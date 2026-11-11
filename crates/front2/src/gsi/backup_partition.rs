@@ -1,5 +1,6 @@
 use crate::digest::{hex, sha256_file};
 use crate::error::{Front2Error, Result};
+use crate::gsi::backup_entry::BackupEntry;
 use crate::image_record::ImageRecord;
 use crate::super_image::file_ranges::copy_all;
 use serde::{Deserialize, Serialize};
@@ -39,6 +40,14 @@ impl BackupPartition {
             bytes,
             sha256,
         })
+    }
+
+    pub fn record(&self) -> ImageRecord {
+        ImageRecord {
+            file: BackupEntry::relative_path(&self.name, self.lun),
+            bytes: self.bytes,
+            sha256: self.sha256.clone(),
+        }
     }
 
     fn require_recorded(&self, bytes: u64, sha256: &str) -> Result<()> {
