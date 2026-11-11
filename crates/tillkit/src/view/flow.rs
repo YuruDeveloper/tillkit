@@ -91,7 +91,8 @@ pub fn results<'a>(
     if let Some((step, error)) = &flow.failure {
         page = page.push(failure(*step, error, palette));
     }
-    if let Some(outcome) = &flow.outcome {
+    let outcome = flow.outcome.as_ref().filter(|_| !flow.reboot_failed());
+    if let Some(outcome) = outcome {
         page = page.push(outcome_block(flow, outcome, palette));
     }
     if flow.can_start_over() && !app.is_busy() {

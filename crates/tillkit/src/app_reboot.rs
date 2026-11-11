@@ -118,8 +118,10 @@ async fn pick_loader_file() -> Option<PathBuf> {
 mod tests {
     use super::*;
     use crate::data_paths::DataPaths;
-    use crate::write_flow::tests::review;
+    use crate::write_flow::tests::{outcome, review};
+    use crate::write_message::WriteMessage;
     use crate::write_step::WriteStep;
+    use front2::ApplyState;
 
     fn app() -> (tempfile::TempDir, App) {
         let directory = tempfile::tempdir().expect("tempdir");
@@ -165,6 +167,26 @@ mod tests {
         app.write.running = Some(WriteStep::Write);
         app.write.failure = None;
         assert!(!app.can_reboot_to(RebootTarget::System), "a write runs");
+    }
+
+    #[test]
+    fn doc_1055_a_refused_reboot_holds_the_reboot_and_the_new_start() {
+        let (_directory, mut app) = app();
+        app.reboot.connection = Some(DeviceConnection::Android);
+        app.write.review = Some(review());
+        app.write.staged = true;
+        app.write.outcome = Some(outcome(ApplyState::VerifiedPendingReboot, true));
+        app.write.running = Some(WriteStep::Reboot);
+        let refused = WriteMessage::Rebooted(Err("not the new pair".into()));
+        let _ = app.update(Message::Write(refused));
+        assert!(!app.is_busy() && app.reboot_is_held());
+        let _ = app.update(ask(RebootTarget::System));
+        assert!(app.confirmation.is_none());
+        app.reboot.asked = Some(RebootTarget::System);
+        let _ = app.update(Message::Confirm);
+        assert!(app.activity.is_none(), "no reboot is sent");
+        let _ = app.update(Message::Write(WriteMessage::StartOver));
+        assert!(app.write.review.is_some() && app.write.failure.is_some());
     }
 
     #[test]
