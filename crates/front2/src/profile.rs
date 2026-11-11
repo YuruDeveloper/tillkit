@@ -20,6 +20,9 @@ pub const GSI_VBMETA_RELEASE_STRING: &str = "avbtool 1.3.0";
 pub const GSI_SYSTEM_PARTITION: &str = "system";
 pub const RETAINED_PRODUCT_PARTITION: &str = "product";
 pub const RETAINED_PRODUCT_PROPERTY_PREFIX: &str = "com.android.build.product.";
+pub const PHYSICAL_BOOT_PARTITIONS: [&str; 5] =
+    ["boot", "dtbo", "init_boot", "recovery", "vendor_boot"];
+pub const BOOT_FINGERPRINT_PROPERTY: &str = "com.android.build.boot.fingerprint";
 pub const REMOTE_STAGE_PARENT: &str = "/data/local/tmp";
 
 pub fn by_name_path(label: &str) -> String {
