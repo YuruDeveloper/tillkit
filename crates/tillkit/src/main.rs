@@ -34,6 +34,7 @@ mod root_worker;
 mod saved_backup;
 mod screen;
 mod step_status;
+mod stored_image;
 mod support_words;
 mod view;
 mod worker;
