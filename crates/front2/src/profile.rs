@@ -12,6 +12,14 @@ pub const TOP_VBMETA_ALGORITHM: &str = "SHA256_RSA4096";
 pub const TOP_VBMETA_KEY_SPEC: &str = "testkey_rsa4096";
 pub const INIT_BOOT_BASE: &str = "init_boot";
 pub const VBMETA_BASE: &str = "vbmeta";
+pub const CHAINED_VBMETA_BASE: &str = "vbmeta_system";
+pub const CHAINED_VBMETA_ALGORITHM: &str = "SHA256_RSA2048";
+pub const CHAINED_VBMETA_KEY_SPEC: &str = "testkey_rsa2048";
+pub const CHAINED_ROLLBACK_INDEX_LOCATION: u32 = 2;
+pub const GSI_VBMETA_RELEASE_STRING: &str = "avbtool 1.3.0";
+pub const GSI_SYSTEM_PARTITION: &str = "system";
+pub const RETAINED_PRODUCT_PARTITION: &str = "product";
+pub const RETAINED_PRODUCT_PROPERTY_PREFIX: &str = "com.android.build.product.";
 pub const REMOTE_STAGE_PARENT: &str = "/data/local/tmp";
 
 pub fn by_name_path(label: &str) -> String {
