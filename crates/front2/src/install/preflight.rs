@@ -1,5 +1,6 @@
 use crate::error::{Front2Error, Result};
 use crate::gpt::{GptCopyKind, SECTOR_BYTES};
+use crate::image_record::ImageRecord;
 use crate::install::digest_check::DigestCheck;
 use crate::install::layout::GPT_LUN_COUNT;
 use crate::install::payload_reader::PayloadReader;
@@ -27,6 +28,7 @@ fn check_all(
     record: &mut PreflightRecord,
 ) -> Result<()> {
     check_sources(plan, record)?;
+    check_restore_files(plan, record)?;
     check_storage(plan, storage, record)?;
     check_gpt_copies(plan, storage, record)?;
     check_boot_wlun(plan, storage, record)?;
@@ -49,6 +51,23 @@ fn check_sources(plan: &StoredInstallPlan, record: &mut PreflightRecord) -> Resu
         let check = DigestCheck::new(&step.name, &sha256, &step.sha256);
         record.sources.push(check.clone());
         require_match("the source of", &check)?;
+    }
+    Ok(())
+}
+
+fn check_restore_files(plan: &StoredInstallPlan, record: &mut PreflightRecord) -> Result<()> {
+    let plan = plan.plan();
+    for entry in plan.restore_set.iter().chain([&plan.data_restore]) {
+        let actual = ImageRecord::from_file(&plan.backup_directory, &entry.file)?;
+        let check = DigestCheck::new(&entry.name, &actual.sha256, &entry.sha256);
+        record.restore_files.push(check.clone());
+        if actual.bytes != entry.bytes {
+            return Err(Front2Error::Verification(format!(
+                "preflight: the backup file of {} is {} bytes, the plan records {} bytes",
+                entry.name, actual.bytes, entry.bytes
+            )));
+        }
+        require_match("the backup file of", &check)?;
     }
     Ok(())
 }

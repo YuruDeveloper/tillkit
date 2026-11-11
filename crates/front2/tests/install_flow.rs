@@ -4,8 +4,8 @@ mod install_support;
 use front2::digest::sha256_bytes;
 use front2::gpt::{GptCopy, GptCopyKind, PartitionMap};
 use front2::install::{
-    CHUNK_SECTORS, DataWipeApproval, InstallExecutor, InstallPlan, InstallStep, PLAN_FILE,
-    RestartApproval, StepSource, StepState, StoredInstallPlan, WriteApproval, WriteStep,
+    CHUNK_SECTORS, DataWipeApproval, DigestCheck, InstallExecutor, InstallPlan, InstallStep,
+    PLAN_FILE, RestartApproval, StepSource, StepState, StoredInstallPlan, WriteApproval, WriteStep,
 };
 use front2::{Front2Error, Result};
 use gpt_support::{PARTITION_SECTORS, SECTOR};
@@ -108,14 +108,10 @@ fn the_whole_flow_writes_every_step_and_restarts_only_with_the_restart_approval(
 
     executor.run_preflight().expect("preflight");
     assert_eq!(count(&fixture.calls, MockCall::changes_the_device), 0);
-    assert!(
-        executor
-            .progress()
-            .preflight
-            .as_ref()
-            .expect("record")
-            .passed
-    );
+    let preflight = executor.progress().preflight.clone().expect("record");
+    assert!(preflight.passed);
+    assert_eq!(preflight.restore_files.len(), WRITE_STEP_COUNT + 1);
+    assert!(preflight.restore_files.iter().all(DigestCheck::matches));
 
     executor.run_write_steps(&write).expect("write steps");
     assert_eq!(
@@ -564,6 +560,78 @@ fn preflight_stops_on_a_candidate_file_that_changed_after_the_plan() {
     fixture.overwrite_candidate_file("boot_b", &pattern("changed", bytes));
     let mut executor = InstallExecutor::new(&plan, &mut fixture.storage);
     rejection(executor.run_preflight(), "preflight: the source of boot_b");
+    assert!(fixture.calls.borrow().is_empty());
+    assert_refuses_everything(&mut executor, plan.plan_sha256(), &fixture.calls);
+}
+
+#[test]
+fn letter_1157_a_candidate_changed_after_the_preflight_is_refused_before_its_write() {
+    let mut fixture = InstallFixture::standard();
+    let plan = fixture.stored_plan();
+    let (write, _, _) = approvals(plan.plan_sha256());
+    let unchanged = step_named(&plan, "boot_b");
+    let changed = step_named(&plan, "dtbo_b");
+    let StepSource::CandidateFile { file } = &changed.source else {
+        panic!("dtbo_b comes from a candidate file");
+    };
+    let path = plan.plan().candidate_directory.join(file);
+    let mut data = fs::read(&path).expect("candidate file");
+    data[0] ^= 0x01;
+    let mut executor = InstallExecutor::new(&plan, &mut fixture.storage);
+    executor.run_preflight().expect("preflight");
+    fs::write(&path, &data).expect("changed candidate file");
+
+    let err = rejection(
+        executor.run_write_steps(&write),
+        "dtbo_b: the source has SHA-256",
+    );
+    assert!(matches!(err, Front2Error::Verification(_)));
+    let progress = executor.progress().clone();
+    assert_eq!(progress.verified_steps(), 1);
+    assert_eq!(progress.steps[1].name, "dtbo_b");
+    assert_eq!(progress.steps[1].state, StepState::Failed);
+    assert_refuses_everything(&mut executor, plan.plan_sha256(), &fixture.calls);
+    assert_eq!(writes_into(&fixture.calls, &unchanged), 1);
+    assert_eq!(writes_into(&fixture.calls, &changed), 0);
+    assert_eq!(count(&fixture.calls, MockCall::is_write), 1);
+}
+
+#[test]
+fn letter_1157_preflight_stops_on_a_backup_file_with_a_changed_byte() {
+    let mut fixture = InstallFixture::standard();
+    let original = &fixture.inputs.images[0].original;
+    assert_eq!(fixture.inputs.images[0].partition, "boot_b");
+    let path = fixture.inputs.backup_directory.join(&original.file);
+    let mut data = fs::read(&path).expect("backup file");
+    data[0] ^= 0x01;
+    fs::write(&path, &data).expect("changed backup file");
+    let plan = fixture.stored_plan();
+    let mut executor = InstallExecutor::new(&plan, &mut fixture.storage);
+    let err = rejection(
+        executor.run_preflight(),
+        "preflight: the backup file of boot_b has SHA-256",
+    );
+    assert!(matches!(err, Front2Error::Verification(_)));
+    assert!(fixture.calls.borrow().is_empty());
+    assert_refuses_everything(&mut executor, plan.plan_sha256(), &fixture.calls);
+}
+
+#[test]
+fn letter_1157_preflight_stops_on_a_userdata_backup_file_with_another_length() {
+    let mut fixture = InstallFixture::standard();
+    let plan = fixture.stored_plan();
+    let path = fixture
+        .inputs
+        .backup_directory
+        .join(&fixture.inputs.userdata_original.file);
+    let mut data = fs::read(&path).expect("backup file");
+    data.pop();
+    fs::write(&path, &data).expect("shorter backup file");
+    let mut executor = InstallExecutor::new(&plan, &mut fixture.storage);
+    rejection(
+        executor.run_preflight(),
+        "preflight: the backup file of userdata is",
+    );
     assert!(fixture.calls.borrow().is_empty());
     assert_refuses_everything(&mut executor, plan.plan_sha256(), &fixture.calls);
 }

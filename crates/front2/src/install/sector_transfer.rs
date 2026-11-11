@@ -55,7 +55,7 @@ pub fn write_and_read_back(
     storage: &mut dyn SectorStorage,
     step: &WriteStep,
 ) -> Result<String> {
-    let mut reader = PayloadReader::open(plan, step)?;
+    let mut reader = PayloadReader::open_verified(plan, step)?;
     write_payload(storage, step, &mut reader)?;
     let readback = read_sectors_sha256(storage, step.lun, step.start_sector, step.sectors)?;
     if readback != step.sha256 {

@@ -7,7 +7,7 @@ use crate::install::stored_install_plan::StoredInstallPlan;
 use crate::install::write_step::WriteStep;
 use sha2::{Digest, Sha256};
 use std::fs::File;
-use std::io::Read;
+use std::io::{Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
 
 #[derive(Debug)]
@@ -27,6 +27,19 @@ impl PayloadReader {
         })
     }
 
+    pub fn open_verified(plan: &StoredInstallPlan, step: &WriteStep) -> Result<Self> {
+        let mut reader = Self::open(plan, step)?;
+        let sha256 = reader.digest()?;
+        if sha256 != step.sha256 {
+            return Err(Front2Error::Verification(format!(
+                "{}: the source has SHA-256 {sha256} immediately before the write, the plan records {}",
+                step.name, step.sha256
+            )));
+        }
+        reader.rewind(step.bytes)?;
+        Ok(reader)
+    }
+
     pub fn remaining(&self) -> u64 {
         self.remaining
     }
@@ -42,11 +55,23 @@ impl PayloadReader {
     }
 
     pub fn sha256(mut self) -> Result<String> {
+        self.digest()
+    }
+
+    fn digest(&mut self) -> Result<String> {
         let mut hasher = Sha256::new();
         while self.remaining > 0 {
             hasher.update(self.next_chunk(CHUNK_SECTORS * SECTOR_BYTES as u64)?);
         }
         Ok(hex(&hasher.finalize()))
+    }
+
+    fn rewind(&mut self, bytes: u64) -> Result<()> {
+        if let Some(file) = self.file.as_mut() {
+            file.seek(SeekFrom::Start(0))?;
+        }
+        self.remaining = bytes;
+        Ok(())
     }
 }
 
