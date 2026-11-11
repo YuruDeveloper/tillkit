@@ -1,6 +1,7 @@
 use crate::planned_write::PlannedWrite;
 use crate::profile::BLOCK_SIZE;
 use crate::root_access::quote;
+use crate::support_report::SupportReport;
 use crate::write_plan::WritePlan;
 use std::fmt::Write;
 
@@ -24,11 +25,8 @@ pub fn render(plan: &WritePlan) -> String {
     line("[ \"$#\" = 1 ]".into());
     line("case \"$1\" in --check|--apply) ;; *) exit 2 ;; esac".into());
     line("[ \"$(id -u)\" = 0 ]".into());
-    for (property, value) in [
-        ("ro.boot.slot_suffix", &plan.slot_suffix),
-        ("ro.boot.vbmeta.device_state", &plan.device_state),
-        ("ro.boot.verifiedbootstate", &plan.verified_boot_state),
-    ] {
+    for (property, expected) in SupportReport::expected_properties() {
+        let value = plan.support_override.observed(property).unwrap_or(expected);
         line(format!("[ \"$(getprop {property})\" = {} ]", quote(value)));
     }
     for (index, write) in plan.writes.iter().enumerate() {

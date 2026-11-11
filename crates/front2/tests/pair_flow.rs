@@ -290,13 +290,14 @@ fn plan_refuses_an_approval_for_the_differences_of_another_device() {
 }
 
 #[test]
-fn no_approval_accepts_a_missing_root_or_an_unknown_slot() {
+fn no_approval_accepts_a_missing_root_an_unknown_slot_or_an_unfinished_boot() {
     let mut bench = bench();
     readback_and_candidate(&mut bench);
     let mut rootless = bench.state.clone();
     rootless.root_access = None;
     let slots = ["", "_c"].map(|slot| with_property(&bench.state, "ro.boot.slot_suffix", slot));
-    for state in [rootless, slots[0].clone(), slots[1].clone()] {
+    let booting = with_property(&bench.state, "sys.boot_completed", "0");
+    for state in [rootless, slots[0].clone(), slots[1].clone(), booting] {
         let report = SupportReport::evaluate(&state);
         assert!(SupportOverride::accept_unmet(&report).is_err());
         let forged = SupportOverride {

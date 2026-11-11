@@ -1,10 +1,17 @@
 use front2::apply_script::{CHECK_PASSED, SCRIPT_FILE, STATE_FILE, render};
 use front2::digest::sha256_bytes;
-use front2::{ImageRecord, PartitionTarget, PlannedWrite, RootAccess, WritePlan, WritePurpose};
+use front2::{
+    ImageRecord, PartitionTarget, PlannedWrite, RootAccess, SupportCheck, SupportOverride,
+    SupportReport, WritePlan, WritePurpose,
+};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 
-const GETPROP_STUB: &str = "#!/bin/sh\ncase \"$1\" in\n  ro.boot.slot_suffix) echo \"${FRONT2_FAKE_SLOT:-_b}\" ;;\n  ro.boot.vbmeta.device_state) echo locked ;;\n  ro.boot.verifiedbootstate) echo green ;;\nesac\n";
+const FINGERPRINT: &str = "ro.vendor.build.fingerprint";
+const OTHER_BUILD: &str = "TOSSPLACE/toss_front2/toss_front2:13/TKQ1.230110.001/476:user/dev-keys";
+const FAKE_SLOT: &str = "FRONT2_FAKE_RO_BOOT_SLOT_SUFFIX";
+const FAKE_BOOT_COMPLETED: &str = "FRONT2_FAKE_SYS_BOOT_COMPLETED";
+const FAKE_FINGERPRINT: &str = "FRONT2_FAKE_RO_VENDOR_BUILD_FINGERPRINT";
 const ID_STUB: &str = "#!/bin/sh\necho 0\n";
 const BLOCKDEV_STUB: &str =
     "#!/bin/sh\ncase \"$1\" in\n  --getsize64) stat -c %s \"$2\" ;;\n  --getro) echo 0 ;;\nesac\n";
@@ -20,6 +27,19 @@ struct Stage {
 }
 
 type Breaker = fn(&Stage);
+type Environment = &'static [(&'static str, &'static str)];
+
+fn getprop_stub() -> String {
+    let mut stub = String::from("#!/bin/sh\ncase \"$1\" in\n");
+    for (property, expected) in SupportReport::expected_properties() {
+        let variable = property.replace('.', "_").to_ascii_uppercase();
+        stub.push_str(&format!(
+            "  {property}) echo \"${{FRONT2_FAKE_{variable}:-{expected}}}\" ;;\n"
+        ));
+    }
+    stub.push_str("esac\n");
+    stub
+}
 
 fn find_shell() -> Option<String> {
     let shell = std::env::var("FRONT2_TEST_SH").unwrap_or_else(|_| "sh".to_string());
@@ -85,6 +105,10 @@ fn planned(stage: &Path, shell: &str, base: &str, old: &[u8], new: &[u8]) -> Pla
 }
 
 fn stage() -> Option<Stage> {
+    stage_accepting(SupportOverride::none())
+}
+
+fn stage_accepting(support_override: SupportOverride) -> Option<Stage> {
     let Some(shell) = find_shell() else {
         eprintln!("skipped: no POSIX sh found (set FRONT2_TEST_SH to run this test)");
         return None;
@@ -95,7 +119,7 @@ fn stage() -> Option<Stage> {
     }
     let real_dd = shell_text(&shell, "command -v dd", Path::new(""));
     let stubs = directory.path().join("stubs");
-    write_stub(&stubs, "getprop", GETPROP_STUB);
+    write_stub(&stubs, "getprop", &getprop_stub());
     write_stub(&stubs, "id", ID_STUB);
     write_stub(&stubs, "blockdev", BLOCKDEV_STUB);
     write_stub(&stubs, "dd", DD_STUB);
@@ -111,7 +135,7 @@ fn stage() -> Option<Stage> {
         created_unix: 0,
         purpose: WritePurpose::ApplyCandidate,
         profile: front2::profile::ID.into(),
-        support_override: front2::SupportOverride::none(),
+        support_override,
         new_pair: "new".into(),
         old_pair: "old".into(),
         slot_suffix: "_b".into(),
@@ -208,39 +232,53 @@ fn apply_writes_both_targets_and_refuses_a_second_run() {
 
 #[test]
 fn each_broken_precondition_stops_before_any_write() {
-    let breakers: [(&str, Breaker); 5] = [
-        ("wrong slot", |_| {}),
-        ("target differs from the old image", |stage| {
-            let path = stage.path("dev").join("vbmeta_b");
-            let mut data = std::fs::read(&path).expect("read");
-            data[5] ^= 1;
-            std::fs::write(&path, data).expect("write");
-        }),
-        ("staged new image is corrupt", |stage| {
-            let path = stage.path("stage").join("init_boot.new.img");
-            let mut data = std::fs::read(&path).expect("read");
-            data[5] ^= 1;
-            std::fs::write(&path, data).expect("write");
-        }),
-        ("staged old image is missing", |stage| {
-            std::fs::remove_file(stage.path("stage").join("vbmeta.old.img")).expect("remove");
-        }),
-        ("target size changed", |stage| {
-            let path = stage.path("dev").join("init_boot_b");
-            let mut data = std::fs::read(&path).expect("read");
-            data.extend_from_slice(&[0; 4096]);
-            std::fs::write(&path, data).expect("write");
-        }),
+    let no_change: Environment = &[];
+    let breakers: [(&str, Breaker, Environment); 7] = [
+        ("wrong slot", |_| {}, &[(FAKE_SLOT, "_a")]),
+        ("boot not completed", |_| {}, &[(FAKE_BOOT_COMPLETED, "0")]),
+        ("another build", |_| {}, &[(FAKE_FINGERPRINT, OTHER_BUILD)]),
+        (
+            "target differs from the old image",
+            |stage| {
+                let path = stage.path("dev").join("vbmeta_b");
+                let mut data = std::fs::read(&path).expect("read");
+                data[5] ^= 1;
+                std::fs::write(&path, data).expect("write");
+            },
+            no_change,
+        ),
+        (
+            "staged new image is corrupt",
+            |stage| {
+                let path = stage.path("stage").join("init_boot.new.img");
+                let mut data = std::fs::read(&path).expect("read");
+                data[5] ^= 1;
+                std::fs::write(&path, data).expect("write");
+            },
+            no_change,
+        ),
+        (
+            "staged old image is missing",
+            |stage| {
+                std::fs::remove_file(stage.path("stage").join("vbmeta.old.img")).expect("remove");
+            },
+            no_change,
+        ),
+        (
+            "target size changed",
+            |stage| {
+                let path = stage.path("dev").join("init_boot_b");
+                let mut data = std::fs::read(&path).expect("read");
+                data.extend_from_slice(&[0; 4096]);
+                std::fs::write(&path, data).expect("write");
+            },
+            no_change,
+        ),
     ];
-    for (name, breaker) in breakers {
+    for (name, breaker, environment) in breakers {
         let Some(stage) = stage() else { return };
         breaker(&stage);
         let before = stage.targets();
-        let environment: &[(&str, &str)] = if name == "wrong slot" {
-            &[("FRONT2_FAKE_SLOT", "_a")]
-        } else {
-            &[]
-        };
         for argument in ["--check", "--apply"] {
             assert!(!stage.run(argument, environment).status.success(), "{name}");
         }
@@ -248,6 +286,30 @@ fn each_broken_precondition_stops_before_any_write() {
         assert_eq!(stage.state(), "", "{name}");
         assert!(!stage.path("dd-count").exists(), "{name}: dd ran");
     }
+}
+
+#[test]
+fn doc_1054_an_accepted_value_must_be_the_same_when_the_script_runs() {
+    let other_build = SupportCheck::exact(
+        FINGERPRINT,
+        "TOSSPLACE/toss_front2/toss_front2:13/TKQ1.230110.001/475:user/dev-keys",
+        OTHER_BUILD,
+    );
+    let accepted = SupportOverride {
+        accepted: vec![other_build],
+    };
+    let Some(stage) = stage_accepting(accepted) else {
+        return;
+    };
+    let same_device: Environment = &[(FAKE_FINGERPRINT, OTHER_BUILD)];
+    for argument in ["--check", "--apply"] {
+        assert!(!stage.run(argument, &[]).status.success(), "{argument}");
+    }
+    assert_eq!(stage.targets(), stage.old);
+    assert!(!stage.path("dd-count").exists(), "dd ran");
+    assert!(stage.run("--check", same_device).status.success());
+    assert!(stage.run("--apply", same_device).status.success());
+    assert_eq!(stage.targets(), stage.new);
 }
 
 #[test]

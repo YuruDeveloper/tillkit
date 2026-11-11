@@ -14,6 +14,8 @@ const READ_FAILED: &str =
 const SUPPORTED: &str = "지원하는 기기입니다. 백업과 기록을 진행할 수 있습니다.";
 const UNSUPPORTED: &str = "지원하는 조건과 맞지 않는 항목이 있어서, 이 기기에는 기록하지 않습니다.";
 const ROOT_MISSING: &str = "루트 권한이 없어서 이 기기에는 기록할 수 없습니다.";
+const BOOT_UNFINISHED: &str =
+    "기기가 아직 부팅을 끝내지 않았습니다. 부팅이 끝난 뒤에 다시 확인해 주세요.";
 const FORCED: &str = "맞지 않는 항목을 확인하고 강제로 진행하는 중입니다. 파일 대조와 기록 뒤의 확인은 그대로 합니다.";
 const DETAIL_KEYS: [(&str, &str); 6] = [
     ("ANDROID RELEASE", "ro.build.version.release"),
@@ -68,6 +70,8 @@ fn verdict<'a>(app: &App, diagnosis: &Diagnosis) -> Element<'a, Message> {
     }
     let sentence = if support_words::root_is_missing(report) {
         ROOT_MISSING
+    } else if support_words::boot_is_unfinished(report) {
+        BOOT_UNFINISHED
     } else {
         UNSUPPORTED
     };

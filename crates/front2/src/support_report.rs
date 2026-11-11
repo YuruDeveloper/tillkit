@@ -1,7 +1,7 @@
 use crate::device_state::DeviceState;
 use crate::error::{Front2Error, Result};
 use crate::profile;
-use crate::support_check::{ROOT_ACCESS, SLOT_SUFFIX, SupportCheck};
+use crate::support_check::{BOOT_COMPLETED, ROOT_ACCESS, SLOT_SUFFIX, SupportCheck};
 use crate::support_override::SupportOverride;
 use crate::verdict::Verdict;
 use serde::{Deserialize, Serialize};
@@ -12,38 +12,43 @@ pub struct SupportReport {
 }
 
 impl SupportReport {
-    pub fn evaluate(state: &DeviceState) -> Self {
-        let exact =
-            |id: &str, expected: &str| SupportCheck::exact(id, expected, state.property(id));
-        let checks = vec![
-            exact(
+    pub fn expected_properties() -> [(&'static str, &'static str); 10] {
+        [
+            (
                 "ro.product.vendor.manufacturer",
                 profile::VENDOR_MANUFACTURER,
             ),
-            exact("ro.product.vendor.device", profile::VENDOR_DEVICE),
-            exact(
+            ("ro.product.vendor.device", profile::VENDOR_DEVICE),
+            (
                 "ro.vendor.build.fingerprint",
                 profile::VENDOR_BUILD_FINGERPRINT,
             ),
-            exact("ro.soc.model", profile::SOC_MODEL),
-            exact("ro.board.platform", profile::BOARD_PLATFORM),
-            exact("ro.build.ab_update", "true"),
-            exact(SLOT_SUFFIX, profile::SUPPORTED_SLOT_SUFFIX),
-            exact(
+            ("ro.soc.model", profile::SOC_MODEL),
+            ("ro.board.platform", profile::BOARD_PLATFORM),
+            ("ro.build.ab_update", "true"),
+            (SLOT_SUFFIX, profile::SUPPORTED_SLOT_SUFFIX),
+            (
                 "ro.boot.vbmeta.device_state",
                 profile::REQUIRED_DEVICE_STATE,
             ),
-            exact(
+            (
                 "ro.boot.verifiedbootstate",
                 profile::REQUIRED_VERIFIED_BOOT_STATE,
             ),
-            exact("sys.boot_completed", "1"),
-            SupportCheck::present(
-                ROOT_ACCESS,
-                "AdbRoot or Su",
-                state.root_access.map(|access| format!("{access:?}")),
-            ),
-        ];
+            (BOOT_COMPLETED, "1"),
+        ]
+    }
+
+    pub fn evaluate(state: &DeviceState) -> Self {
+        let mut checks: Vec<SupportCheck> = Self::expected_properties()
+            .into_iter()
+            .map(|(id, expected)| SupportCheck::exact(id, expected, state.property(id)))
+            .collect();
+        checks.push(SupportCheck::present(
+            ROOT_ACCESS,
+            "AdbRoot or Su",
+            state.root_access.map(|access| format!("{access:?}")),
+        ));
         Self { checks }
     }
 

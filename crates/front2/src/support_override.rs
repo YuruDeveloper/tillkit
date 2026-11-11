@@ -28,6 +28,13 @@ impl SupportOverride {
         self.accepted.contains(check)
     }
 
+    pub fn observed(&self, id: &str) -> Option<&str> {
+        self.accepted
+            .iter()
+            .find(|check| check.id == id)
+            .map(|check| check.observed.as_str())
+    }
+
     pub fn require_acceptable(&self) -> Result<()> {
         match self.accepted.iter().find(|check| !check.can_be_accepted()) {
             None => Ok(()),

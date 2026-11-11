@@ -1,6 +1,7 @@
 use front2::{SupportCheck, SupportOverride, SupportReport};
 
 pub const ROOT_CHECK: &str = "root_access";
+const BOOT_CHECK: &str = "sys.boot_completed";
 const NOT_READ: &str = "읽지 못함";
 const NAMES: [(&str, &str); 11] = [
     ("ro.product.vendor.manufacturer", "제조사"),
@@ -37,6 +38,10 @@ pub fn unmet(report: &SupportReport) -> Vec<&SupportCheck> {
 
 pub fn root_is_missing(report: &SupportReport) -> bool {
     unmet(report).iter().any(|check| check.id == ROOT_CHECK)
+}
+
+pub fn boot_is_unfinished(report: &SupportReport) -> bool {
+    unmet(report).iter().any(|check| check.id == BOOT_CHECK)
 }
 
 pub fn can_be_forced(report: &SupportReport) -> bool {
@@ -82,6 +87,15 @@ mod tests {
             .push(SupportCheck::present(ROOT_CHECK, "AdbRoot or Su", None));
         assert!(root_is_missing(&rootless));
         assert!(!can_be_forced(&rootless));
+    }
+
+    #[test]
+    fn doc_1054_a_device_that_did_not_complete_its_boot_cannot_be_forced() {
+        let booting = report(&[("sys.boot_completed", "1", "0")]);
+        assert!(boot_is_unfinished(&booting));
+        assert!(!can_be_forced(&booting));
+        let other_slot = report(&[("ro.boot.slot_suffix", "_b", "_a")]);
+        assert!(!boot_is_unfinished(&other_slot));
     }
 
     #[test]

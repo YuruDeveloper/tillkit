@@ -3,6 +3,7 @@ use serde::{Deserialize, Serialize};
 
 pub const ROOT_ACCESS: &str = "root_access";
 pub const SLOT_SUFFIX: &str = "ro.boot.slot_suffix";
+pub const BOOT_COMPLETED: &str = "sys.boot_completed";
 const KNOWN_SLOT_SUFFIXES: [&str; 2] = ["_a", "_b"];
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -46,7 +47,7 @@ impl SupportCheck {
 
     pub fn can_be_accepted(&self) -> bool {
         match self.id.as_str() {
-            ROOT_ACCESS => false,
+            ROOT_ACCESS | BOOT_COMPLETED => false,
             SLOT_SUFFIX => KNOWN_SLOT_SUFFIXES.contains(&self.observed.as_str()),
             _ => true,
         }
