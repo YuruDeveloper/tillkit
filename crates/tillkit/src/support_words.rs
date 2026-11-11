@@ -1,4 +1,4 @@
-use front2::{SupportCheck, SupportReport, Verdict};
+use front2::{SupportCheck, SupportOverride, SupportReport};
 
 pub const ROOT_CHECK: &str = "root_access";
 const NOT_READ: &str = "읽지 못함";
@@ -32,11 +32,7 @@ pub fn observed(check: &SupportCheck) -> &str {
 }
 
 pub fn unmet(report: &SupportReport) -> Vec<&SupportCheck> {
-    report
-        .checks
-        .iter()
-        .filter(|check| check.verdict != Verdict::Pass)
-        .collect()
+    report.unmet()
 }
 
 pub fn root_is_missing(report: &SupportReport) -> bool {
@@ -44,7 +40,7 @@ pub fn root_is_missing(report: &SupportReport) -> bool {
 }
 
 pub fn can_be_forced(report: &SupportReport) -> bool {
-    !report.writes_allowed() && !root_is_missing(report)
+    SupportOverride::accept_unmet(report).is_ok_and(|accepted| !accepted.is_empty())
 }
 
 #[cfg(test)]
@@ -86,5 +82,13 @@ mod tests {
             .push(SupportCheck::present(ROOT_CHECK, "AdbRoot or Su", None));
         assert!(root_is_missing(&rootless));
         assert!(!can_be_forced(&rootless));
+    }
+
+    #[test]
+    fn a_device_without_a_known_slot_cannot_be_forced() {
+        for slot in ["", "_c"] {
+            let unknown_slot = report(&[("ro.boot.slot_suffix", "_b", slot)]);
+            assert!(!can_be_forced(&unknown_slot), "{slot:?}");
+        }
     }
 }

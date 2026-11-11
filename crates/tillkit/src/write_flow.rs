@@ -157,10 +157,12 @@ mod tests {
 
     fn plan() -> WritePlan {
         WritePlan {
-            schema: 1,
+            schema: front2::write_plan::PLAN_SCHEMA,
             id: "plan-1".into(),
             created_unix: 1,
             purpose: WritePurpose::ApplyCandidate,
+            profile: front2::profile::ID.into(),
+            support_override: front2::SupportOverride::none(),
             new_pair: "new".into(),
             old_pair: "old".into(),
             slot_suffix: "_b".into(),

@@ -16,6 +16,7 @@ use crate::pair_apply;
 use crate::pair_kind::PairKind;
 use crate::pair_store::is_safe_id;
 use crate::partition_target::PartitionTarget;
+use crate::plan_request::PlanRequest;
 use crate::planned_write::PlannedWrite;
 use crate::profile;
 use crate::root_access::RootAccess;
@@ -38,13 +39,13 @@ impl KernelPlan {
         store: &KernelStore,
         new_set: &str,
         old_set: &str,
-        id: &str,
-        created_unix: u64,
+        request: PlanRequest,
     ) -> Result<Self> {
+        let id = request.id;
         if !is_safe_id(id) {
             return Err(Front2Error::Plan(format!("plan id {id:?}")));
         }
-        SupportReport::evaluate(state).require_writes_allowed()?;
+        SupportReport::evaluate(state).require_allowed_with(&request.support_override)?;
         let root = state
             .root_access
             .ok_or_else(|| Front2Error::Unsupported("root access is not available".into()))?;
@@ -78,8 +79,10 @@ impl KernelPlan {
         let mut plan = WritePlan {
             schema: PLAN_SCHEMA,
             id: id.to_string(),
-            created_unix,
+            created_unix: request.created_unix,
             purpose: purpose_of(new.kind),
+            profile: profile::ID.to_string(),
+            support_override: request.support_override,
             new_pair: new.id.clone(),
             old_pair: old.id.clone(),
             slot_suffix: state.slot_suffix().to_string(),

@@ -12,7 +12,7 @@ use crate::write_flow::WriteFlow;
 use crate::write_kind::WriteKind;
 use crate::write_message::WriteMessage;
 use crate::write_step::WriteStep;
-use front2::ApplyOutcome;
+use front2::{ApplyOutcome, SupportOverride};
 use iced::Task;
 use std::path::PathBuf;
 
@@ -89,7 +89,8 @@ impl App {
             return Task::none();
         };
         let full_backup = self.full_backup_for_gsi();
-        let task = prepare_task(kind, image, self.paths.clone(), full_backup);
+        let accepted = self.support_override();
+        let task = prepare_task(kind, image, self.paths.clone(), full_backup, accepted);
         self.write.running = task.as_ref().map(|_| WriteStep::Prepare);
         task.unwrap_or_else(Task::none)
     }
@@ -205,13 +206,14 @@ fn prepare_task(
     image: PathBuf,
     paths: DataPaths,
     full_backup: Option<PathBuf>,
+    accepted: SupportOverride,
 ) -> Option<Task<Message>> {
     if kind == WriteKind::RootImage {
-        let work = move || worker::prepare_root_write(&paths, &image);
+        let work = move || worker::prepare_root_write(&paths, &image, accepted);
         return Some(run_blocking(work, prepared));
     }
     if kind == WriteKind::Kernel {
-        let work = move || kernel_worker::prepare_write(&paths, &image);
+        let work = move || kernel_worker::prepare_write(&paths, &image, accepted);
         return Some(run_blocking(work, prepared));
     }
     let backup = full_backup?;

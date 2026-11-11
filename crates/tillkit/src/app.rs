@@ -13,7 +13,7 @@ use crate::worker::{self, run_blocking};
 use crate::write_flow::WriteFlow;
 use front2::gsi::backup_manifest::BACKUP_MANIFEST_FILE;
 use front2::kernel::{KernelSet, KernelStore};
-use front2::{PairKind, PairManifest, PairStore};
+use front2::{PairKind, PairManifest, PairStore, SupportOverride};
 use iced::widget::image::Handle;
 use iced::{Element, Task, Theme};
 use std::path::PathBuf;
@@ -140,6 +140,14 @@ impl App {
         unmet && !self.forced
     }
 
+    pub fn support_override(&self) -> SupportOverride {
+        self.diagnosis
+            .as_ref()
+            .filter(|_| self.forced)
+            .and_then(|diagnosis| SupportOverride::accept_unmet(&diagnosis.report).ok())
+            .unwrap_or_default()
+    }
+
     fn can_be_forced(&self) -> bool {
         self.diagnosis
             .as_ref()
@@ -243,6 +251,7 @@ async fn pick_full_backup_folder() -> Option<PathBuf> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use front2::{DeviceState, SupportCheck, SupportReport};
 
     fn app() -> (tempfile::TempDir, App) {
         let directory = tempfile::tempdir().expect("tempdir");
@@ -260,6 +269,28 @@ mod tests {
         assert!(!app.forced && app.confirmation.is_none());
         let _ = app.update(Message::Confirm);
         assert!(!app.forced);
+    }
+
+    #[test]
+    fn the_approval_holds_the_differences_only_while_the_force_state_is_on() {
+        let (_directory, mut app) = app();
+        let other_slot = SupportCheck::exact("ro.boot.slot_suffix", "_b", "_a");
+        let report = SupportReport {
+            checks: vec![other_slot.clone()],
+        };
+        let state = DeviceState {
+            properties: Default::default(),
+            shell_uid: None,
+            root_access: None,
+            magisk_version: None,
+            kernel_release: None,
+        };
+        app.diagnosis = Some(Diagnosis { state, report });
+        assert!(app.support_override().is_empty());
+        app.forced = true;
+        assert_eq!(app.support_override().accepted, [other_slot]);
+        let _ = app.update(Message::ReadDevice);
+        assert!(app.support_override().is_empty());
     }
 
     #[test]

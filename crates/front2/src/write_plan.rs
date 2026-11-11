@@ -9,9 +9,11 @@ use crate::pair_manifest::{PairManifest, VBMETA_FILE};
 use crate::pair_store::{PairStore, is_safe_id};
 use crate::pair_verification::verify_pair_images;
 use crate::partition_target::PartitionTarget;
+use crate::plan_request::PlanRequest;
 use crate::planned_write::PlannedWrite;
 use crate::profile;
 use crate::root_access::RootAccess;
+use crate::support_override::SupportOverride;
 use crate::support_report::SupportReport;
 use crate::top_descriptors::require_unchanged_except_init_boot;
 use crate::write_purpose::WritePurpose;
@@ -20,7 +22,7 @@ use std::fs;
 use std::path::Path;
 
 pub const PLAN_FILE: &str = "write-plan.json";
-pub const PLAN_SCHEMA: u32 = 1;
+pub const PLAN_SCHEMA: u32 = 2;
 pub const POWER_LOSS_RECOVERY: &str =
     "EDL restore from a full device backup. This restore was not tested on a device.";
 
@@ -30,6 +32,8 @@ pub struct WritePlan {
     pub id: String,
     pub created_unix: u64,
     pub purpose: WritePurpose,
+    pub profile: String,
+    pub support_override: SupportOverride,
     pub new_pair: String,
     pub old_pair: String,
     pub slot_suffix: String,
@@ -54,13 +58,13 @@ impl WritePlan {
         store: &PairStore,
         new_pair: &str,
         old_pair: &str,
-        id: &str,
-        created_unix: u64,
+        request: PlanRequest,
     ) -> Result<Self> {
+        let id = request.id;
         if !is_safe_id(id) {
             return Err(Front2Error::Plan(format!("plan id {id:?}")));
         }
-        SupportReport::evaluate(state).require_writes_allowed()?;
+        SupportReport::evaluate(state).require_allowed_with(&request.support_override)?;
         let root = state
             .root_access
             .ok_or_else(|| Front2Error::Unsupported("root access is not available".into()))?;
@@ -96,8 +100,10 @@ impl WritePlan {
         let mut plan = Self {
             schema: PLAN_SCHEMA,
             id: id.to_string(),
-            created_unix,
+            created_unix: request.created_unix,
             purpose: purpose_of(new.kind),
+            profile: profile::ID.to_string(),
+            support_override: request.support_override,
             new_pair: new.id.clone(),
             old_pair: old.id.clone(),
             slot_suffix: state.slot_suffix().to_string(),
@@ -145,6 +151,13 @@ impl WritePlan {
         if plan.schema != PLAN_SCHEMA {
             return Err(Front2Error::Plan(format!("plan schema {}", plan.schema)));
         }
+        if plan.profile != profile::ID {
+            return Err(Front2Error::Plan(format!(
+                "plan profile {:?}",
+                plan.profile
+            )));
+        }
+        plan.support_override.require_acceptable()?;
         plan.script()?;
         Ok((plan, sha256_bytes(&bytes)))
     }

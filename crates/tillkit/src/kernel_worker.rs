@@ -7,7 +7,10 @@ use crate::worker::NO_BACKUP;
 use front2::kernel::{
     KernelPlan, KernelSet, KernelStore, build_kernel_candidate, find_stored_current_kernel_set,
 };
-use front2::{DeviceState, Front2Error, PairKind, PairRequest, Result, SupportReport};
+use front2::{
+    DeviceState, Front2Error, PairKind, PairRequest, PlanRequest, Result, SupportOverride,
+    SupportReport,
+};
 use std::path::Path;
 
 pub fn is_backup_of(set: &KernelSet, current: &KernelSet) -> bool {
@@ -30,10 +33,14 @@ fn current_backup(
         .ok_or_else(|| Front2Error::Store(NO_BACKUP.into()))
 }
 
-pub fn prepare_write(paths: &DataPaths, new_boot: &Path) -> Result<PlanReview> {
+pub fn prepare_write(
+    paths: &DataPaths,
+    new_boot: &Path,
+    support_override: SupportOverride,
+) -> Result<PlanReview> {
     let mut shell = AdbShell::connect()?;
     let state = DeviceState::read(&mut shell)?;
-    SupportReport::evaluate(&state).require_writes_allowed()?;
+    SupportReport::evaluate(&state).require_allowed_with(&support_override)?;
     let store = KernelStore::new(paths.kernel_sets());
     let backup = current_backup(&mut shell, &state, &store)?;
     let created_unix = now_unix();
@@ -45,14 +52,18 @@ pub fn prepare_write(paths: &DataPaths, new_boot: &Path) -> Result<PlanReview> {
     };
     let candidate = build_kernel_candidate(&store, &backup.id, new_boot, request)?;
     let id = format!("kernel-plan-{created_unix}");
+    let plan_request = PlanRequest {
+        id: &id,
+        created_unix,
+        support_override,
+    };
     let kernel_plan = KernelPlan::prepare(
         &mut shell,
         &state,
         &store,
         &candidate.id,
         &backup.id,
-        &id,
-        created_unix,
+        plan_request,
     )?;
     let directory = paths.plans().join(&id);
     let sha256 = kernel_plan.save(&directory)?;

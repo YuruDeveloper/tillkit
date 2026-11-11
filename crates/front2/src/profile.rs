@@ -1,3 +1,4 @@
+pub const ID: &str = "toss-front2";
 pub const SOC_MODEL: &str = "QCM4325";
 pub const BOARD_PLATFORM: &str = "bengal";
 pub const VENDOR_MANUFACTURER: &str = "TOSSPLACE";

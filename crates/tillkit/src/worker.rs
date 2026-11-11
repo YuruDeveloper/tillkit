@@ -11,7 +11,7 @@ use front2::kernel::{KernelPlan, KernelStore, read_current_kernel_set};
 use front2::pair_backup;
 use front2::{
     ApplyOutcome, Authorization, DeviceState, Front2Error, PairKind, PairManifest, PairRequest,
-    PairStore, Result, SupportReport, WritePlan, pair_apply,
+    PairStore, PlanRequest, Result, SupportOverride, SupportReport, WritePlan, pair_apply,
 };
 use iced::Task;
 use std::path::Path;
@@ -83,10 +83,14 @@ fn current_backup(
         .ok_or_else(|| Front2Error::Store(NO_BACKUP.into()))
 }
 
-pub fn prepare_root_write(paths: &DataPaths, patched_init_boot: &Path) -> Result<PlanReview> {
+pub fn prepare_root_write(
+    paths: &DataPaths,
+    patched_init_boot: &Path,
+    support_override: SupportOverride,
+) -> Result<PlanReview> {
     let mut shell = AdbShell::connect()?;
     let state = DeviceState::read(&mut shell)?;
-    SupportReport::evaluate(&state).require_writes_allowed()?;
+    SupportReport::evaluate(&state).require_allowed_with(&support_override)?;
     let store = PairStore::new(paths.pairs());
     let backup = current_backup(&mut shell, &state, &store)?;
     let created_unix = now_unix();
@@ -98,14 +102,18 @@ pub fn prepare_root_write(paths: &DataPaths, patched_init_boot: &Path) -> Result
     };
     let candidate = build_signed_candidate(&store, &backup.id, patched_init_boot, request)?;
     let id = format!("plan-{created_unix}");
+    let plan_request = PlanRequest {
+        id: &id,
+        created_unix,
+        support_override,
+    };
     let plan = WritePlan::prepare(
         &mut shell,
         &state,
         &store,
         &candidate.id,
         &backup.id,
-        &id,
-        created_unix,
+        plan_request,
     )?;
     let directory = paths.plans().join(&id);
     let sha256 = plan.save(&directory)?;

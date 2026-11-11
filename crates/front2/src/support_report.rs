@@ -1,7 +1,8 @@
 use crate::device_state::DeviceState;
 use crate::error::{Front2Error, Result};
 use crate::profile;
-use crate::support_check::SupportCheck;
+use crate::support_check::{ROOT_ACCESS, SLOT_SUFFIX, SupportCheck};
+use crate::support_override::SupportOverride;
 use crate::verdict::Verdict;
 use serde::{Deserialize, Serialize};
 
@@ -27,7 +28,7 @@ impl SupportReport {
             exact("ro.soc.model", profile::SOC_MODEL),
             exact("ro.board.platform", profile::BOARD_PLATFORM),
             exact("ro.build.ab_update", "true"),
-            exact("ro.boot.slot_suffix", profile::SUPPORTED_SLOT_SUFFIX),
+            exact(SLOT_SUFFIX, profile::SUPPORTED_SLOT_SUFFIX),
             exact(
                 "ro.boot.vbmeta.device_state",
                 profile::REQUIRED_DEVICE_STATE,
@@ -38,7 +39,7 @@ impl SupportReport {
             ),
             exact("sys.boot_completed", "1"),
             SupportCheck::present(
-                "root_access",
+                ROOT_ACCESS,
                 "AdbRoot or Su",
                 state.root_access.map(|access| format!("{access:?}")),
             ),
@@ -56,12 +57,35 @@ impl SupportReport {
         self.first_blocker().is_none()
     }
 
+    pub fn unmet(&self) -> Vec<&SupportCheck> {
+        self.checks
+            .iter()
+            .filter(|check| check.verdict != Verdict::Pass)
+            .collect()
+    }
+
     pub fn require_writes_allowed(&self) -> Result<()> {
-        match self.first_blocker() {
-            None => Ok(()),
-            Some(check) => Err(Front2Error::Unsupported(format!(
+        self.require_allowed_with(&SupportOverride::none())
+    }
+
+    pub fn require_allowed_with(&self, support_override: &SupportOverride) -> Result<()> {
+        let unmet = self.unmet();
+        if let Some(check) = unmet.iter().find(|check| !support_override.accepts(check)) {
+            return Err(Front2Error::Unsupported(format!(
                 "{} is {:?}, expected {}",
                 check.id, check.observed, check.expected
+            )));
+        }
+        support_override.require_acceptable()?;
+        let absent = support_override
+            .accepted
+            .iter()
+            .find(|check| !unmet.contains(check));
+        match absent {
+            None => Ok(()),
+            Some(check) => Err(Front2Error::Unsupported(format!(
+                "the approval accepts {} as {:?}, but this device does not have that difference; read the device again",
+                check.id, check.observed
             ))),
         }
     }

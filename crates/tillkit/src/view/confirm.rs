@@ -4,6 +4,7 @@ use crate::fonts;
 use crate::message::Message;
 use crate::palette::Palette;
 use crate::plan_review::PlanReview;
+use crate::support_words;
 use crate::view::{parts, rail, support_rows};
 use crate::write_kind::WriteKind;
 use iced::widget::{Column, Space, column, container, opaque, row, text};
@@ -13,12 +14,12 @@ use std::path::Path;
 const DIALOG_WIDTH: f32 = 620.0;
 const SCRIM_ALPHA: f32 = 0.92;
 const NAME_WIDTH: f32 = 130.0;
-const FORCE_WARNING: &str = "이 기기는 지원하는 조건과 맞지 않습니다. 그래도 진행하면 맞지 않는 기기에 기록하게 되어, 기기가 부팅하지 못할 수 있습니다.";
-const FORCE_KEPT: &str =
-    "파일 대조와 기록 뒤의 확인은 그대로 합니다. 기기를 다시 확인하면 강제 진행이 풀립니다.";
+const FORCE_WARNING: &str = "이 기기는 지원하는 조건과 맞지 않습니다. 그래도 진행하면 확인되지 않은 기기에 기록하게 됩니다. 이 도구는 이런 기기가 기록한 뒤에 부팅하는 것을 보장하지 않습니다.";
+const FORCE_KEPT: &str = "파일 대조와 기록 뒤의 확인은 그대로 합니다. 기록을 준비할 때 기기를 다시 읽어서, 위 항목과 하나라도 다르면 기록하지 않습니다. 기기를 다시 확인하면 강제 진행이 풀립니다.";
 const WRITE_WARNING: &str =
     "아래 내용을 기기에 기록합니다. 기록하는 동안에는 USB 케이블을 뽑거나 기기를 끄지 말아 주세요.";
 const WRITE_KEPT: &str = "기록이 중간에 실패하면 백업해 둔 이미지로 되돌립니다. 사용자 데이터는 지우지 않습니다. 기록하는 도중에 전원이 끊기면 기기가 부팅하지 못할 수 있습니다.";
+const FORCED_WARNING: &str = "지원하는 조건과 맞지 않는 기기에 강제로 진행하는 기록입니다. 기록한 뒤에 기기가 부팅하는 것을 보장하지 않습니다.";
 const KERNEL_WARNING: &str =
     "새 커널로 부팅하지 못하면, 이 프로그램으로는 이전 커널로 되돌릴 수 없습니다.";
 const REBOOT_QUESTION: &str = "기록한 내용을 다시 읽어서 확인했습니다. 기기를 지금 다시 시작하면 새 이미지로 부팅합니다. 나중에 하려면 LATER를 눌러 주세요.";
@@ -74,6 +75,14 @@ fn write(app: &App) -> Element<'_, Message> {
         content = content.push(write_facts(*kind, image, review, palette));
     }
     content = content.push(parts::body(WRITE_KEPT, palette));
+    let forced = app
+        .write
+        .review
+        .as_ref()
+        .is_some_and(|review| !review.plan.support_override.is_empty());
+    if forced {
+        content = content.push(parts::body(FORCED_WARNING, palette));
+    }
     if matches!(image, Some((WriteKind::Kernel, _))) {
         content = content.push(parts::body(KERNEL_WARNING, palette));
     }
@@ -93,7 +102,14 @@ fn write_facts<'a>(
         .iter()
         .map(|write| write.target.label.as_str())
         .collect();
-    let rows = vec![
+    let accepted: Vec<&str> = review
+        .plan
+        .support_override
+        .accepted
+        .iter()
+        .map(support_words::name)
+        .collect();
+    let mut rows = vec![
         stated("하는 일", parts::body(kind.work(), palette), palette),
         stated(
             "고른 이미지",
@@ -111,6 +127,13 @@ fn write_facts<'a>(
             palette,
         ),
     ];
+    if !accepted.is_empty() {
+        rows.push(stated(
+            "강제 진행 항목",
+            parts::body(accepted.join(" · "), palette),
+            palette,
+        ));
+    }
     parts::ruled(rows, palette)
 }
 

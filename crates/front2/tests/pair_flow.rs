@@ -6,7 +6,7 @@ use front2::pair_apply::{apply, check, reboot, stage};
 use front2::pair_backup::read_current_pair;
 use front2::{
     ApplyOutcome, ApplyState, Authorization, DeviceState, PairKind, PairManifest, PairRequest,
-    PairStore, Scope, WritePlan, WritePurpose,
+    PairStore, PlanRequest, Scope, SupportOverride, SupportReport, WritePlan, WritePurpose,
 };
 use std::path::Path;
 use support::{
@@ -75,8 +75,7 @@ fn staged_plan(bench: &mut Bench, new_pair: &str, old_pair: &str, id: &str) -> (
         &bench.store,
         new_pair,
         old_pair,
-        id,
-        2000,
+        PlanRequest::strict(id, 2000),
     )
     .expect("plan");
     let plan_directory = bench.directory.path().join(id);
@@ -186,8 +185,7 @@ fn plan_refuses_a_device_that_does_not_hold_the_old_pair() {
         &bench.store,
         CANDIDATE,
         READBACK,
-        "2000-apply",
-        2000,
+        PlanRequest::strict("2000-apply", 2000),
     );
     assert!(result.is_err());
 }
@@ -203,8 +201,7 @@ fn plan_refuses_unsupported_state_and_identical_pairs() {
             &bench.store,
             new_pair,
             READBACK,
-            "2000-apply",
-            2000,
+            PlanRequest::strict("2000-apply", 2000),
         )
     };
     for (key, value) in [
@@ -219,6 +216,97 @@ fn plan_refuses_unsupported_state_and_identical_pairs() {
     let state = bench.state.clone();
     assert!(prepare(&mut bench, &state, READBACK).is_err());
     assert!(prepare(&mut bench, &state, CANDIDATE).is_ok());
+}
+
+fn with_property(state: &DeviceState, key: &str, value: &str) -> DeviceState {
+    let mut changed = state.clone();
+    changed
+        .properties
+        .insert(key.to_string(), value.to_string());
+    changed
+}
+
+fn accepted_differences(state: &DeviceState) -> SupportOverride {
+    SupportOverride::accept_unmet(&SupportReport::evaluate(state)).expect("acceptable differences")
+}
+
+fn prepare_accepting(
+    bench: &mut Bench,
+    state: &DeviceState,
+    support_override: SupportOverride,
+) -> front2::Result<WritePlan> {
+    let request = PlanRequest {
+        id: "2000-apply",
+        created_unix: 2000,
+        support_override,
+    };
+    WritePlan::prepare(
+        &mut bench.device,
+        state,
+        &bench.store,
+        CANDIDATE,
+        READBACK,
+        request,
+    )
+}
+
+#[test]
+fn plan_records_the_differences_that_the_approval_accepts() {
+    let mut bench = bench();
+    readback_and_candidate(&mut bench);
+    let other_build = with_property(
+        &bench.state,
+        "ro.vendor.build.fingerprint",
+        "TOSSPLACE/toss_front2/toss_front2:13/TKQ1.230110.001/476:user/dev-keys",
+    );
+    let accepted = accepted_differences(&other_build);
+    assert_eq!(accepted.accepted.len(), 1);
+
+    let plan = prepare_accepting(&mut bench, &other_build, accepted.clone()).expect("plan");
+    assert_eq!(plan.support_override, accepted);
+    assert_eq!(plan.profile, front2::profile::ID);
+    let directory = bench.directory.path().join("2000-apply");
+    let digest = plan.save(&directory).expect("save plan");
+    let (loaded, loaded_digest) = WritePlan::load(&directory).expect("load plan");
+    assert_eq!((loaded, loaded_digest), (plan, digest));
+
+    let strict = SupportOverride::none();
+    assert!(prepare_accepting(&mut bench, &other_build, strict).is_err());
+}
+
+#[test]
+fn plan_refuses_an_approval_for_the_differences_of_another_device() {
+    let mut bench = bench();
+    readback_and_candidate(&mut bench);
+    let other_build = with_property(&bench.state, "ro.soc.model", "SM8550");
+    let accepted = accepted_differences(&other_build);
+
+    let supported = bench.state.clone();
+    assert!(prepare_accepting(&mut bench, &supported, accepted.clone()).is_err());
+    let other_value = with_property(&bench.state, "ro.soc.model", "SM8650");
+    assert!(prepare_accepting(&mut bench, &other_value, accepted.clone()).is_err());
+    let two_differences = with_property(&other_build, "ro.board.platform", "kalama");
+    assert!(prepare_accepting(&mut bench, &two_differences, accepted).is_err());
+}
+
+#[test]
+fn no_approval_accepts_a_missing_root_or_an_unknown_slot() {
+    let mut bench = bench();
+    readback_and_candidate(&mut bench);
+    let mut rootless = bench.state.clone();
+    rootless.root_access = None;
+    let slots = ["", "_c"].map(|slot| with_property(&bench.state, "ro.boot.slot_suffix", slot));
+    for state in [rootless, slots[0].clone(), slots[1].clone()] {
+        let report = SupportReport::evaluate(&state);
+        assert!(SupportOverride::accept_unmet(&report).is_err());
+        let forged = SupportOverride {
+            accepted: report.unmet().into_iter().cloned().collect(),
+        };
+        assert!(prepare_accepting(&mut bench, &state, forged).is_err());
+    }
+    let other_slot = with_property(&bench.state, "ro.boot.slot_suffix", "_a");
+    let report = SupportReport::evaluate(&other_slot);
+    assert!(SupportOverride::accept_unmet(&report).is_ok());
 }
 
 #[test]
@@ -244,8 +332,7 @@ fn plan_refuses_pairs_from_a_baseline_with_another_boot_digest() {
             &bench.store,
             new_pair,
             READBACK,
-            "2000-apply",
-            2000,
+            PlanRequest::strict("2000-apply", 2000),
         )
     };
     assert!(prepare(OTHER_CANDIDATE).is_err());
@@ -291,8 +378,7 @@ fn plan_refuses_a_readback_that_fails_avb_verification() {
             &bench.store,
             OTHER_READBACK,
             READBACK,
-            "2000-restore",
-            2000,
+            PlanRequest::strict("2000-restore", 2000),
         );
         assert!(result.is_err(), "{damage}");
     }
@@ -335,8 +421,7 @@ fn corrupt_upload_stops_before_the_device_script_runs() {
         &bench.store,
         CANDIDATE,
         READBACK,
-        "2000-apply",
-        2000,
+        PlanRequest::strict("2000-apply", 2000),
     )
     .expect("plan");
     let plan_directory = bench.directory.path().join("2000-apply");

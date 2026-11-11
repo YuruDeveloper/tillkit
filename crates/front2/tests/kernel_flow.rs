@@ -12,8 +12,8 @@ use front2::kernel::{
 };
 use front2::pair_apply::{apply, check, reboot, stage};
 use front2::{
-    ApplyOutcome, ApplyState, Authorization, DeviceState, PairKind, PairRequest, RootAccess, Scope,
-    WritePlan, WritePurpose,
+    ApplyOutcome, ApplyState, Authorization, DeviceState, PairKind, PairRequest, PlanRequest,
+    RootAccess, Scope, WritePlan, WritePurpose,
 };
 use kernel_support::{
     BOOT_PARTITION_BYTES, CURRENT_KERNEL_BYTES, CURRENT_RELEASE, DTBO_DESCRIPTOR_BYTES,
@@ -93,8 +93,7 @@ fn prepare(
         &bench.store,
         new_set,
         old_set,
-        id,
-        2000,
+        PlanRequest::strict(id, 2000),
     )
 }
 

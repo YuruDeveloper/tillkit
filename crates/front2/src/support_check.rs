@@ -1,6 +1,10 @@
 use crate::verdict::Verdict;
 use serde::{Deserialize, Serialize};
 
+pub const ROOT_ACCESS: &str = "root_access";
+pub const SLOT_SUFFIX: &str = "ro.boot.slot_suffix";
+const KNOWN_SLOT_SUFFIXES: [&str; 2] = ["_a", "_b"];
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SupportCheck {
     pub id: String,
@@ -37,6 +41,14 @@ impl SupportCheck {
             expected: expected.to_string(),
             observed: observed.unwrap_or_default(),
             verdict,
+        }
+    }
+
+    pub fn can_be_accepted(&self) -> bool {
+        match self.id.as_str() {
+            ROOT_ACCESS => false,
+            SLOT_SUFFIX => KNOWN_SLOT_SUFFIXES.contains(&self.observed.as_str()),
+            _ => true,
         }
     }
 }
