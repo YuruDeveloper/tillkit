@@ -18,10 +18,14 @@ fn main() {
     }
     register_magiskboot_host(std::env::current_exe().expect("test executable"))
         .expect("register the magiskboot host");
-    let tests: [(&str, fn()); 4] = [
+    let tests: [(&str, fn()); 5] = [
         (
             "stock_init_boot_becomes_a_signed_magisk_candidate",
             stock_init_boot_becomes_a_signed_magisk_candidate,
+        ),
+        (
+            "a_package_with_a_stub_adds_stub_xz",
+            a_package_with_a_stub_adds_stub_xz,
         ),
         (
             "an_already_patched_init_boot_is_refused",
@@ -40,6 +44,142 @@ fn main() {
         test();
         println!("test {name} ... ok");
     }
+    real_front2_image_matches_the_magisk_app();
+}
+
+const REAL_INPUTS: [&str; 3] = [
+    "FRONT2_MAGISK_APK",
+    "FRONT2_STOCK_INIT_BOOT",
+    "FRONT2_MAGISK_APP_INIT_BOOT",
+];
+
+fn real_front2_image_matches_the_magisk_app() {
+    let inputs: Vec<std::path::PathBuf> = REAL_INPUTS
+        .iter()
+        .filter_map(|name| std::env::var_os(name).map(std::path::PathBuf::from))
+        .collect();
+    if inputs.len() != REAL_INPUTS.len() {
+        println!("test real_front2_image_matches_the_magisk_app ... skipped, set {REAL_INPUTS:?}");
+        return;
+    }
+    let root = tempfile::tempdir().expect("tempdir");
+    let reference = unpacked_entries(&inputs[2], &root.path().join("reference"));
+    let preinit = config_value(&reference, "PREINITDEVICE");
+    let package = MagiskPackage::from_local_file(&inputs[0], &root.path().join("cache"))
+        .expect("admit the real package");
+    let mut log = Vec::new();
+    let patched = patch_init_boot(
+        &inputs[1],
+        &package,
+        &preinit,
+        &root.path().join("work"),
+        &mut log,
+    )
+    .expect("patch the real image");
+    let ours = unpacked_entries(&patched, &root.path().join("ours"));
+    assert_eq!(
+        ours.keys().collect::<Vec<_>>(),
+        reference.keys().collect::<Vec<_>>()
+    );
+    let compare = root.path().join("compare");
+    std::fs::create_dir(&compare).expect("compare directory");
+    for (name, entry) in &reference {
+        let our_entry = &ours[name];
+        assert_eq!(our_entry.0, entry.0, "{name} mode");
+        assert_eq!(
+            content(&compare, name, &our_entry.1, "ours"),
+            content(&compare, name, &entry.1, "reference"),
+            "{name}"
+        );
+    }
+    let our_header = header_page(&patched);
+    let reference_header = header_page(&inputs[2]);
+    assert_eq!(our_header, reference_header);
+    real_candidate_verifies(&inputs[1], &package, &preinit, root.path());
+    println!("test real_front2_image_matches_the_magisk_app ... ok");
+}
+
+fn real_candidate_verifies(stock: &Path, package: &MagiskPackage, preinit: &str, root: &Path) {
+    let Some(vbmeta) = std::env::var_os("FRONT2_STOCK_VBMETA") else {
+        println!("real candidate skipped, set FRONT2_STOCK_VBMETA");
+        return;
+    };
+    let store = PairStore::new(root.join("pairs"));
+    let directory = store.begin(READBACK).expect("begin the real readback pair");
+    std::fs::copy(stock, directory.join("init_boot.img")).expect("copy init_boot");
+    std::fs::copy(vbmeta, directory.join("vbmeta.img")).expect("copy vbmeta");
+    store
+        .commit(READBACK, PairKind::DeviceReadback, 2000, "_b", None, "real")
+        .expect("commit the real readback pair");
+    let mut log = Vec::new();
+    build_magisk_candidate(
+        &store,
+        READBACK,
+        package,
+        preinit,
+        &root.join("candidate-work"),
+        request(CANDIDATE),
+        &mut log,
+    )
+    .expect("build the real candidate");
+    store
+        .load_verified(CANDIDATE)
+        .expect("the real candidate verifies");
+}
+
+fn content(directory: &Path, name: &str, bytes: &[u8], side: &str) -> Vec<u8> {
+    if !name.ends_with(".xz") {
+        return bytes.to_vec();
+    }
+    let compressed = format!("{side}.xz");
+    let plain = format!("{side}.raw");
+    std::fs::write(directory.join(&compressed), bytes).expect("write the compressed entry");
+    ltbox_patch::boot::decompress(directory, &compressed, &plain).expect("decompress the entry");
+    std::fs::read(directory.join(plain)).expect("read the decompressed entry")
+}
+
+fn header_page(image: &Path) -> Vec<u8> {
+    let mut page = std::fs::read(image).expect("read the image")[..PAGE_BYTES].to_vec();
+    page[12..16].fill(0);
+    page
+}
+
+type CpioEntries = std::collections::BTreeMap<String, (u32, Vec<u8>)>;
+
+fn unpacked_entries(image: &Path, directory: &Path) -> CpioEntries {
+    std::fs::create_dir_all(directory).expect("unpack directory");
+    ltbox_patch::boot::unpack(image, directory).expect("unpack");
+    parse_newc(&std::fs::read(directory.join("ramdisk.cpio")).expect("ramdisk"))
+}
+
+fn hex_field(header: &[u8], index: usize) -> usize {
+    let text = std::str::from_utf8(&header[6 + index * 8..14 + index * 8]).expect("hex field");
+    usize::from_str_radix(text, 16).expect("hex number")
+}
+
+fn parse_newc(bytes: &[u8]) -> CpioEntries {
+    let mut entries = CpioEntries::new();
+    let mut offset = 0usize;
+    while offset + 110 <= bytes.len() && &bytes[offset..offset + 6] == b"070701" {
+        let header = &bytes[offset..offset + 110];
+        let size = hex_field(header, 6);
+        let name_end = offset + 110 + hex_field(header, 11);
+        let name = String::from_utf8_lossy(&bytes[offset + 110..name_end - 1]).into_owned();
+        let data_start = name_end.div_ceil(4) * 4;
+        offset = (data_start + size).div_ceil(4) * 4;
+        let mode = hex_field(header, 1) as u32;
+        entries.insert(name, (mode, bytes[data_start..data_start + size].to_vec()));
+    }
+    entries.remove("TRAILER!!!");
+    entries
+}
+
+fn config_value(entries: &CpioEntries, key: &str) -> String {
+    let config = entries.get(".backup/.magisk").expect("Magisk config");
+    String::from_utf8_lossy(&config.1)
+        .lines()
+        .find_map(|line| line.strip_prefix(key)?.strip_prefix('=').map(str::to_owned))
+        .unwrap_or_default()
 }
 
 fn request(id: &str) -> PairRequest<'_> {
@@ -159,19 +299,45 @@ fn stored_zip(entries: &[(&str, &[u8])]) -> Vec<u8> {
     archive
 }
 
-fn synthetic_magisk_apk() -> Vec<u8> {
-    stored_zip(&[
+fn synthetic_magisk_apk(with_stub: bool) -> Vec<u8> {
+    let mut entries: Vec<(&str, &[u8])> = vec![
         ("lib/arm64-v8a/libmagisk.so", b"synthetic magisk daemon"),
         ("lib/arm64-v8a/libmagiskinit.so", b"synthetic magiskinit"),
         ("lib/arm64-v8a/libinit-ld.so", b"synthetic init-ld"),
-        ("assets/stub.apk", b"synthetic stub"),
-    ])
+    ];
+    if with_stub {
+        entries.push(("assets/stub.apk", b"synthetic stub"));
+    }
+    stored_zip(&entries)
 }
 
-fn admitted_package(root: &Path) -> MagiskPackage {
+fn admitted_package(root: &Path, with_stub: bool) -> MagiskPackage {
     let source = root.join("Magisk-synthetic.apk");
-    std::fs::write(&source, synthetic_magisk_apk()).expect("write the synthetic package");
+    std::fs::write(&source, synthetic_magisk_apk(with_stub)).expect("write the synthetic package");
     MagiskPackage::from_local_file(&source, &root.join("cache")).expect("admit the package")
+}
+
+fn a_package_with_a_stub_adds_stub_xz() {
+    let root = tempfile::tempdir().expect("tempdir");
+    let store = store_with_readback(root.path());
+    let stock = store
+        .directory(READBACK)
+        .expect("readback directory")
+        .join("init_boot.img");
+    for with_stub in [true, false] {
+        let package = admitted_package(root.path(), with_stub);
+        let work = root.path().join(format!("work-{with_stub}"));
+        let patched = patch_init_boot(&stock, &package, "", &work, &mut Vec::new())
+            .expect("patch the stock image");
+        let entries =
+            unpacked_entries(&patched, &root.path().join(format!("unpacked-{with_stub}")));
+        assert_eq!(
+            entries.contains_key("overlay.d/sbin/stub.xz"),
+            with_stub,
+            "stub.xz with a stub in the package: {with_stub}"
+        );
+        assert!(entries.contains_key("overlay.d/sbin/magisk.xz"));
+    }
 }
 
 fn store_with_readback(root: &Path) -> PairStore {
@@ -200,7 +366,7 @@ fn contains(haystack: &[u8], needle: &[u8]) -> bool {
 fn stock_init_boot_becomes_a_signed_magisk_candidate() {
     let root = tempfile::tempdir().expect("tempdir");
     let store = store_with_readback(root.path());
-    let package = admitted_package(root.path());
+    let package = admitted_package(root.path(), false);
     let mut log = Vec::new();
     let candidate = build_magisk_candidate(
         &store,
@@ -243,7 +409,7 @@ fn stock_init_boot_becomes_a_signed_magisk_candidate() {
 fn an_already_patched_init_boot_is_refused() {
     let root = tempfile::tempdir().expect("tempdir");
     let store = store_with_readback(root.path());
-    let package = admitted_package(root.path());
+    let package = admitted_package(root.path(), false);
     let stock = store
         .directory(READBACK)
         .expect("readback directory")
@@ -272,7 +438,7 @@ fn a_package_without_the_magisk_payload_is_refused() {
 
 fn a_changed_cached_package_is_not_used() {
     let root = tempfile::tempdir().expect("tempdir");
-    let package = admitted_package(root.path());
+    let package = admitted_package(root.path(), false);
     let cache = root.path().join("cache");
     assert_eq!(
         MagiskPackage::cached(&cache).expect("read the cache"),
