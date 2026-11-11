@@ -1,9 +1,9 @@
 use crate::error::{Front2Error, Result};
-use crate::profile::BLOCK_SIZE;
 use serde::{Deserialize, Serialize};
 
 pub const BOOT_MAGIC: &[u8; 8] = b"ANDROID!";
 pub const HEADER_PAGE_BYTES: usize = 4096;
+const IMAGE_ALIGNMENT: u64 = HEADER_PAGE_BYTES as u64;
 pub const BOOT_V4_HEADER_VERSION: u32 = 4;
 pub const BOOT_V4_HEADER_SIZE: u32 = 1584;
 pub const KERNEL_SIZE_OFFSET: usize = 8;
@@ -76,7 +76,8 @@ impl BootImageHeader {
     }
 
     pub fn payload_bytes(&self) -> u64 {
-        HEADER_PAGE_BYTES as u64 + u64::from(self.kernel_size).div_ceil(BLOCK_SIZE) * BLOCK_SIZE
+        HEADER_PAGE_BYTES as u64
+            + u64::from(self.kernel_size).div_ceil(IMAGE_ALIGNMENT) * IMAGE_ALIGNMENT
     }
 
     pub fn kernel<'a>(&self, image: &'a [u8]) -> Result<&'a [u8]> {

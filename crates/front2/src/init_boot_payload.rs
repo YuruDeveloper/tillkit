@@ -1,5 +1,4 @@
 use crate::error::{Front2Error, Result};
-use crate::profile::BLOCK_SIZE;
 
 const BOOT_MAGIC: &[u8; 8] = b"ANDROID!";
 const KERNEL_SIZE_OFFSET: usize = 8;
@@ -9,6 +8,7 @@ const HEADER_VERSION_OFFSET: usize = 40;
 const SIGNATURE_SIZE_OFFSET: usize = 1580;
 const BOOT_V4_HEADER_SIZE: u32 = 1584;
 const HEADER_PAGE_BYTES: usize = 4096;
+const IMAGE_ALIGNMENT: u64 = HEADER_PAGE_BYTES as u64;
 
 pub fn payload_bytes(original: &[u8], patched: &[u8], maximum: u64) -> Result<u64> {
     let failure = |reason: String| Front2Error::Image(format!("patched init_boot: {reason}"));
@@ -47,7 +47,8 @@ pub fn payload_bytes(original: &[u8], patched: &[u8], maximum: u64) -> Result<u6
         ));
     }
     let ramdisk_bytes = u64::from(field(RAMDISK_SIZE_OFFSET));
-    let payload = HEADER_PAGE_BYTES as u64 + ramdisk_bytes.div_ceil(BLOCK_SIZE) * BLOCK_SIZE;
+    let payload =
+        HEADER_PAGE_BYTES as u64 + ramdisk_bytes.div_ceil(IMAGE_ALIGNMENT) * IMAGE_ALIGNMENT;
     if ramdisk_bytes == 0 || payload > maximum || payload > patched.len() as u64 {
         return Err(failure(format!(
             "payload of {payload} bytes does not fit the limit of {maximum} bytes"
