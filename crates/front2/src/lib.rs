@@ -26,6 +26,7 @@ pub mod profile;
 pub mod root_access;
 pub mod scope;
 pub mod shell_output;
+pub mod super_image;
 pub mod support_check;
 pub mod support_report;
 pub mod top_descriptors;
