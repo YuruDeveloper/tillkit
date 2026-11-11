@@ -13,6 +13,7 @@ use std::path::PathBuf;
 pub struct WriteFlow {
     pub origin: WriteOrigin,
     pub package: Option<MagiskPackage>,
+    pub restored_backup: Option<u64>,
     pub folder: Option<PathBuf>,
     pub kind: Option<Result<WriteKind, FolderRefusal>>,
     pub review: Option<PlanReview>,
@@ -37,6 +38,14 @@ impl WriteFlow {
     pub fn for_magisk() -> Self {
         Self {
             origin: WriteOrigin::Magisk,
+            ..Self::default()
+        }
+    }
+
+    pub fn for_backup(created_unix: u64) -> Self {
+        Self {
+            origin: WriteOrigin::Backup,
+            restored_backup: Some(created_unix),
             ..Self::default()
         }
     }
@@ -460,6 +469,18 @@ pub mod tests {
         flow.start_over();
         assert_eq!(flow.origin, WriteOrigin::Folder);
         assert!(flow.review.is_none() && flow.package.is_none() && !flow.is_open());
+    }
+
+    #[test]
+    fn a_restore_flow_goes_back_to_an_empty_folder_flow_at_a_new_start() {
+        let mut flow = WriteFlow::for_backup(1_794_412_800);
+        assert_eq!(flow.origin, WriteOrigin::Backup);
+        assert!(!flow.is_open() && !flow.can_start(), "no image folder");
+        flow.review = Some(review());
+        assert!(flow.is_open() && flow.can_start_over());
+        flow.start_over();
+        assert_eq!(flow.origin, WriteOrigin::Folder);
+        assert!(flow.restored_backup.is_none() && !flow.is_open());
     }
 
     #[test]

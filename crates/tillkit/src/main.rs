@@ -3,6 +3,7 @@
 mod adb_shell;
 mod app;
 mod app_reboot;
+mod app_restore;
 mod app_root;
 mod app_write;
 mod clock;
@@ -26,6 +27,7 @@ mod reboot;
 mod reboot_flow;
 mod reboot_message;
 mod reboot_words;
+mod restore_session;
 mod root_message;
 mod root_review;
 mod root_worker;

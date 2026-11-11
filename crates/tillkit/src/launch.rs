@@ -133,6 +133,10 @@ pub fn preview(app: &mut App) {
             sha256: "7c41e09b".repeat(8),
         });
     }
+    let restored = std::env::var("TILLKIT_PREVIEW_RESTORE").ok();
+    if let Some(created_unix) = restored.and_then(|text| text.parse().ok()) {
+        app.write = WriteFlow::for_backup(created_unix);
+    }
     app.reboot.connection = match std::env::var("TILLKIT_PREVIEW_CONNECTION").as_deref() {
         Ok("android") => Some(DeviceConnection::Android),
         Ok("bootloader") => Some(DeviceConnection::Bootloader),

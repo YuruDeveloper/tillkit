@@ -103,6 +103,7 @@ impl App {
             Message::ReadDevice => return self.read_device(),
             Message::BackUp => return self.back_up(),
             Message::PickFullBackup => return self.pick_full_backup(),
+            Message::RestoreBackup(created_unix) => return self.start_restore(created_unix),
             Message::Write(message) => return self.update_write(message),
             Message::Root(message) => return self.update_root(message),
             Message::Reboot(message) => return self.update_reboot(message),

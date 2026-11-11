@@ -163,7 +163,7 @@ pub fn reboot(
 }
 
 #[cfg(test)]
-mod tests {
+pub mod tests {
     use super::*;
 
     const MANIFEST: &str = r#"{
@@ -191,7 +191,7 @@ mod tests {
         "note": ""
     }"#;
 
-    fn pair(id: &str, kind: PairKind) -> PairManifest {
+    pub fn pair(id: &str, kind: PairKind) -> PairManifest {
         let mut pair: PairManifest = serde_json::from_str(MANIFEST).expect("manifest");
         pair.id = id.into();
         pair.kind = kind;

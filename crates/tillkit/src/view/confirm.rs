@@ -1,4 +1,5 @@
 use crate::app::App;
+use crate::clock::format_utc;
 use crate::confirmation::Confirmation;
 use crate::fonts;
 use crate::message::Message;
@@ -7,7 +8,6 @@ use crate::plan_review::PlanReview;
 use crate::reboot_words;
 use crate::support_words;
 use crate::view::{parts, rail, support_rows};
-use crate::write_kind::WriteKind;
 use crate::write_origin::WriteOrigin;
 use iced::widget::{Column, Space, column, container, opaque, row, text};
 use iced::{Color, Element, Length, Padding};
@@ -22,8 +22,9 @@ const WRITE_WARNING: &str =
 const WRITE_KEPT: &str = "기록이 중간에 실패하면 백업해 둔 이미지로 되돌립니다. 사용자 데이터는 지우지 않습니다. 기록하는 도중에 전원이 끊기면 기기가 부팅하지 못할 수 있습니다.";
 const FORCED_WARNING: &str = "지원하는 조건과 맞지 않는 기기에 강제로 진행하는 기록입니다. 기록한 뒤에 기기가 부팅하는 것을 보장하지 않습니다.";
 const KERNEL_WARNING: &str =
-    "새 커널로 부팅하지 못하면, 이 프로그램으로는 이전 커널로 되돌릴 수 없습니다.";
+    "기록한 커널로 부팅하지 못하면, 이 프로그램으로는 이전 커널로 되돌릴 수 없습니다.";
 const ROOT_WORK: &str = "Magisk 루트 패치 기록";
+const RESTORE_WORK: &str = "백업한 이미지를 기기에 다시 기록";
 const ROOT_WARNING: &str = "TillKit이 Magisk로 직접 패치한 이미지로 이 기기가 부팅하는지는 아직 실제 기기에서 확인하지 못했습니다.";
 const REBOOT_QUESTION: &str = "기록한 내용을 다시 읽어서 확인했습니다. 기기를 지금 다시 시작하면 새 이미지로 부팅합니다. 나중에 하려면 LATER를 눌러 주세요.";
 
@@ -74,7 +75,6 @@ fn write(app: &App) -> Element<'_, Message> {
     content = content
         .push(parts::warned("WRITE TO DEVICE", palette))
         .push(parts::body(WRITE_WARNING, palette));
-    let image = app.write.image();
     if let (Some(source), Some(review)) = (source(app), &app.write.review) {
         content = content.push(write_facts(source, review, palette));
     }
@@ -90,7 +90,12 @@ fn write(app: &App) -> Element<'_, Message> {
     if forced {
         content = content.push(parts::body(FORCED_WARNING, palette));
     }
-    if matches!(image, Some((WriteKind::Kernel, _))) {
+    let writes_kernel = app
+        .write
+        .review
+        .as_ref()
+        .is_some_and(|review| review.source.kernel_facts().is_some());
+    if writes_kernel {
         content = content.push(parts::body(KERNEL_WARNING, palette));
     }
     content = content.push(answers("WRITE", "CANCEL", palette));
@@ -101,6 +106,10 @@ fn source(app: &App) -> Option<[(&'static str, String); 2]> {
     if let Some((kind, image)) = app.write.image() {
         let image = image.display().to_string();
         return Some([("하는 일", kind.work().into()), ("고른 이미지", image)]);
+    }
+    if let Some(created_unix) = app.write.restored_backup {
+        let backup = format_utc(created_unix);
+        return Some([("하는 일", RESTORE_WORK.into()), ("고른 백업", backup)]);
     }
     let package = app.write.package.as_ref()?;
     let magisk = format!("{} · SHA-256 {}", package.version, package.short_sha256());
@@ -135,7 +144,7 @@ fn write_facts<'a>(
             palette,
         ),
         stated(
-            "되돌릴 백업",
+            "실패 시 복구본",
             parts::value(review.plan.old_pair.clone(), palette),
             palette,
         ),

@@ -1,6 +1,7 @@
 use crate::app::App;
 use crate::message::Message;
 use crate::palette::Palette;
+use crate::restore_session;
 use crate::root_worker;
 use crate::step_status::StepStatus;
 use crate::view::parts;
@@ -25,6 +26,7 @@ const NO_FINAL_STATE: &str =
     "기기가 마지막 상태를 알려 주지 않았습니다. 기기를 다시 시작하지 말고 전원을 유지해 주세요.";
 const NO_NEW_START: &str = "결과를 확인하지 못한 기록이 있어서, 이 화면에서는 새로 시작하지 않습니다. 기기의 전원을 유지한 채로 기기의 상태를 먼저 확인해 주세요.";
 const ALREADY_PATCHED: &str = "이 기기의 init_boot에는 이미 Magisk가 들어 있어서 다시 패치하지 않습니다. 기기에는 기록하지 않았습니다.";
+const SAME_IMAGES: &str = "기기에는 이미 이 백업과 같은 이미지가 들어 있어서 다시 기록하지 않습니다. 기기에는 기록하지 않았습니다.";
 const OTHER_WORK: &str = "화면에서 시작한 작업이 끝나지 않았습니다. 그 화면에서 작업을 끝내거나 START OVER를 누른 뒤에 여기에서 시작할 수 있습니다.";
 const STATUS_WIDTH: f32 = 120.0;
 
@@ -108,6 +110,9 @@ pub fn results<'a>(
 fn failure<'a>(step: WriteStep, error: &str, palette: Palette) -> Element<'a, Message> {
     if step == WriteStep::Prepare && root_worker::is_already_patched(error) {
         return parts::caution("ALREADY PATCHED", ALREADY_PATCHED, palette);
+    }
+    if step == WriteStep::Prepare && restore_session::is_same_images(error) {
+        return parts::caution("NOTHING TO RESTORE", SAME_IMAGES, palette);
     }
     parts::fault(
         step.failed_caption(),

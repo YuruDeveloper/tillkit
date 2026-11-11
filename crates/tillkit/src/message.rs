@@ -19,6 +19,7 @@ pub enum Message {
     BackedUp(Result<(), String>),
     PickFullBackup,
     FullBackupPicked(Option<PathBuf>),
+    RestoreBackup(u64),
     Write(WriteMessage),
     Root(RootMessage),
     Reboot(RebootMessage),
