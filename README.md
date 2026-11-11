@@ -1,12 +1,12 @@
 # TillKit
 
-TillKit is a tool for one device: the Toss Front 2 terminal.
+TillKit is a tool for the Toss Front 2 terminal.
+It makes a backup of the boot partitions, writes images and adds the Magisk root patch.
 The device must have a GSI on slot B, installed from stock firmware 1.609.5.
-The tool keeps, signs and writes the `init_boot_b` and `vbmeta_b` pair of that device.
+The device must also have root access.
 
-TillKit is a modified version of [LTBox](https://github.com/miner7222/LTBox) by miner7222.
+TillKit is a changed version of [LTBox](https://github.com/miner7222/LTBox) by miner7222.
 The Lenovo functions of LTBox are not in this repository.
-The name of the tool can change.
 
 [한국어](READMEs/README_ko-KR.md)
 
@@ -15,14 +15,41 @@ The name of the tool can change.
 > [!WARNING]
 > A change to firmware can make your device unbootable or erase your data. This tool comes without warranty. You use it at your risk.
 
-- The tool writes only when all checks give the correct result. It does not write to a device that it cannot identify.
-- A write changes two partitions, one after the other. If the power stops between the two writes, the device can become unbootable.
-- The only recovery from that condition is an EDL restore from a full backup. This tool cannot do that restore. No person did a test of that restore on a device.
-- Keep a full backup of the device in a different location before you write.
+- No person did a test of the write functions of TillKit on a device.
+- A write changes two partitions, one after the other. If the device stops between the two writes, it can become unbootable.
+- The only recovery from that condition is an EDL restore from a full backup. TillKit cannot make a full backup and cannot do that restore.
+- Make a full backup of the device with a different tool before you write.
+
+## What you need
+
+### USB debugging
+
+USB debugging must be on.
+
+1. Touch the build number seven times in the settings of the device. This shows the `Developer options`.
+2. Set `USB debugging` to on in the `Developer options`.
+3. Connect the device to the computer. The device shows a message. Accept the connection.
+
+The names of the settings can be different on your system.
+
+### Root access
+
+The device must have root access before you use TillKit.
+USB debugging is not sufficient.
+`adb root` must be available, or the device must have `su`.
+TillKit reads and writes the boot partitions with root access.
+Without root access, TillKit cannot make a backup and cannot write.
+
+The `ROOT` screen does not get root access on a device that has none.
+It adds Magisk to a device on which only `adb root` is available.
+
+### One ADB program
+
+If a different ADB program on the computer uses the device, stop that program first.
 
 ## Supported device
 
-The tool writes only when each of these values is correct.
+The `DEVICE` screen examines each of these values.
 
 | Check | Necessary value |
 | --- | --- |
@@ -39,54 +66,96 @@ The tool writes only when each of these values is correct.
 | Root access | `adb root` or `su` |
 
 The top `vbmeta` of the device must have the AOSP test key `testkey_rsa4096` and the algorithm `SHA256_RSA4096`.
-The tool does not work with other Toss terminals, other firmware versions or slot A.
 
-## What the tool does
+The tool does not write to a device that has an incorrect value.
+But you can read the incorrect items on the `DEVICE` screen, accept them and continue.
+The tool continues to compare the files and to do the check after the write.
+The tool does not make sure that such a device starts after a write.
+You cannot continue with these devices:
+
+- A device that has no root access.
+- A device that did not complete its start.
+- A device with a slot that is not `_a` or `_b`.
+
+## Screens
 
 | Screen | Function |
 | --- | --- |
-| DEVICE | Reads the properties of the device and compares them with the necessary values. This screen does not write. |
-| PAIRS | Reads the pair that is on the device into a local folder. Makes a signed candidate pair from a patched `init_boot` image of the Magisk app. |
-| WRITE | Makes a write plan and puts the files in `/data/local/tmp`. Does a check, writes the pair, reads the pair again and compares the hashes. Starts the device again after one more check. |
-| SCOPE | Shows the range of the tool, the items that have no test on a device, and the notices. |
+| DEVICE | Reads the properties of the device and tells you if you can use the tool with it. This screen does not write. |
+| BACKUP | Reads `init_boot`, `boot` and `vbmeta` of the device into a folder on the computer. `RESTORE` in the list writes the images of that backup to the device again. You also select the folder of the full backup for a GSI here. |
+| WRITE | You select a folder with an image and push `WRITE`. The tool does the steps in sequence, from the plan to the check. |
+| ROOT | Downloads Magisk, adds the Magisk patch to the `init_boot` of the device and writes it. |
+| ADVANCED | Starts the device again in system, recovery, bootloader (fastboot) or EDL mode. |
+| INFO | Shows the items that the tool does not do, and the notices. |
 
-The write has these safety steps:
+### Folder for the WRITE screen
 
-1. The pair that is on the device must be in the local folder before a plan is possible.
+Put only one of these files in the folder.
+
+| File | Function |
+| --- | --- |
+| `init_boot.img` | A root patch from a different tool. TillKit signs it and writes `init_boot` and `vbmeta`. |
+| `boot.img` | A kernel image. TillKit signs it and writes `boot` and `vbmeta`. TillKit cannot use a compressed kernel image. |
+| `system.img` | A GSI. TillKit makes an installation plan only and does not write to the device. Select the folder of the full backup on the `BACKUP` screen first. |
+
+### Safety steps of a write
+
+1. The images that are on the device must be in a backup of the `BACKUP` screen before a plan is possible. Thus, make a backup first.
 2. The plan is a file. The approval is for the SHA-256 of that file.
-3. The script on the device does all checks again before it writes.
-4. If a write does not complete, the script writes the earlier pair again and reads it.
-5. The restart of the device has a different approval. It is possible only after a write with correct hashes.
+3. Before the write, the tool shows the partitions and the recovery images. You must give your approval again.
+4. The script on the device examines the properties and the images of the device again immediately before it writes.
+5. If a write does not complete, the script writes the images from before the write again and reads them.
+6. The restart of the device has a different approval. It is possible only after a write with correct hashes.
 
-A candidate keeps the key, the rollback index, the flags and all other descriptors of the top `vbmeta`.
-Only the hash descriptor of `init_boot` changes.
+If the device does not start with a kernel that you wrote, TillKit cannot write the kernel from before the write again.
+
+### ROOT
+
+- `ROOT` downloads the latest Magisk release from `github.com/topjohnwu/Magisk`. TillKit does not include Magisk.
+- TillKit does not add the patch to an `init_boot` that has Magisk.
+- TillKit does not install the Magisk app on the device. Install the app after the restart.
+- TillKit does not make other types of root patch. You can write an `init_boot.img` from a different tool on the `WRITE` screen.
+
+### ADVANCED
+
+- The modes that you can select change with the connection of the device.
+- To go from EDL mode to a usual start, the Firehose loader file of this device is necessary. TillKit does not include this file.
+- If a write has a result that is not known, TillKit does not send a restart.
 
 ## No test on a device
 
+No function of the TillKit screens operated on a device.
 The checks for these items used a simulated device and a local shell only.
 
-- The start of the device from a candidate pair that this tool made. The signed content is the same as the candidate that started the device, but the file hashes are different.
-- The write script and the pair read of this tool on a real device.
-- A write through `su`. The earlier work on the device used `adb root`.
-- The restore of a pair that the tool read earlier.
-- The EDL recovery after the power stops during a write.
+Write functions:
+
+- Backup, write and `RESTORE` on a device.
+- A write through `su`.
+- A write to a device after you accept incorrect items.
+- The EDL recovery after the device stops during a write.
+
+Other functions:
+
+- The start of the device from an image with the Magisk patch that TillKit made.
+- The start of the device from a kernel image that TillKit signed.
+- The restart from the `ADVANCED` screen.
+- The download of Magisk from GitHub.
 
 ## Not in this tool
 
-- GSI build and installation.
-- Kernel image replacement.
-- EDL full backup and restore.
+- A write to a device that has no root access, and root access for such a device.
+- The GSI installation. TillKit makes only the plan.
+- Full backup and full restore of the device.
+- Recovery of a device that does not start after a write.
 - Automatic removal of `/data/local/tmp/front2-write-*` on the device.
-- A time limit for device commands. If the device gives no answer during a write, the tool continues to wait and the write state is not known. The tool does not try again and does not start the device again.
-
-The engine crates from LTBox stay in the repository for this work.
-They have no screen in this tool.
+- A time limit for device commands. If the device gives no result during a write, the tool continues to wait and the write state is not known. The tool does not try again and does not start the device again.
 
 ## Files that must stay out of the repository
 
-Do not add images, firmware, loaders, device logs, keys or read-back pairs of a real device.
+Do not add images, firmware, loaders, device logs, keys or backups of a device.
 `.gitignore` stops the usual file types, but you must examine each commit.
-The tool keeps its data in the local application data folder, in `tillkit/pairs` and `tillkit/plans`.
+The tool keeps its data in the `tillkit` folder of the local data folder of the user (`%LOCALAPPDATA%` on Windows).
+Backups are in `pairs` and `kernel-sets`, write plans are in `plans`, and the Magisk download is in `magisk`.
 
 ## Build from source
 
@@ -156,5 +225,7 @@ Third-party components keep their licenses:
 | IBM Plex Mono (`crates/tillkit/assets/fonts`) | SIL Open Font License 1.1 |
 | IBM Plex Sans KR (`crates/tillkit/assets/fonts`) | SIL Open Font License 1.1 |
 | Archivo Narrow (`crates/tillkit/assets/fonts`) | SIL Open Font License 1.1 |
+
+The `ROOT` screen downloads Magisk (topjohnwu, GPL-3.0-or-later). TillKit does not include Magisk.
 
 [![GPLv3](https://www.gnu.org/graphics/gplv3-127x51.png)](https://www.gnu.org/licenses/gpl-3.0)
