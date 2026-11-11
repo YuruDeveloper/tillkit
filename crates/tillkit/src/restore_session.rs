@@ -18,7 +18,7 @@ pub const UNKNOWN_IMAGES: &str =
 pub const MISSING_BACKUP: &str = "the storage does not have this backup now";
 pub const AMBIGUOUS_BACKUP: &str =
     "the storage has more than one backup with this time; a restore does not select one of them";
-pub const OTHER_VBMETA: &str = "the device has the init_boot image and the boot image of this backup, but its vbmeta is different; a restore does not write vbmeta only";
+pub const OTHER_VBMETA: &str = "the compared images of this backup are the same as the images on the device, but vbmeta is different; a restore does not write vbmeta only";
 
 pub struct RestoreSession {
     shell: AdbShell,
@@ -257,5 +257,19 @@ mod tests {
         let saved = Some(image("readback-1", "bb", "v2"));
         let pair_only = nothing_to_restore((saved, current), (None, current)).to_string();
         assert!(is_same_images(&pair_only));
+    }
+
+    #[test]
+    fn doc_1059_a_backup_with_one_image_does_not_name_an_image_without_a_comparison() {
+        let saved = Some(image("readback-1", "aa", "v1"));
+        let resigned = Some(image("candidate-2", "aa", "v2"));
+        let pair_only = nothing_to_restore((saved, resigned), (None, None)).to_string();
+        assert!(pair_only.contains(OTHER_VBMETA));
+        let kernel_only = nothing_to_restore((None, None), (saved, resigned)).to_string();
+        assert!(kernel_only.contains(OTHER_VBMETA));
+        assert!(!OTHER_VBMETA.contains("init_boot"));
+        assert!(!OTHER_VBMETA.contains("boot image"));
+        let same = nothing_to_restore((saved, saved), (None, None)).to_string();
+        assert!(!same.contains(OTHER_VBMETA));
     }
 }
