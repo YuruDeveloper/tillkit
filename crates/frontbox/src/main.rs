@@ -2,15 +2,26 @@
 
 mod adb_shell;
 mod app;
+mod app_gsi;
+mod app_kernel;
 mod clock;
 mod data_paths;
 mod diagnosis;
 mod fonts;
 mod grain;
+mod gsi_action;
+mod gsi_flow;
+mod gsi_message;
+mod gsi_review;
+mod gsi_worker;
+mod install_review;
+mod kernel_message;
+mod kernel_worker;
 mod launch;
 mod message;
 mod palette;
 mod plan_review;
+mod plan_source;
 mod screen;
 mod step_status;
 mod view;

@@ -14,7 +14,9 @@ pub fn paths() -> DataPaths {
 pub fn screen() -> Screen {
     match std::env::var(SCREEN_VARIABLE).as_deref() {
         Ok("pairs") => Screen::Pairs,
+        Ok("kernel") => Screen::Kernel,
         Ok("write") => Screen::Write,
+        Ok("gsi") => Screen::Gsi,
         Ok("scope") => Screen::Scope,
         _ => Screen::Device,
     }
@@ -34,9 +36,20 @@ pub fn preview(_app: &mut App) {}
 #[cfg(debug_assertions)]
 pub fn preview(app: &mut App) {
     use crate::diagnosis::Diagnosis;
+    use crate::install_review::InstallReview;
     use crate::plan_review::PlanReview;
+    use crate::plan_source::PlanSource;
+    use front2::install::InstallPlan;
+    use front2::kernel::KernelPlanFacts;
     use front2::{DeviceState, SupportReport, WritePlan};
     use std::path::PathBuf;
+
+    fn preview_source() -> PlanSource {
+        match read::<KernelPlanFacts>("FRONTBOX_PREVIEW_KERNEL_FACTS") {
+            Some(facts) => PlanSource::Kernel(Box::new(facts)),
+            None => PlanSource::Pair,
+        }
+    }
 
     fn read<T: serde::de::DeserializeOwned>(variable: &str) -> Option<T> {
         let path = std::env::var_os(variable)?;
@@ -52,10 +65,21 @@ pub fn preview(app: &mut App) {
             plan,
             sha256: "5d1f0c9a".repeat(8),
             directory: PathBuf::from("preview"),
+            source: preview_source(),
         });
         app.write.staged = std::env::var_os("FRONTBOX_PREVIEW_STAGED").is_some();
     }
+    if let Some(directory) = std::env::var_os("FRONTBOX_PREVIEW_INSTALL_PLAN").map(PathBuf::from) {
+        app.gsi.install = InstallPlan::load(&directory)
+            .ok()
+            .map(|stored| InstallReview {
+                plan: stored.plan().clone(),
+                sha256: stored.plan_sha256().to_string(),
+                directory,
+            });
+    }
     if std::env::var_os("FRONTBOX_PREVIEW_SELECT").is_some() {
         app.selected_pair = app.pairs.first().map(|pair| pair.id.clone());
+        app.selected_kernel_set = app.kernel_sets.first().map(|set| set.id.clone());
     }
 }

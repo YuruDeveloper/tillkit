@@ -6,22 +6,24 @@ use crate::step_status::StepStatus;
 use crate::view::parts;
 use crate::write_flow::{REBOOT_WORD, WriteFlow};
 use crate::write_step::WriteStep;
+use front2::kernel::KernelPlanFacts;
 use front2::{ApplyOutcome, ApplyState, PlannedWrite, RootAccess, WritePurpose};
 use iced::widget::{Column, column, container, row};
 use iced::{Alignment, Color, Element, Length};
 
-const INTRODUCTION: &str = "보관함의 쌍 하나를 기기의 init_boot_b와 vbmeta_b에 기록합니다. 슬롯을 바꾸지 않고, 사용자 데이터를 지우지 않으며, 부트로더 잠금을 건드리지 않습니다.";
-const NO_PAIR: &str =
-    "기록할 쌍을 고르지 않았습니다. PAIRS 화면에서 쌍을 고른 뒤에 계획을 세워 주세요.";
+const INTRODUCTION: &str = "보관함의 쌍(init_boot_b와 vbmeta_b)이나 커널 세트(boot_b와 vbmeta_b) 하나를 기기에 기록합니다. 슬롯을 바꾸지 않고, 사용자 데이터를 지우지 않으며, 부트로더 잠금을 건드리지 않습니다.";
+const NO_PAIR: &str = "기록할 대상을 고르지 않았습니다. PAIRS 화면에서 쌍을 고르거나 KERNEL 화면에서 커널 세트를 골라 계획을 세워 주세요.";
 const STEP_FAILED: &str = "이 단계에서 멈췄습니다. 아래 원문을 확인한 뒤, 계획을 버리고 기기 상태를 다시 읽어서 새 계획을 세워 주세요.";
 const SU_CAUTION: &str = "이 계획은 su를 거쳐 기록합니다. 실기에서 검증된 기록 경로는 adb root(uid 0)뿐이고, su를 거친 기록은 검증하지 않았습니다.";
-const RESTORE_CAUTION: &str = "이 계획은 읽어 둔 쌍을 되돌려 기록합니다. 되돌리기는 모의 장치에서만 시험했고 실제 기기에서는 시험하지 않았습니다.";
+const RESTORE_CAUTION: &str = "이 계획은 기기에서 읽어 둔 이미지를 되돌려 기록합니다. 되돌리기는 모의 장치에서만 시험했고 실제 기기에서는 시험하지 않았습니다.";
 const POWER_LOSS: &str = "두 파티션을 차례로 기록하는 동안 전원이 끊기면 기기가 부팅하지 못할 수 있습니다. 그때의 복구 수단은 전체 백업을 EDL로 되돌리는 것이며, 그 복구는 실기에서 시험하지 않았습니다.";
-const UNVERIFIED: &str = "실기에서 검증하지 않은 것: 이 프로그램이 만든 후보의 부팅, 이 프로그램이 만든 기록 스크립트의 실행, su를 거친 기록, 되돌리기, 전원 차단 뒤의 EDL 복구.";
-const ROLLED_BACK: &str = "기록이 중간에 실패해서 되돌릴 쌍을 다시 기록했고, 다시 읽은 해시가 되돌릴 쌍과 일치합니다. 재부팅하지 않았습니다.";
+const UNVERIFIED: &str = "실기에서 검증하지 않은 것: 이 프로그램이 만든 후보의 부팅, 이 프로그램이 만든 기록 스크립트의 실행, 커널 세트의 읽기와 기록 전체, su를 거친 기록, 되돌리기, 전원 차단 뒤의 EDL 복구.";
+const KERNEL_CAUTION: &str = "KMI가 같아도 새 커널이 이 기기에서 부팅된다는 보장은 없습니다. 부팅에 실패하면 ADB를 쓸 수 없고 슬롯 A로 넘어가는 경로도 없으며, 남는 복구 수단은 두 파티션을 EDL로 다시 기록하는 것인데 그 복구는 실기에서 시험하지 않았습니다.";
+const OLD_SET_NOT_RUNNING: &str = "기기가 지금 실행 중인 커널의 release가 되돌릴 세트의 커널과 다릅니다. 되돌릴 세트는 이 기기에서 부팅된 적이 없는 커널일 수 있습니다.";
+const ROLLED_BACK: &str = "기록이 중간에 실패해서 되돌릴 이미지를 다시 기록했고, 다시 읽은 해시가 되돌릴 이미지와 일치합니다. 재부팅하지 않았습니다.";
 const DO_NOT_REBOOT: &str = "기록도 되돌리기도 끝나지 않았습니다. 기기를 재부팅하지 말고 전원을 유지한 채, 기기 로그와 파티션 해시를 확인해 주세요.";
 const NO_FINAL_STATE: &str = "기기가 정해진 시간 안에 마지막 상태를 보고하지 않았습니다. 재부팅하지 말고 기기의 상태 파일과 로그를 확인해 주세요.";
-const VERIFIED: &str = "두 파티션을 다시 읽은 해시가 새 쌍과 일치합니다. 재부팅 전까지는 이전 쌍으로 부팅된 상태입니다.";
+const VERIFIED: &str = "두 파티션을 다시 읽은 해시가 새 이미지와 일치합니다. 재부팅 전까지는 이전 이미지로 부팅된 상태입니다.";
 const REBOOT_SENT: &str =
     "재부팅을 요청했습니다. 부팅이 끝나면 DEVICE 화면에서 기기를 다시 읽어 상태를 확인해 주세요.";
 
@@ -31,7 +33,10 @@ pub fn view(app: &App) -> Element<'_, Message> {
     let mut page = column![
         parts::display("WRITE", palette),
         parts::label(
-            "INIT_BOOT_B + VBMETA_B · ROOT · NO SLOT CHANGE · NO DATA WIPE",
+            format!(
+                "{} · ROOT · NO SLOT CHANGE · NO DATA WIPE",
+                target_labels(flow)
+            ),
             palette
         ),
         parts::body(INTRODUCTION, palette),
@@ -57,13 +62,25 @@ pub fn view(app: &App) -> Element<'_, Message> {
     .into()
 }
 
+fn target_labels(flow: &WriteFlow) -> String {
+    let Some(review) = &flow.review else {
+        return "TWO PARTITIONS OF SLOT B".to_string();
+    };
+    let labels: Vec<String> = review
+        .plan
+        .writes
+        .iter()
+        .map(|write| write.target.label.to_uppercase())
+        .collect();
+    labels.join(" + ")
+}
+
 fn target_line<'a>(app: &App, palette: Palette) -> Element<'a, Message> {
-    let planned = app
-        .write
-        .review
-        .as_ref()
-        .map(|review| &review.plan.new_pair);
-    match planned.or(app.selected_pair.as_ref()) {
+    if let Some(review) = &app.write.review {
+        let caption = format!("{} TO WRITE", review.source.set_word());
+        return parts::key_value(&caption, review.plan.new_pair.clone(), palette);
+    }
+    match &app.selected_pair {
         Some(id) => parts::key_value("PAIR TO WRITE", id.clone(), palette),
         None => parts::body(NO_PAIR, palette),
     }
@@ -132,7 +149,7 @@ fn action<'a>(app: &'a App, step: WriteStep, palette: Palette) -> Element<'a, Me
             &flow.approval_input,
             Message::ApprovalChanged,
             parts::go(
-                "WRITE PAIR",
+                "WRITE",
                 flow.write_authorization(0).map(|_| Message::WritePair),
                 palette,
             ),
@@ -183,12 +200,14 @@ fn plan_block<'a>(review: &PlanReview, palette: Palette) -> Element<'a, Message>
         WritePurpose::ApplyCandidate => "apply candidate",
         WritePurpose::RestoreReadback => "restore readback",
     };
+    let new_caption = format!("NEW {}", review.source.set_word());
+    let old_caption = format!("OLD {} (ROLLBACK SOURCE)", review.source.set_word());
     let facts = [
         ("PLAN", plan.id.clone()),
         ("PLAN SHA-256", review.sha256.clone()),
         ("PURPOSE", purpose.to_string()),
-        ("NEW PAIR", plan.new_pair.clone()),
-        ("OLD PAIR (ROLLBACK SOURCE)", plan.old_pair.clone()),
+        (new_caption.as_str(), plan.new_pair.clone()),
+        (old_caption.as_str(), plan.old_pair.clone()),
         ("SLOT", plan.slot_suffix.clone()),
         ("DEVICE STATE", plan.device_state.clone()),
         ("VERIFIED BOOT STATE", plan.verified_boot_state.clone()),
@@ -217,6 +236,9 @@ fn plan_block<'a>(review: &PlanReview, palette: Palette) -> Element<'a, Message>
     for write in &plan.writes {
         rows.extend(write_rows(write, palette));
     }
+    if let Some(kernel) = review.source.kernel_facts() {
+        rows.extend(kernel_rows(kernel, palette));
+    }
     let mut content = Column::new()
         .spacing(10)
         .push(parts::label("PLAN UNDER REVIEW", palette))
@@ -228,12 +250,40 @@ fn plan_block<'a>(review: &PlanReview, palette: Palette) -> Element<'a, Message>
     if plan.purpose == WritePurpose::RestoreReadback {
         content = content.push(parts::caution("RESTORE", RESTORE_CAUTION, palette));
     }
+    if let Some(kernel) = review.source.kernel_facts() {
+        content = content.push(parts::caution("KERNEL", KERNEL_CAUTION, palette));
+        content = content.push(old_set_caution(kernel, palette));
+    }
     content = content.push(parts::bracket(
         "DISCARD PLAN",
         Some(Message::DiscardPlan),
         palette,
     ));
     parts::panel(content, palette)
+}
+
+fn kernel_rows<'a>(kernel: &KernelPlanFacts, palette: Palette) -> [Element<'a, Message>; 4] {
+    let running = kernel
+        .running_release
+        .clone()
+        .unwrap_or_else(|| "not reported".into());
+    [
+        parts::key_value("KMI", kernel.kmi.clone(), palette),
+        parts::key_value("NEW KERNEL RELEASE", kernel.new_release.clone(), palette),
+        parts::key_value("OLD KERNEL RELEASE", kernel.old_release.clone(), palette),
+        parts::key_value("RUNNING KERNEL RELEASE", running, palette),
+    ]
+}
+
+fn old_set_caution<'a>(kernel: &KernelPlanFacts, palette: Palette) -> Element<'a, Message> {
+    if kernel.old_set_is_running {
+        return Column::new().into();
+    }
+    parts::caution(
+        "OLD SET IS NOT THE RUNNING KERNEL",
+        OLD_SET_NOT_RUNNING,
+        palette,
+    )
 }
 
 fn write_rows<'a>(write: &PlannedWrite, palette: Palette) -> [Element<'a, Message>; 3] {

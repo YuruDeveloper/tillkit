@@ -22,7 +22,7 @@ pub fn view(app: &App) -> Element<'_, Message> {
             .size(20)
             .color(palette.ink),
         parts::label(
-            format!("FRONT 2 PAIR TOOL · V{}", env!("CARGO_PKG_VERSION")),
+            format!("FRONT 2 TOOL · V{}", env!("CARGO_PKG_VERSION")),
             palette
         ),
         Space::new().height(18),

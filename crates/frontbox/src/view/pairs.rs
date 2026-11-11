@@ -29,7 +29,8 @@ pub fn view(app: &App) -> Element<'_, Message> {
         parts::bracket("PLAN WRITE OF SELECTED", plan, palette),
     ]
     .spacing(10)
-    .align_y(Alignment::Center);
+    .align_y(Alignment::Center)
+    .wrap();
     let mut page = column![
         parts::display("PAIRS", palette),
         parts::label(format!("STORE · {}", app.paths.pairs().display()), palette),

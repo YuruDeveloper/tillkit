@@ -2,6 +2,8 @@ use crate::clock::now_unix;
 use crate::data_paths::DataPaths;
 use crate::diagnosis::Diagnosis;
 use crate::grain;
+use crate::gsi_flow::GsiFlow;
+use crate::gsi_worker;
 use crate::launch;
 use crate::message::Message;
 use crate::palette::Palette;
@@ -11,6 +13,7 @@ use crate::view;
 use crate::worker::{self, run_blocking};
 use crate::write_flow::WriteFlow;
 use crate::write_step::WriteStep;
+use front2::kernel::KernelSet;
 use front2::{ApplyOutcome, PairKind, PairManifest, PairStore};
 use iced::widget::image::Handle;
 use iced::{Element, Task, Theme};
@@ -30,7 +33,11 @@ pub struct App {
     pub pairs_error: Option<String>,
     pub selected_pair: Option<String>,
     pub note_input: String,
+    pub kernel_sets: Vec<KernelSet>,
+    pub kernel_error: Option<String>,
+    pub selected_kernel_set: Option<String>,
     pub write: WriteFlow,
+    pub gsi: GsiFlow,
 }
 
 impl App {
@@ -54,9 +61,15 @@ impl App {
             pairs_error: None,
             selected_pair: None,
             note_input: String::new(),
+            kernel_sets: Vec::new(),
+            kernel_error: None,
+            selected_kernel_set: None,
             write: WriteFlow::default(),
+            gsi: GsiFlow::default(),
         };
         app.reload_pairs();
+        app.reload_kernel_sets();
+        app.gsi.review = gsi_worker::newest_candidate(&app.paths);
         app
     }
 
@@ -112,6 +125,8 @@ impl App {
             Message::StagePlan => return self.stage_plan(),
             Message::WritePair => return self.write_pair(),
             Message::Reboot => return self.reboot(),
+            Message::Gsi(message) => return self.update_gsi(message),
+            Message::Kernel(message) => return self.update_kernel(message),
         }
         Task::none()
     }

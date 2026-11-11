@@ -102,6 +102,7 @@ impl WriteFlow {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::plan_source::PlanSource;
     use front2::{RootAccess, WritePlan, WritePurpose};
     use std::path::PathBuf;
 
@@ -134,6 +135,7 @@ mod tests {
             plan: plan(),
             sha256: "0123456789abcdef".repeat(4),
             directory: PathBuf::from("plans/plan-1"),
+            source: PlanSource::Pair,
         }
     }
 

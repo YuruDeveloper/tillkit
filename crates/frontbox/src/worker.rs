@@ -4,8 +4,10 @@ use crate::data_paths::DataPaths;
 use crate::diagnosis::Diagnosis;
 use crate::message::Message;
 use crate::plan_review::PlanReview;
+use crate::plan_source::PlanSource;
 use front2::candidate::build_signed_candidate;
 use front2::current_pair::find_stored_current_pair;
+use front2::kernel::KernelPlan;
 use front2::pair_backup;
 use front2::{
     ApplyOutcome, Authorization, DeviceState, Front2Error, PairManifest, PairRequest, PairStore,
@@ -100,12 +102,13 @@ pub fn plan_write(paths: &DataPaths, new_pair: &str) -> Result<PlanReview> {
         plan,
         sha256,
         directory,
+        source: PlanSource::Pair,
     })
 }
 
 fn load_reviewed(review: &PlanReview) -> Result<WritePlan> {
-    let (plan, sha256) = WritePlan::load(&review.directory)?;
-    if sha256 != review.sha256 || plan != review.plan {
+    let (plan, sha256, source) = load_stored(review)?;
+    if sha256 != review.sha256 || plan != review.plan || source != review.source {
         return Err(Front2Error::Plan(
             "the plan file changed after the review".into(),
         ));
@@ -113,10 +116,20 @@ fn load_reviewed(review: &PlanReview) -> Result<WritePlan> {
     Ok(plan)
 }
 
+fn load_stored(review: &PlanReview) -> Result<(WritePlan, String, PlanSource)> {
+    if review.source == PlanSource::Pair {
+        let (plan, sha256) = WritePlan::load(&review.directory)?;
+        return Ok((plan, sha256, PlanSource::Pair));
+    }
+    let (kernel_plan, sha256) = KernelPlan::load(&review.directory)?;
+    let source = PlanSource::Kernel(Box::new(kernel_plan.facts));
+    Ok((kernel_plan.plan, sha256, source))
+}
+
 pub fn stage_plan(paths: &DataPaths, review: &PlanReview) -> Result<()> {
     let plan = load_reviewed(review)?;
     let mut shell = AdbShell::connect()?;
-    let store = PairStore::new(paths.pairs());
+    let store = PairStore::new(review.source.store_root(paths));
     pair_apply::stage(&mut shell, &store, &plan, &review.directory)?;
     pair_apply::check(&mut shell, &plan)
 }
@@ -142,6 +155,9 @@ pub fn reboot(
 ) -> Result<ApplyOutcome> {
     let plan = load_reviewed(review)?;
     let mut shell = AdbShell::connect()?;
+    if let Some(facts) = review.source.kernel_facts() {
+        facts.require_references_unchanged(&mut shell, plan.root_access)?;
+    }
     pair_apply::reboot(
         &mut shell,
         &plan,

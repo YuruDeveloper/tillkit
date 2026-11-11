@@ -5,6 +5,7 @@ use iced::widget::{Column, Space, button, column, container, row, scrollable, te
 use iced::{Border, Color, Element, Length, Theme};
 
 pub const KEY_WIDTH: f32 = 210.0;
+pub const VALUE_COLUMN_CHARACTERS: usize = 36;
 
 pub fn fill(color: Color) -> container::Style {
     container::Style {
@@ -205,11 +206,31 @@ pub fn caution<'a>(caption: &str, sentence: &str, palette: Palette) -> Element<'
     block(content, palette.tint_warn, palette)
 }
 
+pub fn stacked<'a>(
+    key: &str,
+    content: impl Into<String>,
+    palette: Palette,
+) -> Element<'a, Message> {
+    column![label(key.to_string(), palette), value(content, palette)]
+        .spacing(3)
+        .into()
+}
+
+pub fn fits_value_column(content: &str) -> bool {
+    content
+        .split_whitespace()
+        .all(|word| word.chars().count() <= VALUE_COLUMN_CHARACTERS)
+}
+
 pub fn key_value<'a>(
     key: &str,
     content: impl Into<String>,
     palette: Palette,
 ) -> Element<'a, Message> {
+    let content = content.into();
+    if !fits_value_column(&content) {
+        return stacked(key, content, palette);
+    }
     row![
         container(label(key.to_string(), palette)).width(Length::Fixed(KEY_WIDTH)),
         container(value(content, palette)).width(Length::Fill),
@@ -270,4 +291,23 @@ pub fn scroll_style(
         rail.scroller.border = Border::default();
     }
     style
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_value_without_a_break_goes_below_its_key_when_it_is_long() {
+        assert!(fits_value_column("5.15-android13-8"));
+        assert!(fits_value_column(&"a".repeat(VALUE_COLUMN_CHARACTERS)));
+        assert!(fits_value_column(
+            "boot_b · /dev/block/sde21 · 100663296 bytes"
+        ));
+        assert!(!fits_value_column(&"a".repeat(VALUE_COLUMN_CHARACTERS + 1)));
+        assert!(!fits_value_column(&"0123abcd".repeat(8)));
+        assert!(!fits_value_column(
+            "2597c218aae470a130f61162feaae70afd97f011"
+        ));
+    }
 }

@@ -1,4 +1,6 @@
 pub mod device;
+pub mod gsi;
+pub mod kernel;
 pub mod pairs;
 pub mod parts;
 pub mod rabbit;
@@ -22,7 +24,9 @@ pub fn root(app: &App) -> Element<'_, Message> {
     let content = match app.screen {
         Screen::Device => device::view(app),
         Screen::Pairs => pairs::view(app),
+        Screen::Kernel => kernel::view(app),
         Screen::Write => write::view(app),
+        Screen::Gsi => gsi::view(app),
         Screen::Scope => scope::view(app),
     };
     let center = scrollable(

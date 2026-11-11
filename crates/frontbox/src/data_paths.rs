@@ -24,4 +24,16 @@ impl DataPaths {
     pub fn plans(&self) -> PathBuf {
         self.root.join("plans")
     }
+
+    pub fn kernel_sets(&self) -> PathBuf {
+        self.root.join("kernel-sets")
+    }
+
+    pub fn install_plans(&self) -> PathBuf {
+        self.root.join("install-plans")
+    }
+
+    pub fn gsi_candidates(&self) -> PathBuf {
+        self.root.join("gsi")
+    }
 }

@@ -1,4 +1,6 @@
 use crate::diagnosis::Diagnosis;
+use crate::gsi_message::GsiMessage;
+use crate::kernel_message::KernelMessage;
 use crate::plan_review::PlanReview;
 use crate::screen::Screen;
 use front2::{ApplyOutcome, PairManifest};
@@ -27,4 +29,6 @@ pub enum Message {
     Reboot,
     Rebooted(Result<ApplyOutcome, String>),
     DiscardPlan,
+    Gsi(GsiMessage),
+    Kernel(KernelMessage),
 }

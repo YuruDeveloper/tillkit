@@ -22,7 +22,7 @@ impl WriteStep {
         match self {
             Self::Plan => "PLAN",
             Self::Stage => "STAGE AND CHECK",
-            Self::Write => "WRITE PAIR",
+            Self::Write => "WRITE",
             Self::Reboot => "REBOOT",
         }
     }
@@ -37,7 +37,7 @@ impl WriteStep {
     }
 }
 
-const PLAN_SENTENCE: &str = "기기의 현재 쌍을 읽어 보관함에서 찾고, 기록 계획을 파일로 저장합니다. 파티션에는 기록하지 않습니다.";
-const STAGE_SENTENCE: &str = "새 쌍과 되돌릴 쌍, 기록 스크립트를 기기의 /data/local/tmp에 올리고 사전 점검을 실행합니다. 파티션에는 기록하지 않습니다.";
-const WRITE_SENTENCE: &str = "init_boot_b와 vbmeta_b에 새 쌍을 기록하고 다시 읽어 해시를 대조합니다. 중간에 실패하면 되돌릴 쌍을 다시 기록합니다.";
+const PLAN_SENTENCE: &str = "기기의 현재 내용을 읽어 보관함에서 찾고, 기록 계획을 파일로 저장합니다. 파티션에는 기록하지 않습니다.";
+const STAGE_SENTENCE: &str = "새 이미지와 되돌릴 이미지, 기록 스크립트를 기기의 /data/local/tmp에 올리고 사전 점검을 실행합니다. 파티션에는 기록하지 않습니다.";
+const WRITE_SENTENCE: &str = "계획에 적힌 두 파티션에 새 이미지를 기록하고 다시 읽어 해시를 대조합니다. 중간에 실패하면 되돌릴 이미지를 다시 기록합니다.";
 const REBOOT_SENTENCE: &str = "기록 상태와 파티션 해시를 한 번 더 확인한 뒤에 기기를 재부팅합니다.";
