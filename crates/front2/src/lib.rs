@@ -13,6 +13,7 @@ pub mod gpt;
 pub mod gsi;
 pub mod image_record;
 pub mod init_boot_payload;
+pub mod install;
 pub mod kernel;
 pub mod pair_apply;
 pub mod pair_backup;
