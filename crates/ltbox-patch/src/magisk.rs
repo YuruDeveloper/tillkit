@@ -13,6 +13,28 @@ use ltbox_core::{LtboxError, Result, tr_args};
 use crate::boot;
 use crate::root_pipeline::RootImageTarget;
 
+const STUB_APK: &str = "stub.apk";
+
+fn magisk_cpio_commands(has_stub: bool) -> Vec<&'static str> {
+    let mut commands = vec![
+        "add 0750 init magiskinit",
+        "mkdir 0750 overlay.d",
+        "mkdir 0750 overlay.d/sbin",
+        "add 0644 overlay.d/sbin/magisk.xz magisk.xz",
+    ];
+    if has_stub {
+        commands.push("add 0644 overlay.d/sbin/stub.xz stub.xz");
+    }
+    commands.extend([
+        "add 0644 overlay.d/sbin/init-ld.xz init-ld.xz",
+        "patch",
+        "backup ramdisk.cpio.orig",
+        "mkdir 000 .backup",
+        "add 000 .backup/.magisk config",
+    ]);
+    commands
+}
+
 /// Map the three crypto getprops to the `encrypt_type` v2 uses to gate
 /// `/data` eligibility. `"none"` = unencrypted, `"file"` = FBE,
 /// `"block"` = full-disk, `"metadata"` = metadata crypto. Matches the
@@ -157,17 +179,18 @@ pub fn extract_apk_payload(apk_path: &Path, staging_dir: &Path) -> Result<()> {
     let mut zip =
         zip::ZipArchive::new(file).map_err(|e| LtboxError::Patch(format!("APK read: {e}")))?;
 
-    let mapping: &[(&[&str], &str)] = &[
+    let mapping: &[(&[&str], &str, bool)] = &[
         (
             &["lib/arm64-v8a/libmagisk.so", "lib/arm64-v8a/libmagisk64.so"],
             "magisk",
+            true,
         ),
-        (&["lib/arm64-v8a/libmagiskinit.so"], "magiskinit"),
-        (&["lib/arm64-v8a/libinit-ld.so"], "init-ld"),
-        (&["assets/stub.apk"], "stub.apk"),
+        (&["lib/arm64-v8a/libmagiskinit.so"], "magiskinit", true),
+        (&["lib/arm64-v8a/libinit-ld.so"], "init-ld", true),
+        (&["assets/stub.apk"], STUB_APK, false),
     ];
 
-    for (candidates, dst_name) in mapping {
+    for (candidates, dst_name, required) in mapping {
         let mut staged = false;
         for entry_name in candidates.iter() {
             let mut entry = match zip.by_name(entry_name) {
@@ -184,10 +207,13 @@ pub fn extract_apk_payload(apk_path: &Path, staging_dir: &Path) -> Result<()> {
             staged = true;
             break;
         }
-        if !staged {
+        if !staged && *required {
             return Err(LtboxError::Patch(format!(
                 "APK missing entry for {dst_name} (checked {candidates:?})"
             )));
+        }
+        if !staged {
+            let _ = fs::remove_file(staging_dir.join(dst_name));
         }
     }
     Ok(())
@@ -253,8 +279,11 @@ pub fn patch_root_image(
     fs::copy(&ramdisk, work_dir.join("ramdisk.cpio.orig"))?;
 
     ltbox_core::live!(log, "[Magisk] {}", tr("log_magisk_compressing_payload"));
+    let has_stub = work_dir.join(STUB_APK).is_file();
     boot::compress(work_dir, "xz", "magisk", "magisk.xz")?;
-    boot::compress(work_dir, "xz", "stub.apk", "stub.xz")?;
+    if has_stub {
+        boot::compress(work_dir, "xz", STUB_APK, "stub.xz")?;
+    }
     boot::compress(work_dir, "xz", "init-ld", "init-ld.xz")?;
 
     // Config file baked into .backup/.magisk.
@@ -275,22 +304,11 @@ pub fn patch_root_image(
     // + metadata encryption. v2 `bin/ltbox/patch/root.py` sets the
     // same env via `_get_tool_env()` before invoking magiskboot.
     ltbox_core::live!(log, "[Magisk] {}", tr("log_magisk_cpio_patch"));
-    let cpio_cmds: &[&str] = &[
-        "add 0750 init magiskinit",
-        "mkdir 0750 overlay.d",
-        "mkdir 0750 overlay.d/sbin",
-        "add 0644 overlay.d/sbin/magisk.xz magisk.xz",
-        "add 0644 overlay.d/sbin/stub.xz stub.xz",
-        "add 0644 overlay.d/sbin/init-ld.xz init-ld.xz",
-        "patch",
-        "backup ramdisk.cpio.orig",
-        "mkdir 000 .backup",
-        "add 000 .backup/.magisk config",
-    ];
+    let cpio_cmds = magisk_cpio_commands(has_stub);
     boot::cpio_with_env(
         work_dir,
         ramdisk_name,
-        cpio_cmds,
+        &cpio_cmds,
         &[
             ("KEEPVERITY", "true"),
             ("KEEPFORCEENCRYPT", "true"),
@@ -464,6 +482,41 @@ mod tests {
             resolve_preinit_device(&info, "file").as_deref(),
             Some("metadata")
         );
+    }
+
+    #[test]
+    fn stub_entry_is_added_only_when_the_package_has_a_stub() {
+        let stub = "add 0644 overlay.d/sbin/stub.xz stub.xz";
+        assert!(magisk_cpio_commands(true).contains(&stub));
+        let without = magisk_cpio_commands(false);
+        assert!(!without.contains(&stub));
+        assert_eq!(without.first(), Some(&"add 0750 init magiskinit"));
+        assert_eq!(without.last(), Some(&"add 000 .backup/.magisk config"));
+    }
+
+    #[test]
+    fn package_without_a_stub_extracts_and_clears_an_old_stub() {
+        use std::io::Write;
+        let directory = tempfile::tempdir().unwrap();
+        let apk = directory.path().join("magisk.apk");
+        let mut writer = zip::ZipWriter::new(std::fs::File::create(&apk).unwrap());
+        let options = zip::write::SimpleFileOptions::default()
+            .compression_method(zip::CompressionMethod::Stored);
+        for name in [
+            "lib/arm64-v8a/libmagisk.so",
+            "lib/arm64-v8a/libmagiskinit.so",
+            "lib/arm64-v8a/libinit-ld.so",
+        ] {
+            writer.start_file(name, options).unwrap();
+            writer.write_all(name.as_bytes()).unwrap();
+        }
+        writer.finish().unwrap();
+        let staging = directory.path().join("staging");
+        std::fs::create_dir(&staging).unwrap();
+        std::fs::write(staging.join(STUB_APK), b"old stub").unwrap();
+        extract_apk_payload(&apk, &staging).unwrap();
+        assert!(staging.join("magiskinit").is_file());
+        assert!(!staging.join(STUB_APK).exists());
     }
 
     #[test]
