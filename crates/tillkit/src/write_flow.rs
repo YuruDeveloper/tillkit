@@ -34,6 +34,24 @@ impl WriteFlow {
         *self = self.folder.take().map(Self::for_folder).unwrap_or_default();
     }
 
+    pub fn write_is_uncertain(&self) -> bool {
+        let write_failed = matches!(&self.failure, Some((WriteStep::Write, _)));
+        let unsettled = self.outcome.as_ref().is_some_and(|outcome| {
+            !self.write_verified() && outcome.state != ApplyState::RollbackVerified
+        });
+        write_failed || unsettled
+    }
+
+    pub fn can_start_over(&self) -> bool {
+        self.running.is_none() && self.has_result() && !self.write_is_uncertain()
+    }
+
+    pub fn full_backup_changed(&mut self) {
+        if self.kind == Some(Ok(WriteKind::Gsi)) && self.running.is_none() {
+            self.start_over();
+        }
+    }
+
     pub fn image(&self) -> Option<(WriteKind, PathBuf)> {
         let kind = self.kind?.ok()?;
         let folder = self.folder.as_ref()?;
@@ -335,6 +353,77 @@ mod tests {
             assert_eq!(flow.status(step), StepStatus::Closed);
         }
         assert_eq!(flow.focus_step(), WriteStep::Prepare);
+    }
+
+    #[test]
+    fn doc_1053_a_write_without_a_known_result_cannot_start_over() {
+        let mut failed = staged();
+        failed.failure = Some((WriteStep::Write, "the connection closed".into()));
+        assert!(failed.write_is_uncertain() && !failed.can_start_over());
+        for (state, matches) in [
+            (ApplyState::NotStarted, false),
+            (ApplyState::Writing("WRITING_VBMETA".into()), false),
+            (ApplyState::ApplyFailedRestoring, false),
+            (ApplyState::RollbackFailedDoNotReboot, false),
+            (ApplyState::Unrecognized("garbage".into()), false),
+            (ApplyState::VerifiedPendingReboot, false),
+        ] {
+            let mut flow = staged();
+            flow.outcome = Some(outcome(state.clone(), matches));
+            assert!(flow.write_is_uncertain(), "{state:?}");
+            assert!(!flow.can_start_over(), "{state:?}");
+        }
+    }
+
+    #[test]
+    fn doc_1053_a_known_result_can_start_over() {
+        let unapproved = {
+            let mut flow = chosen(WriteKind::RootImage);
+            flow.review = Some(review());
+            flow
+        };
+        let mut upload_failed = approved();
+        upload_failed.failure = Some((WriteStep::Stage, "push failed".into()));
+        let mut rolled_back = staged();
+        rolled_back.outcome = Some(outcome(ApplyState::RollbackVerified, false));
+        let mut verified = staged();
+        verified.outcome = Some(outcome(ApplyState::VerifiedPendingReboot, true));
+        let mut reboot_failed = staged();
+        reboot_failed.outcome = Some(outcome(ApplyState::VerifiedPendingReboot, true));
+        reboot_failed.failure = Some((WriteStep::Reboot, "no device".into()));
+        for flow in [
+            unapproved,
+            upload_failed,
+            rolled_back,
+            verified,
+            reboot_failed,
+        ] {
+            assert!(!flow.write_is_uncertain(), "{flow:?}");
+            assert!(flow.can_start_over(), "{flow:?}");
+        }
+        let mut running = staged();
+        running.running = Some(WriteStep::Write);
+        assert!(!running.can_start_over());
+        assert!(!chosen(WriteKind::RootImage).can_start_over(), "no result");
+    }
+
+    #[test]
+    fn doc_1053_a_new_full_backup_drops_the_gsi_result_only() {
+        let mut gsi = chosen(WriteKind::Gsi);
+        gsi.failure = Some((WriteStep::Prepare, "the backup has no super".into()));
+        gsi.full_backup_changed();
+        assert!(gsi.failure.is_none());
+        assert_eq!(gsi.folder, Some(PathBuf::from("images")));
+
+        let mut planning = chosen(WriteKind::Gsi);
+        planning.running = Some(WriteStep::Prepare);
+        planning.full_backup_changed();
+        assert_eq!(planning.running, Some(WriteStep::Prepare));
+
+        let mut pair = staged();
+        pair.outcome = Some(outcome(ApplyState::Writing("WRITING_VBMETA".into()), false));
+        pair.full_backup_changed();
+        assert!(pair.outcome.is_some() && pair.review.is_some());
     }
 
     #[test]

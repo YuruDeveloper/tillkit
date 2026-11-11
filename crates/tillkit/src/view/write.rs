@@ -29,6 +29,7 @@ const DO_NOT_REBOOT: &str =
 const NO_FINAL_STATE: &str =
     "기기가 마지막 상태를 알려 주지 않았습니다. 기기를 다시 시작하지 말고 전원을 유지해 주세요.";
 const INSTALL_PLANNED: &str = "GSI 설치 계획을 만들어 아래 폴더에 저장했습니다. 이 계획을 기기에 기록하는 일은 아직 지원하지 않습니다.";
+const NO_NEW_START: &str = "결과를 확인하지 못한 기록이 있어서, 이 화면에서는 새로 시작하지 않습니다. 기기의 전원을 유지한 채로 기기의 상태를 먼저 확인해 주세요.";
 const STATUS_WIDTH: f32 = 120.0;
 
 pub fn view(app: &App) -> Element<'_, Message> {
@@ -59,9 +60,12 @@ pub fn view(app: &App) -> Element<'_, Message> {
     if let Some(install) = &flow.install {
         page = page.push(install_block(install, palette));
     }
-    if flow.has_result() && !app.is_busy() {
+    if flow.can_start_over() && !app.is_busy() {
         let start_over = Message::Write(WriteMessage::StartOver);
         page = page.push(parts::bracket("START OVER", Some(start_over), palette));
+    }
+    if flow.write_is_uncertain() && !app.is_busy() {
+        page = page.push(parts::body(NO_NEW_START, palette));
     }
     page.into()
 }

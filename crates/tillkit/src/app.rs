@@ -237,6 +237,7 @@ impl App {
         };
         self.full_backup_found = folder.join(BACKUP_MANIFEST_FILE).is_file();
         self.full_backup = Some(folder);
+        self.write.full_backup_changed();
     }
 }
 

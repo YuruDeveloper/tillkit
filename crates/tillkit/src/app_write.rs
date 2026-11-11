@@ -75,7 +75,7 @@ impl App {
     }
 
     fn start_over(&mut self) {
-        if !self.is_busy() {
+        if !self.is_busy() && self.write.can_start_over() {
             self.write.start_over();
         }
     }
