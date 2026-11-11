@@ -27,11 +27,6 @@ impl VbmetaOwner {
             Self::VbmetaSystem => "vbmeta_system.img",
         }
     }
-
-    pub fn lun(self) -> Result<u8> {
-        ltbox_core::partition_lun::lun_for_partition(self.partition_base())
-            .ok_or_else(|| LtboxError::Avb(format!("No LUN for {}", self.partition_base())))
-    }
 }
 
 fn target_hash_count(descriptors: &[avbtool_rs::info::DescriptorInfo], target: &str) -> usize {
@@ -138,18 +133,12 @@ pub struct AvbImageInfo {
 }
 
 /// The Android build fingerprint embedded in an image's AVB property
-/// descriptors (`com.android.build.<part>.fingerprint`, e.g.
-/// `qti/TB323FU/...:user/release-keys`), if present. Used to identify the
-/// firmware an image belongs to.
+/// descriptors (`com.android.build.<part>.fingerprint`), if present. Used to
+/// identify the firmware an image belongs to.
 ///
-/// Custom ROMs name the device codename rather than the model in most of these
-/// values, while a few (a stock vendor blob, `pvmfw`) keep the model token, so
-/// the choice prefers one that names a known model:
 /// 1. `com.android.build.system.fingerprint` (carried by vbmeta_system, the
-///    unified identity source) when it names a known model;
-/// 2. otherwise the first `.fingerprint` prop, in descriptor order, that does;
-/// 3. otherwise `com.android.build.system.fingerprint`;
-/// 4. otherwise the first `.fingerprint` prop.
+///    unified identity source);
+/// 2. otherwise the first `.fingerprint` prop, in descriptor order.
 ///
 /// Empty values are ignored throughout.
 pub fn build_fingerprint(info: &AvbImageInfo) -> Option<String> {
@@ -158,25 +147,11 @@ pub fn build_fingerprint(info: &AvbImageInfo) -> Option<String> {
         .iter()
         .filter(|(k, _)| k == "com.android.build.system.fingerprint")
         .find_map(|(_, v)| fingerprint_value(v));
-    if let Some(system) = &system
-        && ltbox_core::model::fingerprint_names_known_model(system)
-    {
-        return Some(system.clone());
-    }
-    let mut first = None;
-    for (_, value) in info
+    let first = info
         .props
         .iter()
         .filter(|(k, _)| k.ends_with(".fingerprint"))
-    {
-        let Some(value) = fingerprint_value(value) else {
-            continue;
-        };
-        if ltbox_core::model::fingerprint_names_known_model(&value) {
-            return Some(value);
-        }
-        first.get_or_insert(value);
-    }
+        .find_map(|(_, v)| fingerprint_value(v));
     system.or(first)
 }
 
@@ -649,52 +624,6 @@ fn preserve_original_vbmeta_size(output_path: &Path, original_vbmeta_path: &Path
     Ok(())
 }
 
-/// Restore the complete signed stock blob without changing its authenticated
-/// descriptors. GBL tolerates the stale content digest, but requires the stock
-/// key and internally consistent authentication data. Keep the repacked payload
-/// boundary and relocate only the blob; never copy the stock payload size back.
-pub fn preserve_stock_vbmeta(stock: &Path, repacked: &Path) -> Result<()> {
-    use avbtool_rs::parser::{AVB_FOOTER_SIZE, AvbFooter};
-    use std::io::{Read, Seek, SeekFrom, Write};
-    let blob = avbtool_rs::image::load_vbmeta_blob(stock)
-        .map_err(|e| LtboxError::Avb(format!("load stock vbmeta: {e}")))?;
-    let mut file = fs::OpenOptions::new()
-        .read(true)
-        .write(true)
-        .open(repacked)?;
-    let size = file.metadata()?.len();
-    let footer_offset = size
-        .checked_sub(AVB_FOOTER_SIZE)
-        .ok_or_else(|| LtboxError::Avb("Repacked image has no AVB footer".into()))?;
-    file.seek(SeekFrom::Start(footer_offset))?;
-    let mut bytes = vec![0; AVB_FOOTER_SIZE as usize];
-    file.read_exact(&mut bytes)?;
-    let mut footer = AvbFooter::from_reader(bytes.as_slice())
-        .map_err(|e| LtboxError::Avb(format!("read repacked footer: {e}")))?;
-    let end = footer.vbmeta_offset.checked_add(blob.len() as u64);
-    if footer.original_image_size > footer.vbmeta_offset
-        || footer
-            .vbmeta_offset
-            .checked_add(footer.vbmeta_size)
-            .is_none_or(|end| end > footer_offset)
-        || end.is_none_or(|end| end > footer_offset)
-    {
-        return Err(LtboxError::Avb(
-            "Stock vbmeta does not fit the repacked image footer layout".into(),
-        ));
-    }
-    footer.vbmeta_size = blob.len() as u64;
-    // All bounds are checked before modifying the output. Truncate old metadata
-    // and zero-fill padding so a larger repacked blob cannot leave stale bytes.
-    file.set_len(footer.vbmeta_offset)?;
-    file.seek(SeekFrom::Start(footer.vbmeta_offset))?;
-    file.write_all(&blob)?;
-    file.set_len(size)?;
-    file.seek(SeekFrom::Start(footer_offset))?;
-    file.write_all(&avbtool_rs::image::encode_footer(&footer))?;
-    Ok(())
-}
-
 /// Add hash footer. `key_spec` follows [`resign_image`]; pass `None`
 /// for the NONE-algorithm path (no signing).
 pub fn add_hash_footer(
@@ -787,7 +716,7 @@ pub fn add_hash_footer(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{key_map, region};
+    use crate::key_map;
 
     fn write_hash_footer_fixture(
         image_path: &Path,
@@ -825,56 +754,6 @@ mod tests {
             },
         )
         .unwrap();
-    }
-
-    #[test]
-    fn stock_signed_blob_survives_payload_growth_without_resigning() {
-        for key in ["testkey_rsa2048", "testkey_rsa4096"] {
-            let temp = tempfile::tempdir().unwrap();
-            let stock = temp.path().join("stock.img");
-            let output = temp.path().join("output.img");
-            write_hash_footer_fixture(&stock, "sha256", Vec::new());
-            let mut info = extract_image_avb_info(&stock).unwrap();
-            info.algorithm = algorithm_for_key_spec(key).unwrap();
-            add_hash_footer(&stock, &info, Some(key), None).unwrap();
-            let original = avbtool_rs::image::load_vbmeta_blob(&stock).unwrap();
-            // A larger replacement payload moves the footer boundary. Rebuild
-            // unsigned metadata to also exercise a different vbmeta size.
-            let payload = vec![0x42; 8192];
-            fs::write(&output, &payload).unwrap();
-            info.algorithm = "NONE".into();
-            add_hash_footer(&output, &info, None, None).unwrap();
-            let before = avbtool_rs::image::inspect_avb_image(&output)
-                .unwrap()
-                .footer
-                .unwrap();
-            preserve_stock_vbmeta(&stock, &output).unwrap();
-            assert_eq!(
-                avbtool_rs::image::load_vbmeta_blob(&output).unwrap(),
-                original
-            );
-            assert_eq!(&fs::read(&output).unwrap()[..payload.len()], &payload);
-            let after = avbtool_rs::image::inspect_avb_image(&output)
-                .unwrap()
-                .footer
-                .unwrap();
-            assert_eq!(after.original_image_size, before.original_image_size);
-            assert_eq!(after.vbmeta_offset, before.vbmeta_offset);
-            assert_eq!(after.vbmeta_size, original.len() as u64);
-            assert_eq!(fs::metadata(&output).unwrap().len(), info.partition_size);
-        }
-    }
-
-    #[test]
-    fn stock_blob_restore_rejects_missing_footer_without_modifying_payload() {
-        let temp = tempfile::tempdir().unwrap();
-        let stock = temp.path().join("stock.img");
-        let output = temp.path().join("output.img");
-        write_hash_footer_fixture(&stock, "sha256", Vec::new());
-        let payload = vec![0x42; 8192];
-        fs::write(&output, &payload).unwrap();
-        assert!(preserve_stock_vbmeta(&stock, &output).is_err());
-        assert_eq!(fs::read(&output).unwrap(), payload);
     }
 
     #[test]
@@ -926,7 +805,7 @@ mod tests {
             hash_descriptor_count: 1,
             unreproducible_descriptor_kinds: Vec::new(),
         };
-        let mut value = b"Lenovo/TB323FU/TB323FU:16/BQ2A/x:user/release-keys".to_vec();
+        let mut value = b"vendor/device/device:16/BQ2A/x:user/release-keys".to_vec();
         value.push(0); // trailing NUL like the on-disk descriptor
         let info = make(vec![
             (
@@ -937,7 +816,7 @@ mod tests {
         ]);
         assert_eq!(
             build_fingerprint(&info).as_deref(),
-            Some("Lenovo/TB323FU/TB323FU:16/BQ2A/x:user/release-keys")
+            Some("vendor/device/device:16/BQ2A/x:user/release-keys")
         );
         // No fingerprint property → None.
         assert_eq!(
@@ -950,7 +829,7 @@ mod tests {
     }
 
     #[test]
-    fn build_fingerprint_prefers_a_prop_naming_a_known_model() {
+    fn build_fingerprint_prefers_the_system_prop_then_the_first_prop() {
         let info = |props: &[(&str, &str)]| AvbImageInfo {
             partition_size: 0,
             original_image_size: None,
@@ -970,58 +849,34 @@ mod tests {
             hash_descriptor_count: 0,
             unreproducible_descriptor_kinds: Vec::new(),
         };
-        let baldur = "Lenovo/lineage_baldur/baldur:17/CP2A/eng:userdebug/test-keys";
-        let stock = "Lenovo/TB323FU/TB323FU:17/CP2A/x:user/release-keys";
-        let pvmfw = "qti/TB323FU/TB323FU:16/BQ2A/x:user/release-keys";
-        let unknown = "Lenovo/lineage_foo/foo:17/CP2A/eng:userdebug/test-keys";
+        let system = "vendor/device/device:17/CP2A/x:user/release-keys";
+        let other = "vendor/lineage_foo/foo:17/CP2A/eng:userdebug/test-keys";
 
-        // The system fingerprint names a model: it wins even when listed last.
         assert_eq!(
             build_fingerprint(&info(&[
-                ("boot.fingerprint", unknown),
-                ("system.fingerprint", stock),
+                ("boot.fingerprint", other),
+                ("system.fingerprint", system),
             ]))
             .as_deref(),
-            Some(stock)
+            Some(system)
         );
-        // System names no known model; the first prop that does is chosen.
         assert_eq!(
             build_fingerprint(&info(&[
-                ("system.fingerprint", unknown),
-                ("system_ext.fingerprint", unknown),
-                ("pvmfw.fingerprint", pvmfw),
-                ("dataext.fingerprint", stock),
+                ("system.fingerprint", " "),
+                ("boot.fingerprint", other),
             ]))
             .as_deref(),
-            Some(pvmfw)
-        );
-        // A codename counts as naming a known model.
-        assert_eq!(
-            build_fingerprint(&info(&[
-                ("system.fingerprint", unknown),
-                ("product.fingerprint", baldur),
-            ]))
-            .as_deref(),
-            Some(baldur)
-        );
-        // Nothing names a model: system, regardless of order.
-        assert_eq!(
-            build_fingerprint(&info(&[
-                ("boot.fingerprint", "other/x/x:1/b"),
-                ("system.fingerprint", unknown),
-            ]))
-            .as_deref(),
-            Some(unknown)
+            Some(other)
         );
         // No system prop: the first prop. Empty values are ignored.
         assert_eq!(
             build_fingerprint(&info(&[
                 ("boot.fingerprint", " "),
-                ("vendor.fingerprint", unknown),
+                ("vendor.fingerprint", other),
                 ("dtbo.fingerprint", "other/x/x:1/b"),
             ]))
             .as_deref(),
-            Some(unknown)
+            Some(other)
         );
     }
 
@@ -1188,16 +1043,7 @@ mod tests {
             }
 
             let vendor_boot_info = extract_image_avb_info(&vendor_boot).unwrap();
-            let patterns = region::RegionPatternSet::default();
-            let replaced = region::patch_vendor_boot(
-                &vendor_boot,
-                &patched_vendor_boot,
-                region::RegionTarget::Prc,
-                &patterns.prc_patterns,
-                &patterns.row_patterns,
-            )
-            .unwrap();
-            assert!(replaced > 0);
+            fs::copy(&vendor_boot, &patched_vendor_boot).unwrap();
             add_hash_footer(&patched_vendor_boot, &vendor_boot_info, None, None).unwrap();
 
             let vbmeta_info = extract_image_avb_info(&vbmeta).unwrap();

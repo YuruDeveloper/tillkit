@@ -328,7 +328,7 @@ pub use self::unsupported::{check_driver_update, check_required_drivers, downloa
 /// up-to-date install apart from a missing, stale, or hand-edited one. Same
 /// source file the GUI's `--install-udev` writer embeds.
 #[cfg(any(target_os = "linux", test))]
-pub(crate) const UDEV_RULES: &str = include_str!("../../../../misc/udev/51-ltbox-qcom.rules");
+pub(crate) const UDEV_RULES: &str = include_str!("../../udev/51-ltbox-qcom.rules");
 
 /// Classify installed udev rules against [`UDEV_RULES`]. `installed` is the
 /// file's content (`None` = file absent). Pure, so it is unit-tested on any

@@ -48,8 +48,6 @@ fn owner_decision_accepts_old_and_new_layouts() {
         avb::decide_root_vbmeta_owner("init_boot", &[hash("init_boot")], None).unwrap(),
         VbmetaOwner::Vbmeta
     );
-    assert_eq!(VbmetaOwner::Vbmeta.lun().unwrap(), 4);
-    assert_eq!(VbmetaOwner::VbmetaSystem.lun().unwrap(), 0);
 }
 
 #[test]
@@ -375,7 +373,7 @@ fn a17_root_pipeline_outputs_only_the_detected_system_owner() {
         nightly_run_id: None,
         release_tag: None,
     };
-    let artifacts = build_patched_artifacts(&config, false, &mut Vec::new()).unwrap();
+    let artifacts = build_patched_artifacts(&config, &mut Vec::new()).unwrap();
     assert_eq!(
         artifacts.vbmeta_partition.as_deref(),
         Some("vbmeta_system_b")

@@ -1,0 +1,23 @@
+[package]
+name = "tillkit"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "tillkit"
+path = "src/main.rs"
+
+[dependencies]
+front2 = { path = "../front2" }
+ltbox-device = { path = "../ltbox-device" }
+iced = { workspace = true }
+rfd = { workspace = true }
+tokio = { workspace = true }
+dirs = { workspace = true }
+dark-light = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+
+[dev-dependencies]
+tempfile = "3"

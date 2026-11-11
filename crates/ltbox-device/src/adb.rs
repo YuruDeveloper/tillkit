@@ -1,6 +1,16 @@
-//! ADB client via `adb_client` crate's `usb` feature — direct libusb
-//! transport, no background `adb.exe` daemon on `localhost:5037`.
+//! ADB client via the `adb_client` crate.
+//!
+//! Two transports are available and `AdbManager` selects one on each
+//! connect:
+//!
+//! - An external adb server on `localhost:5037`, when one is running and
+//!   it lists a device. The server owns the USB interface, so LTBox
+//!   sends its requests through the server and can run next to
+//!   `adb.exe`, scrcpy or Android Studio.
+//! - Direct libusb (`usb` feature) in all other cases. LTBox never
+//!   starts an adb server itself.
 
+use adb_client::server_device::ADBServerDevice;
 use adb_client::usb::{ADBUSBDevice, find_all_connected_adb_devices};
 use adb_client::{ADBDeviceExt, RebootType};
 use rsa::pkcs8::{DecodePrivateKey, EncodePrivateKey, LineEnding};
@@ -12,6 +22,14 @@ use thiserror::Error;
 
 const ADB_SERVER_ADDR: SocketAddrV4 = SocketAddrV4::new(Ipv4Addr::LOCALHOST, 5037);
 const ADB_SERVER_PROBE_TIMEOUT: Duration = Duration::from_millis(150);
+/// Read / write bound for one `host:devices` exchange. An adb server
+/// answers this request from memory, so a slower peer is not an adb server.
+const ADB_SERVER_IO_TIMEOUT: Duration = Duration::from_secs(2);
+/// Upper bound on a `host:devices` body. A peer on port 5037 that is not
+/// an adb server can send any length prefix.
+const ADB_SERVER_MAX_DEVICES_BODY: usize = 16 * 1024;
+const MULTIPLE_SERVER_DEVICES: &str =
+    "Multiple ADB devices found on the adb server. Disconnect other devices and try again.";
 
 /// Probe whether an `adb.exe` server (or any other process) is bound to
 /// `127.0.0.1:5037`. A live listener there claims the Android USB
@@ -22,6 +40,130 @@ const ADB_SERVER_PROBE_TIMEOUT: Duration = Duration::from_millis(150);
 /// server.
 pub fn adb_server_running() -> bool {
     TcpStream::connect_timeout(&ADB_SERVER_ADDR.into(), ADB_SERVER_PROBE_TIMEOUT).is_ok()
+}
+
+/// One line of the adb server's `host:devices` reply.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct ServerDevice {
+    serial: String,
+    state: String,
+}
+
+/// What the adb server at the probed address can offer.
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum ServerProbe {
+    /// No adb server answered, or it lists no device. Use libusb.
+    Absent,
+    Single(ServerDevice),
+    Multiple,
+}
+
+/// Ask the adb server for its device list with a raw `host:devices`
+/// request. `adb_client::server::ADBServer` is not used here because its
+/// connect path runs `adb start-server` on each call, and LTBox must only
+/// use a server that the user already started.
+fn list_server_devices(address: SocketAddrV4) -> Result<Vec<ServerDevice>> {
+    let mut stream = TcpStream::connect_timeout(&address.into(), ADB_SERVER_PROBE_TIMEOUT)
+        .map_err(|error| AdbError::Client(format!("adb server not reachable: {error}")))?;
+    stream
+        .set_write_timeout(Some(ADB_SERVER_IO_TIMEOUT))
+        .and_then(|()| stream.set_read_timeout(Some(ADB_SERVER_IO_TIMEOUT)))
+        .map_err(|error| AdbError::Client(format!("adb server socket timeout: {error}")))?;
+    let payload = b"host:devices";
+    let header = format!("{:04x}", payload.len());
+    stream
+        .write_all(header.as_bytes())
+        .and_then(|()| stream.write_all(payload))
+        .map_err(|error| AdbError::Client(format!("write host:devices: {error}")))?;
+
+    let mut status = [0u8; 4];
+    stream
+        .read_exact(&mut status)
+        .map_err(|error| AdbError::Client(format!("read host:devices status: {error}")))?;
+    if &status != b"OKAY" {
+        return Err(AdbError::Client(format!(
+            "unexpected reply to host:devices: {:?}",
+            String::from_utf8_lossy(&status)
+        )));
+    }
+    let mut length_buffer = [0u8; 4];
+    stream
+        .read_exact(&mut length_buffer)
+        .map_err(|error| AdbError::Client(format!("read host:devices length: {error}")))?;
+    let length = std::str::from_utf8(&length_buffer)
+        .ok()
+        .and_then(|text| usize::from_str_radix(text, 16).ok())
+        .filter(|length| *length <= ADB_SERVER_MAX_DEVICES_BODY)
+        .ok_or_else(|| AdbError::Client("invalid host:devices length".into()))?;
+    let mut body = vec![0u8; length];
+    stream
+        .read_exact(&mut body)
+        .map_err(|error| AdbError::Client(format!("read host:devices body: {error}")))?;
+    Ok(parse_server_devices(&String::from_utf8_lossy(&body)))
+}
+
+/// Parse `<serial>\t<state>` lines. Lines without both fields are skipped.
+fn parse_server_devices(body: &str) -> Vec<ServerDevice> {
+    body.lines()
+        .filter_map(|line| {
+            let (serial, state) = line.split_once('\t')?;
+            let (serial, state) = (serial.trim(), state.trim());
+            (!serial.is_empty() && !state.is_empty()).then(|| ServerDevice {
+                serial: serial.to_string(),
+                state: state.to_string(),
+            })
+        })
+        .collect()
+}
+
+/// A server that cannot be reached or does not speak the adb host
+/// protocol counts as `Absent`, so the caller continues with libusb.
+/// Devices in a state without a token (`offline`, `noperm`, ...) are
+/// ignored for the same reason: the server cannot use them, and the
+/// libusb path then reports `"adb_server_blocking"` so the user can stop
+/// the server.
+fn probe_server(address: SocketAddrV4) -> ServerProbe {
+    let Ok(mut devices) = list_server_devices(address) else {
+        return ServerProbe::Absent;
+    };
+    devices.retain(|device| server_state_token(&device.state).is_some());
+    match devices.len() {
+        0 => ServerProbe::Absent,
+        1 => ServerProbe::Single(devices.remove(0)),
+        _ => ServerProbe::Multiple,
+    }
+}
+
+/// Map an adb server device state to the token `check_device_state`
+/// reports. States that the server cannot use (`offline`, `connecting`,
+/// `noperm`, ...) map to `None`.
+fn server_state_token(state: &str) -> Option<&'static str> {
+    match state {
+        "device" => Some("device"),
+        "recovery" => Some("recovery"),
+        "sideload" | "rescue" => Some("sideload"),
+        "unauthorized" | "authorizing" => Some("unauthorized"),
+        _ => None,
+    }
+}
+
+fn server_state_is_usable(state: &str) -> bool {
+    matches!(server_state_token(state), Some("device" | "recovery"))
+}
+
+/// State token for a device that is visible but refused the connect.
+///
+/// A live external adb server on 127.0.0.1:5037 holds the Android USB
+/// interface exclusively → our libusb claim returns `LIBUSB_ERROR_BUSY`.
+/// Surface that as a distinct state so the dashboard can offer "kill
+/// server" instead of misleading the user into tapping "Allow USB
+/// debugging" again.
+fn connect_failure_token() -> &'static str {
+    if adb_server_running() {
+        "adb_server_blocking"
+    } else {
+        "unauthorized"
+    }
 }
 
 /// Send the raw `host:kill` ADB protocol message to `127.0.0.1:5037` to
@@ -117,13 +259,87 @@ const WAIT_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(120);
 const CONNECT_RETRY_ATTEMPTS: u32 = 10;
 const CONNECT_RETRY_BACKOFF: std::time::Duration = std::time::Duration::from_millis(150);
 
+/// The open connection to a device: direct libusb, or through the
+/// external adb server.
+enum Transport {
+    Usb(ADBUSBDevice),
+    Server(ADBServerDevice),
+}
+
+impl Transport {
+    fn device(&mut self) -> &mut dyn ADBDeviceExt {
+        match self {
+            Self::Usb(device) => device,
+            Self::Server(device) => device,
+        }
+    }
+
+    fn is_server(&self) -> bool {
+        matches!(self, Self::Server(_))
+    }
+}
+
+/// Open the transport the probe selected: the adb server when it lists
+/// exactly one usable device, libusb when it lists none.
+fn open_transport(probe: ServerProbe, server_address: SocketAddrV4) -> Result<Transport> {
+    match probe {
+        ServerProbe::Single(device) if server_state_is_usable(&device.state) => Ok(
+            Transport::Server(ADBServerDevice::new(device.serial, Some(server_address))),
+        ),
+        ServerProbe::Single(device) => Err(AdbError::Client(format!(
+            "ADB device {} is {}",
+            device.serial, device.state
+        ))),
+        ServerProbe::Multiple => Err(AdbError::Client(MULTIPLE_SERVER_DEVICES.into())),
+        ServerProbe::Absent => open_usb_device().map(Transport::Usb),
+    }
+}
+
+fn open_usb_device() -> Result<ADBUSBDevice> {
+    let key_path = AdbManager::ensure_key_path()?;
+    // Retry the libusb claim a few times — see
+    // `CONNECT_RETRY_ATTEMPTS` for the race rationale. A fresh
+    // `autodetect_with_custom_private_key` per attempt also
+    // re-runs Android-descriptor filtering so a replug between
+    // attempts is picked up automatically.
+    let mut last_error = String::from("ADB USB open failed");
+    for attempt in 0..CONNECT_RETRY_ATTEMPTS {
+        if attempt > 0 {
+            std::thread::sleep(CONNECT_RETRY_BACKOFF);
+        }
+        match ADBUSBDevice::autodetect_with_custom_private_key(key_path.clone()) {
+            Ok(device) => return Ok(device),
+            Err(error) => last_error = error.to_string(),
+        }
+    }
+    Err(AdbError::Client(last_error))
+}
+
+/// Read the user-facing serial from a freshly opened handle. This runs
+/// before the handle is cached: `shell_inner` would route through
+/// `drop_device` on any shell-side failure (recovery adbd that
+/// auth-handshakes but doesn't respond to shell), which would invalidate
+/// the device before the caller gets it.
+fn read_serial(transport: &mut Transport) -> Option<String> {
+    let mut stdout = Vec::new();
+    let _ = transport.device().shell_command(
+        &"getprop ro.serialno",
+        Some(&mut stdout as &mut dyn std::io::Write),
+        None,
+    );
+    let serial = String::from_utf8_lossy(&stdout).trim().to_string();
+    (!serial.is_empty()).then_some(serial)
+}
+
 pub struct AdbManager {
     serial: Option<String>,
-    /// Cached USB device handle — lazy, populated on first successful
+    /// Cached device handle — lazy, populated on first successful
     /// `connect_device`. Reused so the RSA auth handshake only fires
     /// once per `AdbManager` lifetime. Dropped on any I/O error so a
     /// replug always recovers.
-    device: Option<ADBUSBDevice>,
+    device: Option<Transport>,
+    /// Address of the external adb server to probe.
+    server_address: SocketAddrV4,
     /// Cached `getprop ro.bootmode` from the first successful connect.
     /// `Some("recovery")` promotes the reported state from "device" to
     /// "recovery" so `poll_active_slot` and the Dashboard chip see the
@@ -133,9 +349,14 @@ pub struct AdbManager {
 
 impl AdbManager {
     pub fn new() -> Self {
+        Self::with_server_address(ADB_SERVER_ADDR)
+    }
+
+    fn with_server_address(server_address: SocketAddrV4) -> Self {
         Self {
             serial: None,
             device: None,
+            server_address,
             cached_bootmode: None,
         }
     }
@@ -176,58 +397,62 @@ impl AdbManager {
     /// way the legacy server path did. USB descriptor VID:PID is too
     /// coarse to identify a specific device when multiple of the same
     /// model are around.
-    fn connect_device(&mut self) -> Result<&mut ADBUSBDevice> {
+    fn connect_device(&mut self) -> Result<&mut dyn ADBDeviceExt> {
+        self.connect_probed(None)
+    }
+
+    /// `connect_device` for a caller that already probed the adb server,
+    /// so one poll makes one `host:devices` request. `None` probes here,
+    /// and only when no handle is cached.
+    fn connect_probed(&mut self, probe: Option<ServerProbe>) -> Result<&mut dyn ADBDeviceExt> {
         crate::selection::ensure_single_usb_target()
             .map_err(|e| AdbError::Client(e.to_string()))?;
         if self.device.is_none() {
-            let key_path = Self::ensure_key_path()?;
-            // Retry the libusb claim a few times — see
-            // `CONNECT_RETRY_ATTEMPTS` for the race rationale. A fresh
-            // `autodetect_with_custom_private_key` per attempt also
-            // re-runs Android-descriptor filtering so a replug between
-            // attempts is picked up automatically.
-            let mut last_err: Option<String> = None;
-            for attempt in 0..CONNECT_RETRY_ATTEMPTS {
-                match ADBUSBDevice::autodetect_with_custom_private_key(key_path.clone()) {
-                    Ok(mut dev) => {
-                        // Stamp the user-facing serial inline on the
-                        // freshly opened handle. Calling out to
-                        // `shell_inner` would route through
-                        // `drop_device` on any shell-side failure
-                        // (recovery adbd that auth-handshakes but
-                        // doesn't respond to shell), which would
-                        // invalidate the device we just opened before
-                        // we'd had a chance to hand it back. Pulling
-                        // the shell directly here keeps the
-                        // `self.device = Some(dev)` move atomic with
-                        // the `return Ok(...)`.
-                        let mut stdout = Vec::new();
-                        let _ = dev.shell_command(
-                            &"getprop ro.serialno",
-                            Some(&mut stdout as &mut dyn std::io::Write),
-                            None,
-                        );
-                        let serial = String::from_utf8_lossy(&stdout).trim().to_string();
-                        if !serial.is_empty() {
-                            self.serial = Some(serial);
-                        }
-                        self.cached_bootmode = None;
-                        self.device = Some(dev);
-                        return Ok(self.device.as_mut().expect("device just set"));
-                    }
-                    Err(e) => {
-                        last_err = Some(e.to_string());
-                        if attempt + 1 < CONNECT_RETRY_ATTEMPTS {
-                            std::thread::sleep(CONNECT_RETRY_BACKOFF);
-                        }
-                    }
-                }
-            }
-            return Err(AdbError::Client(
-                last_err.unwrap_or_else(|| "ADB USB open failed".into()),
-            ));
+            let probe = probe.unwrap_or_else(|| probe_server(self.server_address));
+            let mut transport = open_transport(probe, self.server_address)?;
+            self.serial = read_serial(&mut transport).or(self.serial.take());
+            self.cached_bootmode = None;
+            self.device = Some(transport);
         }
-        Ok(self.device.as_mut().expect("device cached"))
+        Ok(self.device.as_mut().expect("device cached").device())
+    }
+
+    /// Find which transport can see a device. `Ok(None)` means neither
+    /// the adb server nor libusb sees one. A cached handle of the other
+    /// transport is dropped, because a server that started or stopped
+    /// after the last connect invalidates it.
+    fn probe_presence(&mut self) -> Result<Option<ServerProbe>> {
+        let probe = probe_server(self.server_address);
+        let uses_server = probe != ServerProbe::Absent;
+        if self
+            .device
+            .as_ref()
+            .is_some_and(|transport| transport.is_server() != uses_server)
+        {
+            self.drop_device();
+        }
+        if uses_server {
+            return Ok(Some(probe));
+        }
+        // Cheap presence probe before paying for an auth attempt — if
+        // libusb sees nothing, no point handshaking.
+        let infos =
+            find_all_connected_adb_devices().map_err(|e| AdbError::Client(e.to_string()))?;
+        Ok((!infos.is_empty()).then_some(probe))
+    }
+
+    fn probe_bootmode(&mut self) -> Result<&'static str> {
+        match self.shell_inner("getprop ro.bootmode") {
+            Ok(mode) if mode.trim() == "recovery" => Ok("recovery"),
+            Ok(_) => Ok("device"),
+            // The dependency discards the connect banner, so
+            // use only its exact unsupported-shell response as
+            // the minadbd-style sideload inference. Rescue uses
+            // the same response and is therefore an unavoidable
+            // false-positive until the banner is exposed.
+            Err(err) if is_sideload_shell_refusal(&err) => Ok("sideload"),
+            Err(err) => Err(err),
+        }
     }
 
     /// Drop the cached USB device handle. Called after any I/O error
@@ -240,20 +465,16 @@ impl AdbManager {
 
     /// Probe for a *fully-authorized* ADB device; updates stored serial.
     ///
-    /// Returns `true` only when libusb sees at least one Android device
-    /// AND the auth handshake succeeds. Both shell-able states (the
+    /// Returns `true` only when the adb server or libusb sees an Android
+    /// device AND it accepts commands. Both shell-able states (the
     /// regular "device" boot mode and "recovery") map to `true`
     /// because every LTBox caller treats them identically.
     pub fn check_device(&mut self) -> Result<bool> {
-        // Cheap presence probe before paying for an auth attempt — if
-        // libusb sees nothing, no point handshaking.
-        let infos =
-            find_all_connected_adb_devices().map_err(|e| AdbError::Client(e.to_string()))?;
-        if infos.is_empty() {
+        let Some(probe) = self.probe_presence()? else {
             self.drop_device();
             return Ok(false);
-        }
-        match self.connect_device() {
+        };
+        match self.connect_probed(Some(probe)) {
             Ok(_) => Ok(true),
             Err(_) => {
                 self.drop_device();
@@ -276,6 +497,15 @@ impl AdbManager {
     /// | Device visible + auth fails AND a process holds `127.0.0.1:5037` | `Ok(Some("adb_server_blocking"))` |
     /// | Device visible + auth fails AND no adb server present | `Ok(Some("unauthorized"))` |
     ///
+    /// When an external adb server lists a device, the server's own state
+    /// decides instead: `unauthorized` / `authorizing` give
+    /// `"unauthorized"`, `sideload` / `rescue` give `"sideload"`, `device`
+    /// / `recovery` continue to the bootmode probe through the server.
+    /// A device in any other server state (`offline`, ...) is ignored and
+    /// the libusb rows above apply. `"adb_server_blocking"` then means
+    /// that the server path failed too (for example the server lists
+    /// more than one device, or only an offline one).
+    ///
     /// The `sideload` row is what separates "connected but useless" from
     /// "not authorized". `adb_client` gives no access to the connect
     /// banner that names the state outright, so the state is inferred from
@@ -285,46 +515,32 @@ impl AdbManager {
     /// apart. Other shell errors are returned so transport failures cannot
     /// masquerade as a connected sideload device.
     pub fn check_device_state(&mut self) -> Result<Option<&'static str>> {
-        let infos =
-            find_all_connected_adb_devices().map_err(|e| AdbError::Client(e.to_string()))?;
-        if infos.is_empty() {
+        let Some(probe) = self.probe_presence()? else {
             self.drop_device();
             return Ok(None);
+        };
+        let server_state = match &probe {
+            ServerProbe::Single(device) => Some(device.state.as_str()),
+            ServerProbe::Multiple | ServerProbe::Absent => None,
+        };
+        let server_token = server_state.and_then(server_state_token);
+        if server_state.is_some_and(|state| !server_state_is_usable(state)) {
+            self.drop_device();
+            return Ok(server_token);
         }
-        match self.connect_device() {
-            Ok(_) => {
-                // First successful connect probes bootmode once; cache
-                // hit for subsequent state polls so the Dashboard's 3 s
-                // heartbeat doesn't re-shell every tick.
-                if self.cached_bootmode.is_none() {
-                    self.cached_bootmode = Some(match self.shell_inner("getprop ro.bootmode") {
-                        Ok(mode) if mode.trim() == "recovery" => "recovery",
-                        Ok(_) => "device",
-                        // The dependency discards the connect banner, so
-                        // use only its exact unsupported-shell response as
-                        // the minadbd-style sideload inference. Rescue uses
-                        // the same response and is therefore an unavoidable
-                        // false-positive until the banner is exposed.
-                        Err(err) if is_sideload_shell_refusal(&err) => "sideload",
-                        Err(err) => return Err(err),
-                    });
-                }
-                Ok(self.cached_bootmode)
-            }
-            Err(_) => {
-                // A live external adb server on 127.0.0.1:5037 holds the
-                // Android USB interface exclusively → our libusb claim
-                // returns `LIBUSB_ERROR_BUSY`. Surface that as a
-                // distinct state so the dashboard can offer "kill
-                // server" instead of misleading the user into tapping
-                // "Allow USB debugging" again.
-                if adb_server_running() {
-                    Ok(Some("adb_server_blocking"))
-                } else {
-                    Ok(Some("unauthorized"))
-                }
-            }
+        if self.connect_probed(Some(probe)).is_err() {
+            return Ok(Some(connect_failure_token()));
         }
+        // First successful connect probes bootmode once; cache
+        // hit for subsequent state polls so the Dashboard's 3 s
+        // heartbeat doesn't re-shell every tick.
+        if self.cached_bootmode.is_none() && server_token == Some("recovery") {
+            self.cached_bootmode = server_token;
+        }
+        if self.cached_bootmode.is_none() {
+            self.cached_bootmode = Some(self.probe_bootmode()?);
+        }
+        Ok(self.cached_bootmode)
     }
 
     /// Wait up to [`WAIT_TIMEOUT`] for a fully-authorized ADB device.
@@ -383,6 +599,25 @@ impl AdbManager {
                 Err(AdbError::CommandFailed(e.to_string()))
             }
         }
+    }
+
+    pub fn shell_with_status(&mut self, command: &str) -> Result<(String, i32)> {
+        let output = self.shell_inner(&format!("{command}\necho \"{EXIT_STATUS_MARKER}$?\""))?;
+        split_exit_status(&output).ok_or_else(|| {
+            AdbError::CommandFailed("the device shell returned no exit status".to_string())
+        })
+    }
+
+    pub fn pull_file(&mut self, remote: &str, local: &Path) -> Result<()> {
+        let mut file = std::fs::File::create(local)
+            .map_err(|e| AdbError::CommandFailed(format!("create {}: {e}", local.display())))?;
+        let device = self.connect_device()?;
+        if let Err(error) = device.pull(&remote, &mut file) {
+            self.drop_device();
+            return Err(AdbError::CommandFailed(error.to_string()));
+        }
+        file.sync_all()
+            .map_err(|e| AdbError::CommandFailed(format!("sync {}: {e}", local.display())))
     }
 
     pub fn get_model(&mut self) -> Result<Option<String>> {
@@ -646,6 +881,14 @@ fn write_key_atomic(path: &Path, pem: &[u8]) -> Result<()> {
     Ok(())
 }
 
+const EXIT_STATUS_MARKER: &str = "__adb_exit_status:";
+
+fn split_exit_status(output: &str) -> Option<(String, i32)> {
+    let (text, status) = output.rsplit_once(EXIT_STATUS_MARKER)?;
+    let status = status.trim().parse().ok()?;
+    Some((text.trim().to_string(), status))
+}
+
 const ADB_SHELL_REFUSED: &str =
     "ADB request failed - Open session failed: got CLSE in response instead of OKAY";
 
@@ -696,10 +939,159 @@ impl Default for AdbManager {
 mod tests {
     use super::{
         AdbError, ensure_key_at_path, is_adbd_dropped_after_reboot, is_sideload_shell_refusal,
-        remove_corrupt_key, validate_key_file, write_key_atomic,
+        remove_corrupt_key, split_exit_status, validate_key_file, write_key_atomic,
+    };
+    use super::{
+        AdbManager, ServerDevice, ServerProbe, parse_server_devices, probe_server,
+        server_state_is_usable, server_state_token,
     };
     use rsa::pkcs8::{EncodePrivateKey, LineEnding};
+    use std::io::{Read, Write};
+    use std::net::{Ipv4Addr, SocketAddrV4, TcpListener};
     use std::path::PathBuf;
+
+    /// Serve one connection the way an adb server answers `host:devices`,
+    /// or with `raw_reply` verbatim when it is set.
+    fn fake_adb_server(devices: &'static str, raw_reply: Option<&'static str>) -> SocketAddrV4 {
+        let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).expect("bind fake adb server");
+        let port = listener.local_addr().expect("fake server address").port();
+        std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().expect("accept probe");
+            let mut request = [0u8; 16];
+            stream.read_exact(&mut request).expect("read request");
+            assert_eq!(&request, b"000chost:devices");
+            let reply =
+                raw_reply.map_or_else(|| format!("OKAY{:04x}{devices}", devices.len()), Into::into);
+            stream.write_all(reply.as_bytes()).expect("write reply");
+        });
+        SocketAddrV4::new(Ipv4Addr::LOCALHOST, port)
+    }
+
+    fn closed_port() -> SocketAddrV4 {
+        let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).expect("bind");
+        let port = listener.local_addr().expect("address").port();
+        drop(listener);
+        SocketAddrV4::new(Ipv4Addr::LOCALHOST, port)
+    }
+
+    fn server_device(serial: &str, state: &str) -> ServerDevice {
+        ServerDevice {
+            serial: serial.into(),
+            state: state.into(),
+        }
+    }
+
+    #[test]
+    fn server_device_lines_parse_and_malformed_lines_are_skipped() {
+        assert_eq!(
+            parse_server_devices("HA1ABCDE\tdevice\n192.168.0.7:5555\tunauthorized\n"),
+            vec![
+                server_device("HA1ABCDE", "device"),
+                server_device("192.168.0.7:5555", "unauthorized"),
+            ]
+        );
+        assert!(parse_server_devices("").is_empty());
+        assert!(parse_server_devices("no-tab-here\n\tdevice\nserial\t\n").is_empty());
+    }
+
+    #[test]
+    fn server_states_map_to_state_tokens() {
+        assert_eq!(server_state_token("device"), Some("device"));
+        assert_eq!(server_state_token("recovery"), Some("recovery"));
+        assert_eq!(server_state_token("sideload"), Some("sideload"));
+        assert_eq!(server_state_token("rescue"), Some("sideload"));
+        assert_eq!(server_state_token("unauthorized"), Some("unauthorized"));
+        assert_eq!(server_state_token("authorizing"), Some("unauthorized"));
+        for state in ["offline", "connecting", "noperm", "detached", "bootloader"] {
+            assert_eq!(server_state_token(state), None, "{state}");
+        }
+        assert!(server_state_is_usable("device"));
+        assert!(server_state_is_usable("recovery"));
+        assert!(!server_state_is_usable("sideload"));
+        assert!(!server_state_is_usable("unauthorized"));
+        assert!(!server_state_is_usable("offline"));
+    }
+
+    #[test]
+    fn probe_reports_single_and_multiple_server_devices() {
+        assert_eq!(
+            probe_server(fake_adb_server("HA1ABCDE\tdevice\n", None)),
+            ServerProbe::Single(server_device("HA1ABCDE", "device"))
+        );
+        assert_eq!(
+            probe_server(fake_adb_server(
+                "HA1ABCDE\tdevice\nemulator-5554\tdevice\n",
+                None
+            )),
+            ServerProbe::Multiple
+        );
+    }
+
+    #[test]
+    fn probe_is_absent_without_a_usable_adb_server() {
+        assert_eq!(probe_server(closed_port()), ServerProbe::Absent);
+        assert_eq!(probe_server(fake_adb_server("", None)), ServerProbe::Absent);
+        // The server cannot use an offline device, so libusb must decide.
+        assert_eq!(
+            probe_server(fake_adb_server("HA1ABCDE\toffline\n", None)),
+            ServerProbe::Absent
+        );
+        assert_eq!(
+            probe_server(fake_adb_server(
+                "HA1ABCDE\toffline\nemulator-5554\tdevice\n",
+                None
+            )),
+            ServerProbe::Single(server_device("emulator-5554", "device"))
+        );
+        // Another service on the port must not be taken for an adb server.
+        assert_eq!(
+            probe_server(fake_adb_server("", Some("HTTP/1.1 400 Bad Request\r\n"))),
+            ServerProbe::Absent
+        );
+        // A length prefix above the limit, with no body behind it.
+        assert_eq!(
+            probe_server(fake_adb_server("", Some("OKAYffff"))),
+            ServerProbe::Absent
+        );
+        assert_eq!(
+            probe_server(fake_adb_server("", Some("FAIL0004oops"))),
+            ServerProbe::Absent
+        );
+    }
+
+    #[test]
+    fn server_reported_states_need_no_usb_claim() {
+        for (devices, expected) in [
+            ("HA1ABCDE\tunauthorized\n", Some("unauthorized")),
+            ("HA1ABCDE\tauthorizing\n", Some("unauthorized")),
+            ("HA1ABCDE\tsideload\n", Some("sideload")),
+        ] {
+            let mut adb = AdbManager::with_server_address(fake_adb_server(devices, None));
+            assert_eq!(adb.check_device_state().expect("state"), expected);
+        }
+    }
+
+    #[test]
+    fn exit_status_is_split_from_the_shell_output() {
+        assert_eq!(
+            split_exit_status("line one\nline two\n__adb_exit_status:0"),
+            Some(("line one\nline two".to_string(), 0))
+        );
+        assert_eq!(
+            split_exit_status("__adb_exit_status:13"),
+            Some((String::new(), 13))
+        );
+        assert_eq!(
+            split_exit_status("__adb_exit_status:7\nreal\n__adb_exit_status:1"),
+            Some(("__adb_exit_status:7\nreal".to_string(), 1))
+        );
+        assert_eq!(split_exit_status("output cut before the status"), None);
+        assert_eq!(split_exit_status("text\n__adb_exit_status:"), None);
+        assert_eq!(
+            split_exit_status("text\n__adb_exit_status:0 trailing"),
+            None
+        );
+    }
 
     #[test]
     fn only_exact_shell_refusal_is_sideload() {

@@ -1,4 +1,4 @@
-//! Patching engine — AVB, boot image, region patching.
+//! Patching engine — AVB, boot image patching.
 //!
 //! Uses `avbtool-rs` in-process and isolates magiskboot CLI operations in a child.
 //! GUI hosts register their executable; standalone consumers install the
@@ -8,13 +8,11 @@ pub mod abl_key;
 pub mod apatch;
 pub mod avb;
 pub mod boot;
-pub mod efisp_load;
 pub mod gki;
 pub mod key_map;
 pub mod konabess;
 pub mod ksu;
 pub mod magisk;
-pub mod region;
 pub mod rollback;
 pub mod root_pipeline;
 pub mod skroot;

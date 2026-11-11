@@ -1,7 +1,7 @@
 //! Linux device-access provisioning: detect and install the LTBox udev rules
 //! that grant the desktop user libusb / serial access to the Qualcomm EDL
-//! (`05c6:9008`), Lenovo (`17ef`), and Google ADB (`18d1`) USB IDs.
-//! See `misc/udev/51-ltbox-qcom.rules`.
+//! (`05c6:9008`) and Google ADB (`18d1`) USB IDs.
+//! See `crates/ltbox-device/udev/51-ltbox-qcom.rules`.
 //!
 //! Userspace mode has no driver *download*: the rules ship embedded in the
 //! binary and are written by the privileged `ltbox --install-udev` entry

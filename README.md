@@ -1,123 +1,209 @@
-# LTBox
+# TillKit
 
-A desktop tool for flashing and modifying firmware on supported Lenovo tablets, written in Rust.
+TillKit is a tool for the Toss Front 2 terminal.
+It makes a backup of the boot partitions, writes images and adds the Magisk root patch.
+The device must have a GSI on slot B, installed from stock firmware 1.609.5.
+The device must also have root access.
 
-[한국어](READMEs/README_ko-KR.md) · [简体中文](READMEs/README_zh-CN.md)
+TillKit is a changed version of [LTBox](https://github.com/miner7222/LTBox) by miner7222.
+The Lenovo functions of LTBox are not in this repository.
 
-[![Latest release](https://img.shields.io/github/v/release/miner7222/LTBox)](https://github.com/miner7222/LTBox/releases/latest)
-[![Build](https://img.shields.io/github/actions/workflow/status/miner7222/LTBox/rust-ci.yml?branch=main&label=build)](https://github.com/miner7222/LTBox/actions/workflows/rust-ci.yml)
-[![License: GPLv3](https://img.shields.io/badge/License-GPLv3-blue.svg)](LICENSE)
-[![Downloads](https://img.shields.io/github/downloads/miner7222/LTBox/total)](https://github.com/miner7222/LTBox/releases/latest)
-
-LTBox brings firmware flashing, region conversion, rooting, and recovery tools into a native GUI for **Windows, Linux, and macOS**, with guided workflows and advanced tools for individual operations.
-
-**[Download](https://github.com/miner7222/LTBox/releases/latest) · [Installation and user guide](https://miner7222.github.io/ltbox/en/index.html) · [Report an issue](https://github.com/miner7222/LTBox/issues)**
+[한국어](READMEs/README_ko-KR.md)
 
 ## Before you start
 
 > [!WARNING]
-> Modifying firmware can make your device unbootable, erase data, or void your warranty. LTBox is provided for educational purposes, without warranty. You use it at your own risk; the developer assumes no liability.
+> A change to firmware can make your device unbootable or erase your data. This tool comes without warranty. You use it at your risk.
 
-- Check the **exact model code**, firmware region, and instructions for your device before flashing.
-- Back up important data and keep any backups created by LTBox.
-- Read the confirmation screen before starting.
+- No person did a test of the write functions of TillKit on a device.
+- A write changes two partitions, one after the other. If the device stops between the two writes, it can become unbootable.
+- The only recovery from that condition is an EDL restore from a full backup. TillKit cannot make a full backup and cannot do that restore.
+- Make a full backup of the device with a different tool before you write.
 
-## Supported devices
+## What you need
 
-LTBox supports **TB320FC, TB321FU, TB322FC, TB323FU, TB324ZC, TB376FC, TB390FU, TB391FC, TB520FU, and TB710FU**.
+### USB debugging
 
-Features depend on the model, firmware, and connection mode:
+USB debugging must be on.
 
-| Device group | Important limitations |
+1. Touch the build number seven times in the settings of the device. This shows the `Developer options`.
+2. Set `USB debugging` to on in the `Developer options`.
+3. Connect the device to the computer. The device shows a message. Accept the connection.
+
+The names of the settings can be different on your system.
+
+### Root access
+
+The device must have root access before you use TillKit.
+USB debugging is not sufficient.
+`adb root` must be available, or the device must have `su`.
+TillKit reads and writes the boot partitions with root access.
+Without root access, TillKit cannot make a backup and cannot write.
+
+The `ROOT` screen does not get root access on a device that has none.
+It adds Magisk to a device on which only `adb root` is available.
+
+### One ADB program
+
+If a different ADB program on the computer uses the device, stop that program first.
+
+## Supported device
+
+The `DEVICE` screen examines each of these values.
+
+| Check | Necessary value |
 | --- | --- |
-| TB376FC / TB390FU / TB391FC | Root, unroot, GPU tuning, and boot rescue are unavailable. Rollback information is read-only. |
-| TB323FU / TB324ZC | GKI rooting, boot rescue, and AVB region conversion are unavailable. |
+| `ro.product.vendor.manufacturer` | `TOSSPLACE` |
+| `ro.product.vendor.device` | `toss_front2` |
+| `ro.vendor.build.fingerprint` | `TOSSPLACE/toss_front2/toss_front2:13/TKQ1.230110.001/475:user/dev-keys` |
+| `ro.soc.model` | `QCM4325` |
+| `ro.board.platform` | `bengal` |
+| `ro.build.ab_update` | `true` |
+| `ro.boot.slot_suffix` | `_b` |
+| `ro.boot.vbmeta.device_state` | `locked` |
+| `ro.boot.verifiedbootstate` | `green` |
+| `sys.boot_completed` | `1` |
+| Root access | `adb root` or `su` |
 
-## Install and connect
+The top `vbmeta` of the device must have the AOSP test key `testkey_rsa4096` and the algorithm `SHA256_RSA4096`.
 
-Get a packaged build from [GitHub Releases](https://github.com/miner7222/LTBox/releases/latest), or follow the [platform-specific installation instructions](https://miner7222.github.io/ltbox/en/index.html) for package managers and USB setup.
+The tool does not write to a device that has an incorrect value.
+But you can read the incorrect items on the `DEVICE` screen, accept them and continue.
+The tool continues to compare the files and to do the check after the write.
+The tool does not make sure that such a device starts after a write.
+You cannot continue with these devices:
 
-On Windows, Scoop is available:
+- A device that has no root access.
+- A device that did not complete its start.
+- A device with a slot that is not `_a` or `_b`.
 
-```powershell
-scoop bucket add ltbox https://github.com/miner7222/scoop-bucket
-scoop install ltbox
-```
+## Screens
 
-After USB setup, connect your tablet, choose a task from the sidebar, and follow the wizard. Keep the device connected until the operation finishes.
-
-The interface supports **English, Korean, Simplified Chinese, Russian, Japanese, and French**, with system, light, and dark themes.
-
-## What you can do
-
-| Task | Capabilities |
+| Screen | Function |
 | --- | --- |
-| Flash firmware | Prepare and flash firmware, with model-specific region and rollback handling and data-wipe choices. |
-| Root and unroot | Patch supported boot images with a selected root provider; restore backed-up stock images and associated verification metadata. |
-| Manage system updates | Disable or re-enable OTA updates; use boot recovery on supported devices after a region-converted OTA fails to boot. |
-| Tune the GPU | Edit clock and voltage tables with KonaBess and rebuild the affected AVB images on supported models. |
-| Inspect and reboot | View device information and reboot into Android, recovery, bootloader, fastbootd, or EDL as supported by the current connection. |
+| DEVICE | Reads the properties of the device and tells you if you can use the tool with it. This screen does not write. |
+| BACKUP | Reads `init_boot`, `boot` and `vbmeta` of the device into a folder on the computer. `RESTORE` in the list writes the images of that backup to the device again. You also select the folder of the full backup for a GSI here. |
+| WRITE | You select a folder with an image and push `WRITE`. The tool does the steps in sequence, from the plan to the check. |
+| ROOT | Downloads Magisk, adds the Magisk patch to the `init_boot` of the device and writes it. |
+| ADVANCED | Starts the device again in system, recovery, bootloader (fastboot) or EDL mode. |
+| INFO | Shows the items that the tool does not do, and the notices. |
 
-### Root providers
+### Folder for the WRITE screen
 
-Supported integrations include **Magisk, KernelSU, KernelSU Next, SukiSU Ultra, BakaSU, APatch, FolkPatch, and SKRoot Lite**. Availability depends on the device and provider.
+Put only one of these files in the folder.
 
-### Advanced tools
+| File | Function |
+| --- | --- |
+| `init_boot.img` | A root patch from a different tool. TillKit signs it and writes `init_boot` and `vbmeta`. |
+| `boot.img` | A kernel image. TillKit signs it and writes `boot` and `vbmeta`. TillKit cannot use a compressed kernel image. |
+| `system.img` | A GSI. TillKit makes an installation plan only and does not write to the device. Select the folder of the full backup on the `BACKUP` screen first. |
 
-- **Region and country:** convert supported firmware between PRC and ROW, or change the device country code.
-- **AVB and rollback:** inspect image metadata and rollback information, modify supported rollback indices, and rebuild vbmeta.
-- **EDL storage:** read or write named partitions, dump or flash whole LUNs, and flash firmware through the simple flasher.
-- **Firmware files:** decrypt `.x` files into rawprogram XML.
+### Safety steps of a write
+
+1. The images that are on the device must be in a backup of the `BACKUP` screen before a plan is possible. Thus, make a backup first.
+2. The plan is a file. The approval is for the SHA-256 of that file.
+3. Before the write, the tool shows the partitions and the recovery images. You must give your approval again.
+4. The script on the device examines the properties and the images of the device again immediately before it writes.
+5. If a write does not complete, the script writes the images from before the write again and reads them.
+6. The restart of the device has a different approval. It is possible only after a write with correct hashes.
+
+If the device does not start with a kernel that you wrote, TillKit cannot write the kernel from before the write again.
+
+### ROOT
+
+- `ROOT` downloads the latest Magisk release from `github.com/topjohnwu/Magisk`. TillKit does not include Magisk.
+- TillKit does not add the patch to an `init_boot` that has Magisk.
+- TillKit does not install the Magisk app on the device. Install the app after the restart.
+- TillKit does not make other types of root patch. You can write an `init_boot.img` from a different tool on the `WRITE` screen.
+
+### ADVANCED
+
+- The modes that you can select change with the connection of the device.
+- To go from EDL mode to a usual start, the Firehose loader file of this device is necessary. TillKit does not include this file.
+- If a write has a result that is not known, TillKit does not send a restart.
+
+## No test on a device
+
+No function of the TillKit screens operated on a device.
+The checks for these items used a simulated device and a local shell only.
+
+Write functions:
+
+- Backup, write and `RESTORE` on a device.
+- A write through `su`.
+- A write to a device after you accept incorrect items.
+- The EDL recovery after the device stops during a write.
+
+Other functions:
+
+- The start of the device from an image with the Magisk patch that TillKit made.
+- The start of the device from a kernel image that TillKit signed.
+- The restart from the `ADVANCED` screen.
+- The download of Magisk from GitHub.
+
+## Not in this tool
+
+- A write to a device that has no root access, and root access for such a device.
+- The GSI installation. TillKit makes only the plan.
+- Full backup and full restore of the device.
+- Recovery of a device that does not start after a write.
+- Automatic removal of `/data/local/tmp/front2-write-*` on the device.
+- A time limit for device commands. If the device gives no result during a write, the tool continues to wait and the write state is not known. The tool does not try again and does not start the device again.
+
+## Files that must stay out of the repository
+
+Do not add images, firmware, loaders, device logs, keys or backups of a device.
+`.gitignore` stops the usual file types, but you must examine each commit.
+The tool keeps its data in the `tillkit` folder of the local data folder of the user (`%LOCALAPPDATA%` on Windows).
+Backups are in `pairs` and `kernel-sets`, write plans are in `plans`, and the Magisk download is in `magisk`.
 
 ## Build from source
 
-Install [Rust through rustup](https://rustup.rs/) and native build tools: Visual Studio C++ Build Tools and the Windows SDK on Windows, Xcode Command Line Tools on macOS, or a C/C++ toolchain and the USB/GUI development libraries listed in the [CI workflow](.github/workflows/rust-ci.yml) on Linux.
-
-The repository pins its Rust toolchain in [rust-toolchain.toml](rust-toolchain.toml).
+Install [Rust through rustup](https://rustup.rs/) and the native build tools of your system.
+The repository pins the Rust toolchain in [rust-toolchain.toml](rust-toolchain.toml).
 
 ```sh
-git clone https://github.com/miner7222/LTBox.git
-cd LTBox
-cargo build --release --locked -p ltbox-gui
+cargo build --release --locked -p tillkit
 ```
 
-The executable is `target/release/ltbox` (`ltbox.exe` on Windows).
-
-### Source layout
+The executable is `target/release/tillkit` (`tillkit.exe` on Windows).
+The only builds until now are Windows builds.
 
 | Crate | Responsibility |
 | --- | --- |
-| [ltbox-core](crates/ltbox-core) | Shared models, settings, errors, logging, downloads, and firmware utilities. |
-| [ltbox-device](crates/ltbox-device) | ADB, Fastboot, EDL/QDL transport, device discovery, and USB driver integration. |
-| [ltbox-patch](crates/ltbox-patch) | Boot and AVB image processing, region conversion, rollback handling, and root providers. |
-| [ltbox-gui](crates/ltbox-gui) | The iced desktop application and guided workflows; produces the `ltbox` executable. |
+| [front2](crates/front2) | Device profile, support checks, pair store, candidate signature, write plan, device script and apply flow. |
+| [tillkit](crates/tillkit) | The iced desktop application. |
+| [ltbox-core](crates/ltbox-core) | Shared errors, paths, logs and downloads from LTBox. |
+| [ltbox-device](crates/ltbox-device) | ADB, Fastboot and EDL transport from LTBox. |
+| [ltbox-patch](crates/ltbox-patch) | Boot image and AVB functions from LTBox. |
 
-## Help and contributions
-
-Start with the [user guide](https://miner7222.github.io/ltbox/en/index.html). If a problem remains, [open an issue](https://github.com/miner7222/LTBox/issues) with:
-
-- LTBox version and host operating system.
-- Exact tablet model, firmware version and region, and connection mode.
-- Steps to reproduce the problem, expected behavior, and actual result.
-- Relevant logs or screenshots, with device identifiers, personal paths, and secrets removed. Do not attach root keys.
-
-Bug fixes, device findings, documentation improvements, and translations are welcome. UI translations live in [crates/ltbox-gui/lang](crates/ltbox-gui/lang); keep translation keys and placeholders consistent across languages.
-
-For code changes, run the relevant checks:
+Run these checks before a change:
 
 ```sh
 cargo fmt --all -- --check
-cargo test --workspace --locked
 cargo clippy --workspace --all-targets --locked -- -D warnings
+cargo test --workspace --locked
 ```
 
-Check prerequisites before running ignored tests or live download checks.
+## Design
 
-LTBox is a personal hobby project and does **not** accept donations, sponsorships, or other financial support.
+The interface has one shape rule: a tone block with a 2 px ink line on its top edge.
+A block has no side borders, no shadow and no round corners.
+Red is a signal with five fixed shapes. Do not use it for decoration.
+
+## Changes from LTBox
+
+This repository started from LTBox 3.3.5, commit `8f6d141c`, in November 2026.
+
+- Removed the LTBox application, its Lenovo screens and its translations.
+- Removed the Lenovo model table, the Lenovo server queries, the region and country changes, and the fixed partition map.
+- Removed the automatic update, the packages and the release workflow of LTBox.
+- Added the `front2` and `tillkit` crates.
 
 ## Credits
 
-Thanks to the following people for sharing findings, information, and guides that helped shape LTBox.
+LTBox is the work of [miner7222](https://github.com/miner7222/LTBox) and its contributors.
+The LTBox README gives thanks to these people for their data and guides:
 
 - **Anonymous [ㅇㅇ](https://gall.dcinside.com/board/lists?id=tabletpc)**
 - **[갓파더](https://ppomppu.co.kr/zboard/view.php?id=androidtab&page=1&divpage=38&no=197457)**
@@ -127,6 +213,19 @@ Thanks to the following people for sharing findings, information, and guides tha
 
 ## License
 
-LTBox is licensed under [GPL-3.0-or-later](LICENSE). Third-party components retain their respective licenses.
+TillKit is licensed under [GPL-3.0-or-later](LICENSE), the same license as LTBox.
+Third-party components keep their licenses:
+
+| Component | License |
+| --- | --- |
+| qdl (`vendor/qdl`, Qualcomm) | BSD-3-Clause |
+| magiskboot-rs | GPL-3.0-or-later |
+| kptools-rs | GPL-2.0-or-later |
+| avbtool-rs | Apache-2.0 |
+| IBM Plex Mono (`crates/tillkit/assets/fonts`) | SIL Open Font License 1.1 |
+| IBM Plex Sans KR (`crates/tillkit/assets/fonts`) | SIL Open Font License 1.1 |
+| Archivo Narrow (`crates/tillkit/assets/fonts`) | SIL Open Font License 1.1 |
+
+The `ROOT` screen downloads Magisk (topjohnwu, GPL-3.0-or-later). TillKit does not include Magisk.
 
 [![GPLv3](https://www.gnu.org/graphics/gplv3-127x51.png)](https://www.gnu.org/licenses/gpl-3.0)

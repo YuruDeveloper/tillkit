@@ -1,0 +1,21 @@
+[package]
+name = "front2"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+ltbox-core = { path = "../ltbox-core" }
+ltbox-patch = { path = "../ltbox-patch" }
+avbtool-rs = { workspace = true }
+thiserror = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+sha2 = { workspace = true }
+
+[dev-dependencies]
+tempfile = "3"
+
+[[test]]
+name = "magisk_patch"
+harness = false

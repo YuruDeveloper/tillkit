@@ -1,6 +1,6 @@
 //! `ltbox-core` — domain layer shared across LTBox crates.
 //!
-//! AES-CBC `.x` decryption, GitHub client, i18n, and
+//! File hashing, GitHub client, i18n, and
 //! rawprogram XML parser. Every fallible API returns [`Result<T>`] /
 //! [`LtboxError`]. Port of the non-UI parts of Python LTBox v2.x.
 
@@ -11,15 +11,8 @@ pub mod downloader;
 pub mod error;
 pub mod github;
 pub mod i18n;
-pub mod install_source;
-pub mod lenovo_info;
-pub mod lenovo_ota;
-pub mod lenovo_qfil;
 pub mod live_sink;
 pub mod log_format;
-pub mod model;
-pub mod obf;
-pub mod partition_lun;
 pub mod runtime;
 pub mod safe_path;
 pub mod sahara_xml;
