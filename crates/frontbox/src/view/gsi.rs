@@ -14,7 +14,7 @@ use std::path::{Path, PathBuf};
 
 const INTRODUCTION: &str = "기기 저장소 전체 백업과 GSI 이미지로, 슬롯 B에 기록할 이미지 여덟 개를 PC에서 만듭니다. 이 화면의 작업은 기기에 접근하지 않습니다.";
 const BUILD_NOTE: &str = "후보 폴더에는 super 전체와 슬롯 B 논리 파티션의 사본이 새로 기록됩니다. 실물 백업으로 시험했을 때 약 6분이 걸렸습니다.";
-const NOT_BUILT: &str = "후보를 만들지 못했습니다. 만들던 폴더는 남기지 않았습니다.";
+const NOT_BUILT: &str = "후보를 만들지 못했습니다. 만들던 폴더는 지우려고 했지만, 지우지 못했으면 남아 있을 수 있습니다.";
 const CANDIDATE_CAUTION: &str = "이 프로그램이 만든 후보로 기기를 부팅해 본 적은 없습니다. 실기 전환과 같은 입력으로 만든 후보는 여덟 이미지의 SHA-256이 그 전환과 같았고, 다른 입력으로 만든 후보에는 대조할 기준이 없습니다.";
 const NOT_PICKED: &str = "선택하지 않음";
 const NOT_PLANNED: &str = "설치 계획을 만들지 못했습니다. 기기에는 접근하지 않았습니다.";

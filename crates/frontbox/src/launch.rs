@@ -44,10 +44,12 @@ pub fn preview(app: &mut App) {
     use front2::{DeviceState, SupportReport, WritePlan};
     use std::path::PathBuf;
 
-    fn preview_source() -> PlanSource {
+    fn preview_source(plan: &WritePlan) -> PlanSource {
         match read::<KernelPlanFacts>("FRONTBOX_PREVIEW_KERNEL_FACTS") {
-            Some(facts) => PlanSource::Kernel(Box::new(facts)),
-            None => PlanSource::Pair,
+            Some(facts) if facts.require_matches(plan).is_ok() => {
+                PlanSource::Kernel(Box::new(facts))
+            }
+            _ => PlanSource::Pair,
         }
     }
 
@@ -61,11 +63,12 @@ pub fn preview(app: &mut App) {
         app.diagnosis = Some(Diagnosis { state, report });
     }
     if let Some(plan) = read::<WritePlan>("FRONTBOX_PREVIEW_PLAN") {
+        let source = preview_source(&plan);
         app.write.review = Some(PlanReview {
             plan,
             sha256: "5d1f0c9a".repeat(8),
             directory: PathBuf::from("preview"),
-            source: preview_source(),
+            source,
         });
         app.write.staged = std::env::var_os("FRONTBOX_PREVIEW_STAGED").is_some();
     }

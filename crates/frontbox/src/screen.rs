@@ -28,4 +28,8 @@ impl Screen {
             Self::Scope => "06 SCOPE",
         }
     }
+
+    pub fn has_selection_line(self) -> bool {
+        matches!(self, Self::Pairs | Self::Kernel | Self::Write)
+    }
 }

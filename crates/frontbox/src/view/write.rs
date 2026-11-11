@@ -12,6 +12,8 @@ use iced::widget::{Column, column, container, row};
 use iced::{Alignment, Color, Element, Length};
 
 const INTRODUCTION: &str = "보관함의 쌍(init_boot_b와 vbmeta_b)이나 커널 세트(boot_b와 vbmeta_b) 하나를 기기에 기록합니다. 슬롯을 바꾸지 않고, 사용자 데이터를 지우지 않으며, 부트로더 잠금을 건드리지 않습니다.";
+const PAIR_INTRODUCTION: &str = "보관함의 쌍(init_boot_b와 vbmeta_b) 하나를 기기에 기록합니다. 슬롯을 바꾸지 않고, 사용자 데이터를 지우지 않으며, 부트로더 잠금을 건드리지 않습니다.";
+const KERNEL_INTRODUCTION: &str = "보관함의 커널 세트(boot_b와 vbmeta_b) 하나를 기기에 기록합니다. 슬롯을 바꾸지 않고, 사용자 데이터를 지우지 않으며, 부트로더 잠금을 건드리지 않습니다.";
 const NO_PAIR: &str = "기록할 대상을 고르지 않았습니다. PAIRS 화면에서 쌍을 고르거나 KERNEL 화면에서 커널 세트를 골라 계획을 세워 주세요.";
 const STEP_FAILED: &str = "이 단계에서 멈췄습니다. 아래 원문을 확인한 뒤, 계획을 버리고 기기 상태를 다시 읽어서 새 계획을 세워 주세요.";
 const SU_CAUTION: &str = "이 계획은 su를 거쳐 기록합니다. 실기에서 검증된 기록 경로는 adb root(uid 0)뿐이고, su를 거친 기록은 검증하지 않았습니다.";
@@ -19,10 +21,10 @@ const RESTORE_CAUTION: &str = "이 계획은 기기에서 읽어 둔 이미지�
 const POWER_LOSS: &str = "두 파티션을 차례로 기록하는 동안 전원이 끊기면 기기가 부팅하지 못할 수 있습니다. 그때의 복구 수단은 전체 백업을 EDL로 되돌리는 것이며, 그 복구는 실기에서 시험하지 않았습니다.";
 const UNVERIFIED: &str = "실기에서 검증하지 않은 것: 이 프로그램이 만든 후보의 부팅, 이 프로그램이 만든 기록 스크립트의 실행, 커널 세트의 읽기와 기록 전체, su를 거친 기록, 되돌리기, 전원 차단 뒤의 EDL 복구.";
 const KERNEL_CAUTION: &str = "KMI가 같아도 새 커널이 이 기기에서 부팅된다는 보장은 없습니다. 부팅에 실패하면 ADB를 쓸 수 없고 슬롯 A로 넘어가는 경로도 없으며, 남는 복구 수단은 두 파티션을 EDL로 다시 기록하는 것인데 그 복구는 실기에서 시험하지 않았습니다.";
-const OLD_SET_NOT_RUNNING: &str = "기기가 지금 실행 중인 커널의 release가 되돌릴 세트의 커널과 다릅니다. 되돌릴 세트는 이 기기에서 부팅된 적이 없는 커널일 수 있습니다.";
+const OLD_SET_NOT_RUNNING: &str = "기기가 지금 실행 중인 커널의 release가 되돌릴 세트의 boot 이미지에 든 release와 다릅니다. 이번에 읽은 값으로는 되돌릴 세트로 정상 복귀할 수 있는지 확인하지 못했습니다.";
 const ROLLED_BACK: &str = "기록이 중간에 실패해서 되돌릴 이미지를 다시 기록했고, 다시 읽은 해시가 되돌릴 이미지와 일치합니다. 재부팅하지 않았습니다.";
 const DO_NOT_REBOOT: &str = "기록도 되돌리기도 끝나지 않았습니다. 기기를 재부팅하지 말고 전원을 유지한 채, 기기 로그와 파티션 해시를 확인해 주세요.";
-const NO_FINAL_STATE: &str = "기기가 정해진 시간 안에 마지막 상태를 보고하지 않았습니다. 재부팅하지 말고 기기의 상태 파일과 로그를 확인해 주세요.";
+const NO_FINAL_STATE: &str = "정해진 횟수만큼 상태를 조회했지만 기기가 마지막 상태를 보고하지 않았습니다. 재부팅하지 말고 기기의 상태 파일과 로그를 확인해 주세요.";
 const VERIFIED: &str = "두 파티션을 다시 읽은 해시가 새 이미지와 일치합니다. 재부팅 전까지는 이전 이미지로 부팅된 상태입니다.";
 const REBOOT_SENT: &str =
     "재부팅을 요청했습니다. 부팅이 끝나면 DEVICE 화면에서 기기를 다시 읽어 상태를 확인해 주세요.";
@@ -39,7 +41,7 @@ pub fn view(app: &App) -> Element<'_, Message> {
             ),
             palette
         ),
-        parts::body(INTRODUCTION, palette),
+        parts::body(introduction(flow), palette),
         target_line(app, palette),
         steps(app, palette),
     ]
@@ -60,6 +62,14 @@ pub fn view(app: &App) -> Element<'_, Message> {
         palette,
     ))
     .into()
+}
+
+fn introduction(flow: &WriteFlow) -> &'static str {
+    match &flow.review {
+        None => INTRODUCTION,
+        Some(review) if review.source.kernel_facts().is_some() => KERNEL_INTRODUCTION,
+        Some(_) => PAIR_INTRODUCTION,
+    }
 }
 
 fn target_labels(flow: &WriteFlow) -> String {

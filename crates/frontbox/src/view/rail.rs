@@ -4,8 +4,8 @@ use crate::message::Message;
 use crate::palette::Palette;
 use crate::screen::Screen;
 use crate::view::parts;
-use iced::widget::{Column, Space, button, column, container, text};
-use iced::{Border, Element, Length};
+use iced::widget::{Column, Space, button, column, container, row, text};
+use iced::{Color, Element, Length};
 
 pub const RAIL_WIDTH: f32 = 196.0;
 
@@ -40,29 +40,61 @@ pub fn view(app: &App) -> Element<'_, Message> {
 }
 
 fn item<'a>(screen: Screen, current: Screen, palette: Palette) -> Element<'a, Message> {
-    let selected = screen == current;
-    let word = if selected { palette.paper } else { palette.ink };
-    button(
+    let font = if screen == current {
+        fonts::MONO_BOLD
+    } else {
+        fonts::MONO
+    };
+    let face = button(
         text(screen.caption())
-            .font(fonts::MONO)
+            .font(font)
             .size(12)
-            .color(word),
+            .color(palette.ink),
     )
     .width(Length::Fill)
     .padding([6, 8])
     .on_press(Message::Navigate(screen))
-    .style(move |_, status| item_style(selected, status, palette))
-    .into()
+    .style(move |_, status| parts::flat(status, palette));
+    let line = selection_line(screen, current, palette);
+    row![parts::bar(line, Length::Fixed(3.0), Length::Fill), face]
+        .spacing(4)
+        .height(Length::Shrink)
+        .into()
 }
 
-fn item_style(selected: bool, status: button::Status, palette: Palette) -> button::Style {
-    if !selected {
-        return parts::flat(status, palette);
+fn selection_line(screen: Screen, current: Screen, palette: Palette) -> Color {
+    if screen != current {
+        return Color::TRANSPARENT;
     }
-    button::Style {
-        background: Some(palette.ink.into()),
-        text_color: palette.paper,
-        border: Border::default(),
-        ..button::Style::default()
+    if screen.has_selection_line() {
+        palette.ink
+    } else {
+        palette.idol
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::palette::{DUSK, PAPER};
+
+    #[test]
+    fn letter_1161_only_the_selected_item_has_a_line_and_one_selection_line_is_idol() {
+        for palette in [PAPER, DUSK] {
+            for current in Screen::ALL {
+                let lines = Screen::ALL.map(|screen| selection_line(screen, current, palette));
+                let drawn = lines
+                    .iter()
+                    .filter(|line| **line != Color::TRANSPARENT)
+                    .count();
+                assert_eq!(drawn, 1);
+            }
+            for screen in [Screen::Device, Screen::Gsi, Screen::Scope] {
+                assert_eq!(selection_line(screen, screen, palette), palette.idol);
+            }
+            for screen in [Screen::Pairs, Screen::Kernel, Screen::Write] {
+                assert_eq!(selection_line(screen, screen, palette), palette.ink);
+            }
+        }
     }
 }
