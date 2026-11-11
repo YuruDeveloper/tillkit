@@ -97,7 +97,10 @@ mod tests {
             .count()
     }
 
-    fn selected_line_colors(screens: [Screen; 3], palette: Palette) -> [Color; 3] {
+    fn selected_line_colors<const COUNT: usize>(
+        screens: [Screen; COUNT],
+        palette: Palette,
+    ) -> [Color; COUNT] {
         screens.map(|screen| selection_line(screen, screen, palette))
     }
 
@@ -107,8 +110,11 @@ mod tests {
             let counts = Screen::ALL.map(|current| drawn_line_count(current, palette));
             assert!(counts.iter().all(|count| *count == 1));
             assert_eq!(
-                selected_line_colors([Screen::Device, Screen::Gsi, Screen::Info], palette),
-                [palette.idol; 3]
+                selected_line_colors(
+                    [Screen::Device, Screen::Backup, Screen::Gsi, Screen::Info],
+                    palette
+                ),
+                [palette.idol; 4]
             );
             assert_eq!(
                 selected_line_colors([Screen::Pairs, Screen::Kernel, Screen::Write], palette),

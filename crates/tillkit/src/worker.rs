@@ -7,7 +7,7 @@ use crate::plan_review::PlanReview;
 use crate::plan_source::PlanSource;
 use front2::candidate::build_signed_candidate;
 use front2::current_pair::find_stored_current_pair;
-use front2::kernel::KernelPlan;
+use front2::kernel::{KernelPlan, KernelStore, read_current_kernel_set};
 use front2::pair_backup;
 use front2::{
     ApplyOutcome, Authorization, DeviceState, Front2Error, PairManifest, PairRequest, PairStore,
@@ -43,6 +43,23 @@ pub fn read_device() -> Result<Diagnosis> {
     let state = DeviceState::read(&mut shell)?;
     let report = SupportReport::evaluate(&state);
     Ok(Diagnosis { state, report })
+}
+
+pub fn back_up(paths: &DataPaths) -> Result<()> {
+    let mut shell = AdbShell::connect()?;
+    let state = DeviceState::read(&mut shell)?;
+    let created_unix = now_unix();
+    let id = format!("readback-{created_unix}");
+    let request = || PairRequest {
+        id: &id,
+        created_unix,
+        note: "",
+    };
+    let pairs = PairStore::new(paths.pairs());
+    pair_backup::read_current_pair(&mut shell, &state, &pairs, request())?;
+    let kernel_sets = KernelStore::new(paths.kernel_sets());
+    read_current_kernel_set(&mut shell, &state, &kernel_sets, request())?;
+    Ok(())
 }
 
 pub fn read_current_pair(paths: &DataPaths, note: &str) -> Result<PairManifest> {

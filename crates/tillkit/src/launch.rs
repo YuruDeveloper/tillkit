@@ -13,6 +13,7 @@ pub fn paths() -> DataPaths {
 
 pub fn screen() -> Screen {
     match std::env::var(SCREEN_VARIABLE).as_deref() {
+        Ok("backup") => Screen::Backup,
         Ok("pairs") => Screen::Pairs,
         Ok("kernel") => Screen::Kernel,
         Ok("write") => Screen::Write,
@@ -37,7 +38,9 @@ pub fn preview(_app: &mut App) {}
 pub fn preview(app: &mut App) {
     use crate::confirmation::Confirmation;
     use crate::diagnosis::Diagnosis;
+    use crate::gsi_message::GsiMessage;
     use crate::install_review::InstallReview;
+    use crate::message::Message;
     use crate::plan_review::PlanReview;
     use crate::plan_source::PlanSource;
     use front2::install::InstallPlan;
@@ -62,6 +65,9 @@ pub fn preview(app: &mut App) {
         app.diagnosis = Some(Diagnosis { state, report });
     }
     app.details_open = std::env::var_os("TILLKIT_PREVIEW_DETAILS").is_some();
+    if let Some(folder) = std::env::var_os("TILLKIT_PREVIEW_FULL_BACKUP").map(PathBuf::from) {
+        let _ = app.update(Message::Gsi(GsiMessage::BackupPicked(Some(folder))));
+    }
     match std::env::var("TILLKIT_PREVIEW_FORCE").as_deref() {
         Ok("ask") => app.confirmation = Some(Confirmation::ForceSupport),
         Ok("forced") => app.forced = true,

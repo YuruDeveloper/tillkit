@@ -1,3 +1,4 @@
+pub mod backup;
 pub mod confirm;
 pub mod device;
 pub mod gsi;
@@ -25,6 +26,7 @@ pub fn root(app: &App) -> Element<'_, Message> {
     let palette = app.palette;
     let content = match app.screen {
         Screen::Device => device::view(app),
+        Screen::Backup => backup::view(app),
         Screen::Pairs => pairs::view(app),
         Screen::Kernel => kernel::view(app),
         Screen::Write => write::view(app),

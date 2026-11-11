@@ -23,6 +23,7 @@ mod message;
 mod palette;
 mod plan_review;
 mod plan_source;
+mod saved_backup;
 mod screen;
 mod step_status;
 mod support_words;

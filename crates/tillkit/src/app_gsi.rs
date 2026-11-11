@@ -6,6 +6,7 @@ use crate::gsi_worker;
 use crate::install_review::InstallReview;
 use crate::message::Message;
 use crate::worker::run_blocking;
+use front2::gsi::backup_manifest::BACKUP_MANIFEST_FILE;
 use iced::Task;
 use std::path::PathBuf;
 
@@ -19,7 +20,7 @@ impl App {
             GsiMessage::PickImage => return self.pick_gsi_image(),
             GsiMessage::Build => return self.build_gsi_candidate(),
             GsiMessage::PlanInstall => return self.plan_gsi_install(),
-            GsiMessage::BackupPicked(Some(path)) => self.gsi.backup_directory = Some(path),
+            GsiMessage::BackupPicked(Some(path)) => self.full_backup_picked(path),
             GsiMessage::ImagePicked(Some(path)) => self.gsi.gsi_image = Some(path),
             GsiMessage::BackupPicked(None) | GsiMessage::ImagePicked(None) => {}
             GsiMessage::Built(result) => self.gsi_candidate_built(result),
@@ -27,6 +28,11 @@ impl App {
             GsiMessage::Close => self.close_gsi_candidate(),
         }
         Task::none()
+    }
+
+    fn full_backup_picked(&mut self, path: PathBuf) {
+        self.full_backup_found = path.join(BACKUP_MANIFEST_FILE).is_file();
+        self.gsi.backup_directory = Some(path);
     }
 
     fn gsi_allows(&self, action: GsiAction) -> bool {

@@ -9,6 +9,7 @@ use crate::launch;
 use crate::message::Message;
 use crate::palette::Palette;
 use crate::plan_review::PlanReview;
+use crate::saved_backup::SavedBackup;
 use crate::screen::Screen;
 use crate::support_words;
 use crate::view;
@@ -34,6 +35,8 @@ pub struct App {
     pub details_open: bool,
     pub forced: bool,
     pub confirmation: Option<Confirmation>,
+    pub backup_error: Option<String>,
+    pub full_backup_found: bool,
     pub pairs: Vec<PairManifest>,
     pub pairs_error: Option<String>,
     pub selected_pair: Option<String>,
@@ -65,6 +68,8 @@ impl App {
             details_open: false,
             forced: false,
             confirmation: None,
+            backup_error: None,
+            full_backup_found: false,
             pairs: Vec::new(),
             pairs_error: None,
             selected_pair: None,
@@ -114,6 +119,7 @@ impl App {
         match message {
             Message::Navigate(screen) => self.screen = screen,
             Message::ToggleTheme => self.set_palette(self.palette.toggled()),
+            Message::BackedUp(result) => self.backed_up(result),
             Message::SelectPair(id) => self.selected_pair = Some(id),
             Message::NoteChanged(note) => self.note_input = note,
             Message::ApprovalChanged(text) => self.write.approval_input = text,
@@ -130,6 +136,7 @@ impl App {
             Message::PairWritten(result) => self.pair_written(result),
             Message::Rebooted(result) => self.rebooted(result),
             Message::ReadDevice => return self.read_device(),
+            Message::BackUp => return self.back_up(),
             Message::ReadCurrentPair => return self.read_current_pair(),
             Message::PickPatchedImage => return self.pick_patched_image(),
             Message::PatchedImagePicked(path) => return self.build_candidate(path),
@@ -192,6 +199,37 @@ impl App {
             Some(Confirmation::ForceSupport) => self.forced = self.can_be_forced(),
             None => {}
         }
+    }
+
+    pub fn saved_backups(&self) -> Vec<SavedBackup> {
+        let root_images = self
+            .pairs
+            .iter()
+            .filter(|pair| pair.kind == PairKind::DeviceReadback)
+            .map(|pair| pair.created_unix);
+        let kernel_images = self
+            .kernel_sets
+            .iter()
+            .filter(|set| set.kind == PairKind::DeviceReadback)
+            .map(|set| set.created_unix);
+        SavedBackup::newest_first(root_images, kernel_images)
+    }
+
+    fn back_up(&mut self) -> Task<Message> {
+        if self.is_busy() {
+            return Task::none();
+        }
+        self.activity = Some("BACKING UP");
+        self.backup_error = None;
+        let paths = self.paths.clone();
+        run_blocking(move || worker::back_up(&paths), Message::BackedUp)
+    }
+
+    fn backed_up(&mut self, result: Outcome<()>) {
+        self.activity = None;
+        self.backup_error = result.err();
+        self.reload_pairs();
+        self.reload_kernel_sets();
     }
 
     fn read_current_pair(&mut self) -> Task<Message> {

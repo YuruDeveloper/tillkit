@@ -16,6 +16,8 @@ pub enum Message {
     AskForce,
     Confirm,
     Cancel,
+    BackUp,
+    BackedUp(Result<(), String>),
     SelectPair(String),
     NoteChanged(String),
     ReadCurrentPair,
