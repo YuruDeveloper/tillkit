@@ -94,9 +94,10 @@ impl KernelPlanFacts {
         &self,
         shell: &mut dyn DeviceShell,
         root: RootAccess,
+        block_bytes: u64,
     ) -> Result<()> {
         for reference in &self.reference_partitions {
-            reference.require_unchanged(shell, root)?;
+            reference.require_unchanged(shell, root, block_bytes)?;
         }
         Ok(())
     }

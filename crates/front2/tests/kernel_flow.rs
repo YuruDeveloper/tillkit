@@ -1,3 +1,4 @@
+use front2::profiles::toss_front2::PROFILE;
 mod kernel_support;
 mod support;
 
@@ -47,7 +48,7 @@ fn bench() -> Bench {
     std::fs::create_dir(&source).expect("source directory");
     let mut device = front2_device(&source);
     let state = DeviceState::read(&mut device).expect("device state");
-    let store = KernelStore::new(directory.path().join("kernel-sets"));
+    let store = KernelStore::new(directory.path().join("kernel-sets"), &PROFILE);
     Bench {
         directory,
         store,
@@ -227,7 +228,7 @@ fn readback_candidate_apply_reboot_and_restore() {
         ]
     );
     let plan_directory = bench.directory.path().join("2000-apply");
-    let (loaded, loaded_digest) = KernelPlan::load(&plan_directory).expect("load plan");
+    let (loaded, loaded_digest) = KernelPlan::load(&plan_directory, &PROFILE).expect("load plan");
     assert_eq!((&loaded, &loaded_digest), (&kernel_plan, &digest));
 
     check(&mut bench.device, &plan).expect("check");
@@ -246,7 +247,11 @@ fn readback_candidate_apply_reboot_and_restore() {
     );
     for reference in &candidate.references {
         reference
-            .require_unchanged(&mut bench.device, RootAccess::Su)
+            .require_unchanged(
+                &mut bench.device,
+                RootAccess::Su,
+                PROFILE.storage_block_bytes,
+            )
             .expect("the reference partitions are untouched by the write");
     }
     let approved = approval(&digest);
@@ -457,7 +462,7 @@ fn readback_refuses_a_top_vbmeta_with_other_hash_partitions() {
     write_top_vbmeta(&vbmeta, &directory.path().join("boot.img"), descriptors);
     *device.partition_mut("vbmeta_b") = std::fs::read(&vbmeta).expect("vbmeta");
     let state = DeviceState::read(&mut device).expect("device state");
-    let store = KernelStore::new(directory.path().join("kernel-sets"));
+    let store = KernelStore::new(directory.path().join("kernel-sets"), &PROFILE);
     let result = read_current_kernel_set(&mut device, &state, &store, request(READBACK));
     let error = result.expect_err("a top vbmeta without the recovery hash is not the measured one");
     assert!(error.to_string().contains("hash descriptors"), "{error}");
@@ -508,14 +513,22 @@ fn the_plan_facts_refuse_a_reference_partition_that_changed_after_the_plan() {
     readback_and_candidate(&mut bench);
     let plan = prepare(&mut bench, CANDIDATE, READBACK, "2000-apply").expect("plan");
     plan.facts
-        .require_references_unchanged(&mut bench.device, RootAccess::Su)
+        .require_references_unchanged(
+            &mut bench.device,
+            RootAccess::Su,
+            PROFILE.storage_block_bytes,
+        )
         .expect("nothing changed");
     assert_eq!(plan.facts.reference_partitions.len(), 4);
 
     bench.device.partition_mut("recovery_b")[0] ^= 1;
     let error = plan
         .facts
-        .require_references_unchanged(&mut bench.device, RootAccess::Su)
+        .require_references_unchanged(
+            &mut bench.device,
+            RootAccess::Su,
+            PROFILE.storage_block_bytes,
+        )
         .expect_err("recovery_b changed");
     assert!(error.to_string().contains("recovery_b"), "{error}");
 }
@@ -637,7 +650,7 @@ fn plan_refuses_an_edited_or_damaged_kernel_set() {
     bytes[4096 + 5000] ^= 1;
     std::fs::write(&boot, bytes).expect("boot");
     assert!(prepare(&mut damaged, CANDIDATE, READBACK, "2000-apply").is_err());
-    assert!(verify_kernel_images(&damaged.store.root().join(CANDIDATE)).is_err());
+    assert!(verify_kernel_images(&damaged.store.root().join(CANDIDATE), &PROFILE).is_err());
 }
 
 #[test]
@@ -646,7 +659,7 @@ fn saved_plan_facts_reject_edits() {
     readback_and_candidate(&mut bench);
     let (_, digest) = staged_plan(&mut bench, CANDIDATE, READBACK, "2000-apply");
     let plan_directory = bench.directory.path().join("2000-apply");
-    let (_, loaded_digest) = KernelPlan::load(&plan_directory).expect("load");
+    let (_, loaded_digest) = KernelPlan::load(&plan_directory, &PROFILE).expect("load");
     assert_eq!(loaded_digest, digest);
     let facts: PathBuf = plan_directory.join(FACTS_FILE);
     edit_text(
@@ -654,15 +667,15 @@ fn saved_plan_facts_reject_edits() {
         "\"slot_a_fallback\": false",
         "\"slot_a_fallback\": true",
     );
-    assert!(KernelPlan::load(&plan_directory).is_err());
+    assert!(KernelPlan::load(&plan_directory, &PROFILE).is_err());
     edit_text(
         &facts,
         "\"slot_a_fallback\": true",
         "\"slot_a_fallback\": false",
     );
-    KernelPlan::load(&plan_directory).expect("the restored facts load again");
+    KernelPlan::load(&plan_directory, &PROFILE).expect("the restored facts load again");
     edit_text(&facts, "does not guarantee", "guarantees");
-    assert!(KernelPlan::load(&plan_directory).is_err());
+    assert!(KernelPlan::load(&plan_directory, &PROFILE).is_err());
 }
 
 #[test]
@@ -693,7 +706,7 @@ fn candidate_from_a_real_boot_backup_when_available() {
         return;
     };
     let directory = tempfile::tempdir().expect("tempdir");
-    let store = KernelStore::new(directory.path().join("kernel-sets"));
+    let store = KernelStore::new(directory.path().join("kernel-sets"), &PROFILE);
     let readback_directory = store.begin(READBACK).expect("begin");
     let boot = readback_directory.join("boot.img");
     std::fs::copy(backup.join("partitions/lun4/boot_a.bin"), &boot).expect("copy boot");
@@ -712,7 +725,7 @@ fn candidate_from_a_real_boot_backup_when_available() {
         None => write_top_vbmeta(&vbmeta, &boot, reference_descriptors()),
     }
     println!("top vbmeta is the real signed one: {}", real_top.is_some());
-    verify_kernel_images(&readback_directory).expect("the readback verifies");
+    verify_kernel_images(&readback_directory, &PROFILE).expect("the readback verifies");
     let readback = store
         .commit(
             request(READBACK),
@@ -722,7 +735,7 @@ fn candidate_from_a_real_boot_backup_when_available() {
             Vec::new(),
         )
         .expect("commit readback");
-    readback.avb.require_front2_trust().expect("front2 trust");
+    readback.avb.require_trust(&PROFILE).expect("front2 trust");
     println!("readback avb: {:#?}", readback.avb);
 
     let mut changed = image[..header.payload_bytes() as usize].to_vec();

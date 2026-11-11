@@ -4,21 +4,32 @@ use crate::gsi_review::GsiReview;
 use crate::install_review::InstallReview;
 use front2::gsi::{GsiCandidate, GsiCandidateRequest, install_inputs};
 use front2::install::InstallPlan;
-use front2::{Front2Error, Result};
+use front2::{DeviceProfile, Front2Error, Result};
 use std::path::{Path, PathBuf};
 
 const CANDIDATE_PREFIX: &str = "gsi-";
 
-pub fn prepare(paths: &DataPaths, backup: &Path, gsi_image: &Path) -> Result<InstallReview> {
-    let review = build_candidate(paths, backup, gsi_image)?;
-    plan_install(paths, &review, backup)
+pub fn prepare(
+    paths: &DataPaths,
+    backup: &Path,
+    gsi_image: &Path,
+    profile: &DeviceProfile,
+) -> Result<InstallReview> {
+    let review = build_candidate(paths, backup, gsi_image, profile)?;
+    plan_install(paths, &review, backup, profile)
 }
 
-fn build_candidate(paths: &DataPaths, backup: &Path, gsi_image: &Path) -> Result<GsiReview> {
+fn build_candidate(
+    paths: &DataPaths,
+    backup: &Path,
+    gsi_image: &Path,
+    profile: &DeviceProfile,
+) -> Result<GsiReview> {
     let root = paths.gsi_candidates();
     std::fs::create_dir_all(&root)?;
     let directory = root.join(format!("{CANDIDATE_PREFIX}{}", now_unix()));
     let request = GsiCandidateRequest {
+        profile,
         backup_directory: backup,
         gsi_image,
         output_directory: &directory,
@@ -34,7 +45,12 @@ fn build_candidate(paths: &DataPaths, backup: &Path, gsi_image: &Path) -> Result
     Ok(review)
 }
 
-fn plan_install(paths: &DataPaths, review: &GsiReview, backup: &Path) -> Result<InstallReview> {
+fn plan_install(
+    paths: &DataPaths,
+    review: &GsiReview,
+    backup: &Path,
+    profile: &DeviceProfile,
+) -> Result<InstallReview> {
     let (candidate, sha256) = GsiCandidate::load(&review.directory)?;
     if sha256 != review.sha256 || candidate != review.candidate {
         return Err(Front2Error::Plan(
@@ -42,7 +58,7 @@ fn plan_install(paths: &DataPaths, review: &GsiReview, backup: &Path) -> Result<
         ));
     }
     candidate.verify_files(&review.directory)?;
-    let inputs = install_inputs(&candidate, &review.directory, backup)?;
+    let inputs = install_inputs(&candidate, &review.directory, backup, profile)?;
     let directory = paths
         .install_plans()
         .join(format!("install-{}", now_unix()));
@@ -77,7 +93,15 @@ mod tests {
         let image = directory.path().join("gsi.img");
         std::fs::write(&image, b"not an image").expect("image");
 
-        assert!(prepare(&paths, &backup, &image).is_err());
+        assert!(
+            prepare(
+                &paths,
+                &backup,
+                &image,
+                &front2::profiles::toss_front2::PROFILE
+            )
+            .is_err()
+        );
         let left: Vec<_> = std::fs::read_dir(paths.gsi_candidates())
             .expect("the store exists")
             .collect();

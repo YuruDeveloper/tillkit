@@ -12,7 +12,7 @@ use crate::write_flow::WriteFlow;
 use crate::write_kind::WriteKind;
 use crate::write_message::WriteMessage;
 use crate::write_step::WriteStep;
-use front2::{ApplyOutcome, SupportOverride};
+use front2::{ApplyOutcome, DeviceProfile, SupportOverride};
 use iced::Task;
 use std::path::PathBuf;
 
@@ -90,7 +90,15 @@ impl App {
         };
         let full_backup = self.full_backup_for_gsi();
         let accepted = self.support_override();
-        let task = prepare_task(kind, image, self.paths.clone(), full_backup, accepted);
+        let profile = self.device_profile();
+        let task = prepare_task(
+            kind,
+            image,
+            self.paths.clone(),
+            full_backup,
+            accepted,
+            profile,
+        );
         self.write.running = task.as_ref().map(|_| WriteStep::Prepare);
         task.unwrap_or_else(Task::none)
     }
@@ -207,6 +215,7 @@ fn prepare_task(
     paths: DataPaths,
     full_backup: Option<PathBuf>,
     accepted: SupportOverride,
+    profile: &'static DeviceProfile,
 ) -> Option<Task<Message>> {
     if kind == WriteKind::RootImage {
         let work = move || worker::prepare_root_write(&paths, &image, accepted);
@@ -217,7 +226,7 @@ fn prepare_task(
         return Some(run_blocking(work, prepared));
     }
     let backup = full_backup?;
-    let work = move || gsi_worker::prepare(&paths, &backup, &image);
+    let work = move || gsi_worker::prepare(&paths, &backup, &image, profile);
     Some(run_blocking(work, install_planned))
 }
 

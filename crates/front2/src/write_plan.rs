@@ -1,4 +1,5 @@
 use crate::apply_script;
+use crate::device_profile::DeviceProfile;
 use crate::device_shell::DeviceShell;
 use crate::device_state::DeviceState;
 use crate::digest::sha256_bytes;
@@ -12,6 +13,7 @@ use crate::partition_target::PartitionTarget;
 use crate::plan_request::PlanRequest;
 use crate::planned_write::PlannedWrite;
 use crate::profile;
+use crate::profiles;
 use crate::root_access::RootAccess;
 use crate::support_override::SupportOverride;
 use crate::support_report::SupportReport;
@@ -64,17 +66,18 @@ impl WritePlan {
         if !is_safe_id(id) {
             return Err(Front2Error::Plan(format!("plan id {id:?}")));
         }
-        SupportReport::evaluate(state).require_allowed_with(&request.support_override)?;
+        let profile = store.profile();
+        SupportReport::evaluate(profile, state).require_allowed_with(&request.support_override)?;
         let root = state
             .root_access
             .ok_or_else(|| Front2Error::Unsupported("root access is not available".into()))?;
         let new = store.load_verified(new_pair)?;
         let old = store.load_verified(old_pair)?;
-        require_compatible(&new, &old, state.slot_suffix())?;
+        require_compatible(profile, &new, &old, state.slot_suffix())?;
         let new_directory = store.directory(new_pair)?;
         let old_directory = store.directory(old_pair)?;
-        verify_pair_images(&new_directory)?;
-        verify_pair_images(&old_directory)?;
+        verify_pair_images(&new_directory, profile)?;
+        verify_pair_images(&old_directory, profile)?;
         require_unchanged_except_init_boot(
             &new_directory.join(VBMETA_FILE),
             &old_directory.join(VBMETA_FILE),
@@ -83,6 +86,7 @@ impl WritePlan {
             plan_write(
                 shell,
                 root,
+                profile.storage_block_bytes,
                 state,
                 profile::INIT_BOOT_BASE,
                 &new.init_boot,
@@ -91,6 +95,7 @@ impl WritePlan {
             plan_write(
                 shell,
                 root,
+                profile.storage_block_bytes,
                 state,
                 profile::VBMETA_BASE,
                 &new.vbmeta,
@@ -102,7 +107,7 @@ impl WritePlan {
             id: id.to_string(),
             created_unix: request.created_unix,
             purpose: purpose_of(new.kind),
-            profile: profile::ID.to_string(),
+            profile: profile.id.to_string(),
             support_override: request.support_override,
             new_pair: new.id.clone(),
             old_pair: old.id.clone(),
@@ -110,7 +115,7 @@ impl WritePlan {
             device_state: state.property("ro.boot.vbmeta.device_state").to_string(),
             verified_boot_state: state.property("ro.boot.verifiedbootstate").to_string(),
             root_access: root,
-            remote_stage: format!("{}/front2-write-{id}", profile::REMOTE_STAGE_PARENT),
+            remote_stage: format!("{}/front2-write-{id}", profile.remote_stage_parent),
             writes,
             top_rollback_index: new.avb.top_rollback_index,
             script_sha256: String::new(),
@@ -120,12 +125,12 @@ impl WritePlan {
             restore_tested_on_device: false,
             power_loss_recovery: POWER_LOSS_RECOVERY.to_string(),
         };
-        plan.script_sha256 = sha256_bytes(apply_script::render(&plan).as_bytes());
+        plan.script_sha256 = sha256_bytes(apply_script::render(&plan, profile).as_bytes());
         Ok(plan)
     }
 
     pub fn script(&self) -> Result<String> {
-        let script = apply_script::render(self);
+        let script = apply_script::render(self, profiles::find(&self.profile)?);
         if sha256_bytes(script.as_bytes()) != self.script_sha256 {
             return Err(Front2Error::Plan(
                 "the apply script does not match the SHA-256 in the plan".into(),
@@ -145,18 +150,13 @@ impl WritePlan {
         Ok(sha256_bytes(text.as_bytes()))
     }
 
-    pub fn load(directory: &Path) -> Result<(Self, String)> {
+    pub fn load(directory: &Path, profile: &DeviceProfile) -> Result<(Self, String)> {
         let bytes = fs::read(directory.join(PLAN_FILE))?;
         let plan: Self = serde_json::from_slice(&bytes)?;
         if plan.schema != PLAN_SCHEMA {
             return Err(Front2Error::Plan(format!("plan schema {}", plan.schema)));
         }
-        if plan.profile != profile::ID {
-            return Err(Front2Error::Plan(format!(
-                "plan profile {:?}",
-                plan.profile
-            )));
-        }
+        profile.require_id(&plan.profile)?;
         plan.support_override.require_acceptable()?;
         plan.script()?;
         Ok((plan, sha256_bytes(&bytes)))
@@ -173,13 +173,14 @@ fn purpose_of(kind: PairKind) -> WritePurpose {
 fn plan_write(
     shell: &mut dyn DeviceShell,
     root: RootAccess,
+    block_bytes: u64,
     state: &DeviceState,
     base: &str,
     new_image: &ImageRecord,
     old_image: &ImageRecord,
 ) -> Result<PlannedWrite> {
     let label = profile::slot_label(base, state.slot_suffix());
-    let target = PartitionTarget::resolve(shell, root, &label)?;
+    let target = PartitionTarget::resolve(shell, root, &label, block_bytes)?;
     let current = target.sha256(shell, root)?;
     require_device_holds(&target, &current, new_image, old_image)?;
     Ok(PlannedWrite {
@@ -192,9 +193,14 @@ fn plan_write(
     })
 }
 
-fn require_compatible(new: &PairManifest, old: &PairManifest, slot_suffix: &str) -> Result<()> {
-    new.avb.require_front2_trust()?;
-    old.avb.require_front2_trust()?;
+fn require_compatible(
+    profile: &DeviceProfile,
+    new: &PairManifest,
+    old: &PairManifest,
+    slot_suffix: &str,
+) -> Result<()> {
+    new.avb.require_trust(profile)?;
+    old.avb.require_trust(profile)?;
     if new.slot_suffix != slot_suffix || old.slot_suffix != slot_suffix {
         return Err(Front2Error::Plan(format!(
             "pairs are for slots {:?} and {:?}, the device runs {slot_suffix:?}",

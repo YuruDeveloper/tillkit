@@ -1,3 +1,4 @@
+use front2::profiles::toss_front2::PROFILE;
 mod super_support;
 
 use front2::Front2Error;
@@ -35,11 +36,42 @@ fn write_manifest(backup: &Path, entries: &[Value]) {
 
 fn request<'a>(backup: &'a Path, gsi: &'a Path, output: &'a Path) -> GsiCandidateRequest<'a> {
     GsiCandidateRequest {
+        profile: &PROFILE,
         backup_directory: backup,
         gsi_image: gsi,
         output_directory: output,
         rollback_evidence: &[],
     }
+}
+
+static NO_GSI: front2::DeviceProfile = front2::DeviceProfile {
+    id: "no-gsi",
+    name: "Device without the GSI install",
+    identity: &[("ro.product.vendor.device", "no_gsi")],
+    slot_suffix: "_b",
+    device_state: "locked",
+    verified_boot_state: "green",
+    storage_block_bytes: 4096,
+    top_vbmeta_algorithm: "SHA256_RSA4096",
+    top_vbmeta_key_spec: "testkey_rsa4096",
+    remote_stage_parent: "/data/local/tmp",
+    supports_gsi: false,
+};
+
+#[test]
+fn a_profile_without_the_gsi_install_is_refused_before_any_work() {
+    let directory = tempfile::tempdir().expect("tempdir");
+    let output = directory.path().join("candidate");
+    let gsi = directory.path().join("gsi.img");
+    let refused = GsiCandidate::build(&GsiCandidateRequest {
+        profile: &NO_GSI,
+        ..request(directory.path(), &gsi, &output)
+    });
+    assert!(
+        matches!(refused, Err(Front2Error::Unsupported(_))),
+        "{refused:?}"
+    );
+    assert!(!output.exists());
 }
 
 #[test]

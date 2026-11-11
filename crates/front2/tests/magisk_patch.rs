@@ -4,6 +4,7 @@ use front2::magisk::{
     InitBootState, MagiskPackage, PatchInputs, build_magisk_candidate, dispatch_magiskboot_helper,
     patch_init_boot, register_magiskboot_host,
 };
+use front2::profiles::toss_front2::PROFILE;
 use front2::{Front2Error, PairKind, PairRequest, PairStore, RootAccess};
 use std::path::Path;
 use support::{BOOT_DIGEST_BYTE, write_readback_pair_from};
@@ -114,7 +115,7 @@ fn real_candidate_verifies(stock: &Path, package: &MagiskPackage, preinit: &str,
         println!("real candidate skipped, set FRONT2_STOCK_VBMETA");
         return;
     };
-    let store = PairStore::new(root.join("pairs"));
+    let store = PairStore::new(root.join("pairs"), &PROFILE);
     let directory = store.begin(READBACK).expect("begin the real readback pair");
     std::fs::copy(stock, directory.join("init_boot.img")).expect("copy init_boot");
     std::fs::copy(vbmeta, directory.join("vbmeta.img")).expect("copy vbmeta");
@@ -362,7 +363,7 @@ fn a_package_with_a_stub_adds_stub_xz() {
 }
 
 fn store_with_readback(root: &Path) -> PairStore {
-    let store = PairStore::new(root.join("pairs"));
+    let store = PairStore::new(root.join("pairs"), &PROFILE);
     let directory = store.begin(READBACK).expect("begin the readback pair");
     write_readback_pair_from(&directory, &stock_init_boot_payload(), BOOT_DIGEST_BYTE);
     store

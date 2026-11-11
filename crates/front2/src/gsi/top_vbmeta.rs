@@ -5,7 +5,7 @@ use crate::gsi::signed_vbmeta::SignedVbmeta;
 use crate::gsi::vbmeta_parameters::VbmetaParameters;
 use crate::gsi::vbmeta_source::VbmetaSource;
 use crate::gsi::vbmeta_template::VbmetaTemplate;
-use crate::profile;
+use crate::profiles::toss_front2;
 use avbtool_rs::crypto::extract_public_key;
 use avbtool_rs::info::DescriptorInfo;
 use std::path::Path;
@@ -17,15 +17,22 @@ pub fn build_top_vbmeta(
 ) -> Result<SignedVbmeta> {
     let stock = VbmetaSource::read(template.stock_slot_a)?;
     let original = VbmetaSource::read(template.original_slot_b)?;
-    original.require_signed_with(profile::TOP_VBMETA_KEY_SPEC, profile::TOP_VBMETA_ALGORITHM)?;
+    original.require_signed_with(
+        toss_front2::TOP_VBMETA_KEY_SPEC,
+        toss_front2::TOP_VBMETA_ALGORITHM,
+    )?;
     original.require_no_public_key_metadata()?;
     require_supported_headers(&stock, &original)?;
     let rollback_index = stock.info.header.rollback_index;
     require_no_higher_evidence(rollback_index, &original, evidence)?;
 
-    let chained_key = extract_public_key(profile::CHAINED_VBMETA_KEY_SPEC).map_err(|error| {
-        Front2Error::Image(format!("key {}: {error}", profile::CHAINED_VBMETA_KEY_SPEC))
-    })?;
+    let chained_key =
+        extract_public_key(toss_front2::CHAINED_VBMETA_KEY_SPEC).map_err(|error| {
+            Front2Error::Image(format!(
+                "key {}: {error}",
+                toss_front2::CHAINED_VBMETA_KEY_SPEC
+            ))
+        })?;
     let mut chains = 0usize;
     let mut descriptors = Vec::with_capacity(stock.descriptors.len());
     for descriptor in &stock.descriptors {
@@ -56,8 +63,8 @@ pub fn build_top_vbmeta(
     }
 
     let parameters = VbmetaParameters {
-        algorithm_name: profile::TOP_VBMETA_ALGORITHM.to_string(),
-        key_spec: profile::TOP_VBMETA_KEY_SPEC.to_string(),
+        algorithm_name: toss_front2::TOP_VBMETA_ALGORITHM.to_string(),
+        key_spec: toss_front2::TOP_VBMETA_KEY_SPEC.to_string(),
         rollback_index,
         rollback_index_location: original.info.header.rollback_index_location,
         flags: original.info.header.flags,
@@ -66,7 +73,7 @@ pub fn build_top_vbmeta(
             .header
             .required_libavb_version_minor
             .max(original.info.header.required_libavb_version_minor),
-        release_string: profile::GSI_VBMETA_RELEASE_STRING.to_string(),
+        release_string: toss_front2::GSI_VBMETA_RELEASE_STRING.to_string(),
     };
     SignedVbmeta::write(output, original.file_bytes, &parameters, &descriptors)
 }
@@ -110,14 +117,14 @@ fn require_no_higher_evidence(
 }
 
 fn require_expected_chain(partition_name: &str, location: u32, path: &Path) -> Result<()> {
-    if partition_name != profile::CHAINED_VBMETA_BASE
-        || location != profile::CHAINED_ROLLBACK_INDEX_LOCATION
+    if partition_name != toss_front2::CHAINED_VBMETA_BASE
+        || location != toss_front2::CHAINED_ROLLBACK_INDEX_LOCATION
     {
         return Err(Front2Error::Unsupported(format!(
             "{} chains {partition_name} at rollback index location {location}, only {} at location {} is supported",
             path.display(),
-            profile::CHAINED_VBMETA_BASE,
-            profile::CHAINED_ROLLBACK_INDEX_LOCATION
+            toss_front2::CHAINED_VBMETA_BASE,
+            toss_front2::CHAINED_ROLLBACK_INDEX_LOCATION
         )));
     }
     Ok(())

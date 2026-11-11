@@ -1,8 +1,9 @@
 use front2::apply_script::render;
 use front2::digest::sha256_bytes;
+use front2::profiles::toss_front2::PROFILE;
 use front2::{
-    ImageRecord, PartitionTarget, PlannedWrite, RootAccess, SupportCheck, SupportOverride,
-    WritePlan, WritePurpose,
+    DeviceProfile, Front2Error, ImageRecord, PartitionTarget, PlannedWrite, RootAccess,
+    SupportCheck, SupportOverride, WritePlan, WritePurpose,
 };
 
 const PLAIN_SCRIPT_SHA256: &str =
@@ -70,10 +71,54 @@ fn accepting_plan() -> WritePlan {
     })
 }
 
+static OTHER_DEVICE: DeviceProfile = DeviceProfile {
+    id: "other-device",
+    name: "Other device",
+    identity: &[("ro.product.vendor.device", "other")],
+    slot_suffix: "_a",
+    device_state: "locked",
+    verified_boot_state: "green",
+    storage_block_bytes: 512,
+    top_vbmeta_algorithm: "SHA256_RSA4096",
+    top_vbmeta_key_spec: "testkey_rsa4096",
+    remote_stage_parent: "/data/local/tmp",
+    supports_gsi: false,
+};
+
+#[test]
+fn a_plan_loads_only_with_the_profile_that_made_it() {
+    let directory = tempfile::tempdir().expect("tempdir");
+    let mut plan = fixed_plan(SupportOverride::none());
+    plan.script_sha256 = sha256_bytes(render(&plan, &PROFILE).as_bytes());
+    let digest = plan.save(directory.path()).expect("save the plan");
+    let (loaded, loaded_digest) = WritePlan::load(directory.path(), &PROFILE).expect("load");
+    assert_eq!((loaded, loaded_digest), (plan, digest));
+    let refused = WritePlan::load(directory.path(), &OTHER_DEVICE);
+    assert!(matches!(refused, Err(Front2Error::Plan(_))), "{refused:?}");
+}
+
+#[test]
+fn a_plan_with_an_unknown_profile_has_no_script() {
+    let mut plan = fixed_plan(SupportOverride::none());
+    plan.script_sha256 = sha256_bytes(render(&plan, &PROFILE).as_bytes());
+    assert!(plan.script().is_ok());
+    plan.profile = OTHER_DEVICE.id.into();
+    assert!(matches!(plan.script(), Err(Front2Error::Plan(_))));
+}
+
+#[test]
+fn the_storage_unit_of_the_profile_sets_the_dd_block_size() {
+    let plan = fixed_plan(SupportOverride::none());
+    let script = render(&plan, &OTHER_DEVICE);
+    assert!(script.contains("bs=512 count=16384 conv=fsync"), "{script}");
+    assert!(script.contains("[ \"$(getprop ro.product.vendor.device)\" = 'other' ]"));
+    assert!(!script.contains("ro.soc.model"));
+}
+
 #[test]
 fn the_rendered_script_is_the_same_as_before_the_profile_change() {
-    let plain = render(&fixed_plan(SupportOverride::none()));
-    let accepting = render(&accepting_plan());
+    let plain = render(&fixed_plan(SupportOverride::none()), &PROFILE);
+    let accepting = render(&accepting_plan(), &PROFILE);
     assert_eq!(sha256_bytes(plain.as_bytes()), PLAIN_SCRIPT_SHA256);
     assert_eq!(sha256_bytes(accepting.as_bytes()), ACCEPTING_SCRIPT_SHA256);
 }

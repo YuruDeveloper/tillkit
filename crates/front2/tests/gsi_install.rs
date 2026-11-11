@@ -1,3 +1,4 @@
+use front2::profiles::toss_front2::PROFILE;
 mod gpt_support;
 mod install_support;
 
@@ -190,7 +191,8 @@ fn real_candidate_gives_the_install_plan_that_worked_on_the_device_when_availabl
         return;
     };
     let (candidate, _) = GsiCandidate::load(&candidate_directory).expect("candidate");
-    let inputs = install_inputs(&candidate, &candidate_directory, &backup).expect("inputs");
+    let inputs =
+        install_inputs(&candidate, &candidate_directory, &backup, &PROFILE).expect("inputs");
     let plan = InstallPlan::build(&inputs).expect("plan");
 
     let recorded: Value = serde_json::from_slice(

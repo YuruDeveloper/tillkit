@@ -13,7 +13,12 @@ pub struct PartitionTarget {
 }
 
 impl PartitionTarget {
-    pub fn resolve(shell: &mut dyn DeviceShell, root: RootAccess, label: &str) -> Result<Self> {
+    pub fn resolve(
+        shell: &mut dyn DeviceShell,
+        root: RootAccess,
+        label: &str,
+        block_bytes: u64,
+    ) -> Result<Self> {
         if !is_safe_label(label) {
             return Err(Front2Error::Plan(format!("partition label {label:?}")));
         }
@@ -30,10 +35,9 @@ impl PartitionTarget {
         let bytes: u64 = size_text.parse().map_err(|_| {
             Front2Error::Verification(format!("{by_name} size {size_text:?} is not a number"))
         })?;
-        if bytes == 0 || !bytes.is_multiple_of(profile::BLOCK_SIZE) {
+        if bytes == 0 || !bytes.is_multiple_of(block_bytes) {
             return Err(Front2Error::Verification(format!(
-                "{by_name} size {bytes} is not a positive multiple of {}",
-                profile::BLOCK_SIZE
+                "{by_name} size {bytes} is not a positive multiple of {block_bytes}"
             )));
         }
         Ok(Self {

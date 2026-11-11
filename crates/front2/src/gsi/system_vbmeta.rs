@@ -4,7 +4,7 @@ use crate::gsi::signed_vbmeta::SignedVbmeta;
 use crate::gsi::vbmeta_parameters::VbmetaParameters;
 use crate::gsi::vbmeta_source::VbmetaSource;
 use crate::gsi::vbmeta_template::VbmetaTemplate;
-use crate::profile;
+use crate::profiles::toss_front2;
 use avbtool_rs::info::DescriptorInfo;
 use std::path::Path;
 
@@ -17,8 +17,8 @@ pub fn build_system_vbmeta(
     let original = VbmetaSource::read(template.original_slot_b)?;
     let gsi_source = VbmetaSource::read(gsi)?;
     original.require_signed_with(
-        profile::CHAINED_VBMETA_KEY_SPEC,
-        profile::CHAINED_VBMETA_ALGORITHM,
+        toss_front2::CHAINED_VBMETA_KEY_SPEC,
+        toss_front2::CHAINED_VBMETA_ALGORITHM,
     )?;
     original.require_no_public_key_metadata()?;
     require_same_rollback(&stock, &original)?;
@@ -31,13 +31,13 @@ pub fn build_system_vbmeta(
         .collect();
     require_one_hashtree(
         &descriptors,
-        profile::RETAINED_PRODUCT_PARTITION,
+        toss_front2::RETAINED_PRODUCT_PARTITION,
         &stock.path,
     )?;
     require_only_hashtree_and_properties(&gsi_source)?;
     require_one_hashtree(
         &gsi_source.descriptors,
-        profile::GSI_SYSTEM_PARTITION,
+        toss_front2::GSI_SYSTEM_PARTITION,
         &gsi_source.path,
     )?;
     descriptors.extend(gsi_source.descriptors.iter().cloned());
@@ -48,13 +48,13 @@ pub fn build_system_vbmeta(
         .max()
         .unwrap_or(0);
     let parameters = VbmetaParameters {
-        algorithm_name: profile::CHAINED_VBMETA_ALGORITHM.to_string(),
-        key_spec: profile::CHAINED_VBMETA_KEY_SPEC.to_string(),
+        algorithm_name: toss_front2::CHAINED_VBMETA_ALGORITHM.to_string(),
+        key_spec: toss_front2::CHAINED_VBMETA_KEY_SPEC.to_string(),
         rollback_index: original.info.header.rollback_index,
         rollback_index_location: original.info.header.rollback_index_location,
         flags: original.info.header.flags,
         required_libavb_version_minor: required_minor,
-        release_string: profile::GSI_VBMETA_RELEASE_STRING.to_string(),
+        release_string: toss_front2::GSI_VBMETA_RELEASE_STRING.to_string(),
     };
     SignedVbmeta::write(output, original.file_bytes, &parameters, &descriptors)
 }
@@ -62,10 +62,10 @@ pub fn build_system_vbmeta(
 fn is_retained_product(descriptor: &DescriptorInfo) -> bool {
     match descriptor {
         DescriptorInfo::Hashtree { partition_name, .. } => {
-            partition_name == profile::RETAINED_PRODUCT_PARTITION
+            partition_name == toss_front2::RETAINED_PRODUCT_PARTITION
         }
         DescriptorInfo::Property { key, .. } => {
-            key.starts_with(profile::RETAINED_PRODUCT_PROPERTY_PREFIX)
+            key.starts_with(toss_front2::RETAINED_PRODUCT_PROPERTY_PREFIX)
         }
         _ => false,
     }

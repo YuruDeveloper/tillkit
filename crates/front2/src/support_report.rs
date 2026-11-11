@@ -1,6 +1,6 @@
+use crate::device_profile::DeviceProfile;
 use crate::device_state::DeviceState;
 use crate::error::{Front2Error, Result};
-use crate::profile;
 use crate::support_check::{BOOT_COMPLETED, ROOT_ACCESS, SLOT_SUFFIX, SupportCheck};
 use crate::support_override::SupportOverride;
 use crate::verdict::Verdict;
@@ -12,35 +12,20 @@ pub struct SupportReport {
 }
 
 impl SupportReport {
-    pub fn expected_properties() -> [(&'static str, &'static str); 10] {
-        [
-            (
-                "ro.product.vendor.manufacturer",
-                profile::VENDOR_MANUFACTURER,
-            ),
-            ("ro.product.vendor.device", profile::VENDOR_DEVICE),
-            (
-                "ro.vendor.build.fingerprint",
-                profile::VENDOR_BUILD_FINGERPRINT,
-            ),
-            ("ro.soc.model", profile::SOC_MODEL),
-            ("ro.board.platform", profile::BOARD_PLATFORM),
+    pub fn expected_properties(profile: &DeviceProfile) -> Vec<(&'static str, &'static str)> {
+        let mut properties = profile.identity.to_vec();
+        properties.extend([
             ("ro.build.ab_update", "true"),
-            (SLOT_SUFFIX, profile::SUPPORTED_SLOT_SUFFIX),
-            (
-                "ro.boot.vbmeta.device_state",
-                profile::REQUIRED_DEVICE_STATE,
-            ),
-            (
-                "ro.boot.verifiedbootstate",
-                profile::REQUIRED_VERIFIED_BOOT_STATE,
-            ),
+            (SLOT_SUFFIX, profile.slot_suffix),
+            ("ro.boot.vbmeta.device_state", profile.device_state),
+            ("ro.boot.verifiedbootstate", profile.verified_boot_state),
             (BOOT_COMPLETED, "1"),
-        ]
+        ]);
+        properties
     }
 
-    pub fn evaluate(state: &DeviceState) -> Self {
-        let mut checks: Vec<SupportCheck> = Self::expected_properties()
+    pub fn evaluate(profile: &DeviceProfile, state: &DeviceState) -> Self {
+        let mut checks: Vec<SupportCheck> = Self::expected_properties(profile)
             .into_iter()
             .map(|(id, expected)| SupportCheck::exact(id, expected, state.property(id)))
             .collect();
@@ -100,6 +85,7 @@ impl SupportReport {
 mod tests {
     use super::*;
     use crate::device_state::PROPERTY_KEYS;
+    use crate::profiles::toss_front2::PROFILE;
     use crate::root_access::RootAccess;
     use std::collections::BTreeMap;
 
@@ -136,7 +122,7 @@ mod tests {
 
     #[test]
     fn measured_front2_state_allows_writes() {
-        let report = SupportReport::evaluate(&supported_state());
+        let report = SupportReport::evaluate(&PROFILE, &supported_state());
         assert!(report.writes_allowed(), "{:?}", report.first_blocker());
     }
 
@@ -159,7 +145,7 @@ mod tests {
         ] {
             let mut state = supported_state();
             state.properties.insert(key.to_string(), value.to_string());
-            let report = SupportReport::evaluate(&state);
+            let report = SupportReport::evaluate(&PROFILE, &state);
             assert_eq!(
                 report.first_blocker().map(|check| check.id.as_str()),
                 Some(key)
@@ -172,7 +158,7 @@ mod tests {
     fn missing_root_blocks_writes() {
         let mut state = supported_state();
         state.root_access = None;
-        let report = SupportReport::evaluate(&state);
+        let report = SupportReport::evaluate(&PROFILE, &state);
         assert_eq!(
             report.first_blocker().map(|check| check.id.as_str()),
             Some("root_access")

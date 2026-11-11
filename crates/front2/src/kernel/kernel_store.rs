@@ -1,3 +1,4 @@
+use crate::device_profile::DeviceProfile;
 use crate::error::{Front2Error, Result};
 use crate::kernel::kernel_set::{KernelSet, SET_FILE, SET_SCHEMA};
 use crate::kernel::reference_partition::ReferencePartition;
@@ -10,11 +11,19 @@ use std::path::{Path, PathBuf};
 #[derive(Debug, Clone)]
 pub struct KernelStore {
     root: PathBuf,
+    profile: &'static DeviceProfile,
 }
 
 impl KernelStore {
-    pub fn new(root: impl Into<PathBuf>) -> Self {
-        Self { root: root.into() }
+    pub fn new(root: impl Into<PathBuf>, profile: &'static DeviceProfile) -> Self {
+        Self {
+            root: root.into(),
+            profile,
+        }
+    }
+
+    pub fn profile(&self) -> &'static DeviceProfile {
+        self.profile
     }
 
     pub fn root(&self) -> &Path {
@@ -22,7 +31,7 @@ impl KernelStore {
     }
 
     pub fn pair_store(&self) -> PairStore {
-        PairStore::new(self.root.clone())
+        PairStore::new(self.root.clone(), self.profile)
     }
 
     pub fn directory(&self, id: &str) -> Result<PathBuf> {
