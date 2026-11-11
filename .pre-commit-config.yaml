@@ -12,9 +12,6 @@ repos:
       # whichever platform ran the hook that rewrote the file.
       - id: mixed-line-ending
         args: ["--fix=auto"]
-      - id: pretty-format-json
-        args: ["--autofix", "--no-ensure-ascii"]
-        files: ^crates/ltbox-gui/lang/.*\.json$
 
   - repo: local
     hooks:

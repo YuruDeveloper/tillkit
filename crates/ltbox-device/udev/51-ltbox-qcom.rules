@@ -4,7 +4,7 @@
 # Install manually, or let the GUI invoke `pkexec ltbox --install-udev`
 # from its Linux driver flow:
 #
-#   sudo cp misc/udev/51-ltbox-qcom.rules /etc/udev/rules.d/
+#   sudo cp crates/ltbox-device/udev/51-ltbox-qcom.rules /etc/udev/rules.d/
 #   sudo udevadm control --reload
 #   sudo udevadm trigger
 #
@@ -17,8 +17,7 @@
 # Filename starts with `51-` so it sorts after distro-shipped 50-*
 # rules (gives LTBox the last word on the matching device).
 #
-# VID/PID list: confirmed-needed entries only; expand once hardware
-# testing surfaces additional Lenovo Fastboot or recovery VIDs.
+# VID/PID list: confirmed-needed entries only.
 
 # ---- Qualcomm 9008 EDL (qdl + `serialport` crate) -----------------
 # USB endpoint — needed for the libusb open path qdl uses for
@@ -48,12 +47,4 @@ SUBSYSTEM=="tty", ATTRS{idVendor}=="05c6", ATTRS{idProduct}=="9008", \
 # `rusb` — without this rule the desktop user can't open the bulk-in
 # / bulk-out endpoints `ADBUSBDevice` needs.
 SUBSYSTEM=="usb", ATTR{idVendor}=="18d1", \
-    TAG+="uaccess", MODE="0660", GROUP="plugdev"
-
-# ---- Lenovo USB (ADB + Fastboot on Lenovo tablets) ----------------
-# Vendor ID 17ef covers the production device states (ADB normal /
-# recovery, Fastboot bootloader) that Lenovo tablet boot stages
-# enumerate as. Same `adb_client::usb` libusb-claim grant rationale
-# applies as for 18d1 above.
-SUBSYSTEM=="usb", ATTR{idVendor}=="17ef", \
     TAG+="uaccess", MODE="0660", GROUP="plugdev"

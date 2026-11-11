@@ -636,32 +636,6 @@ impl EdlSession {
             ltbox_core::tr_args!("log_edl_found_on", port = port)
         );
 
-        // An encrypted manifest (`qsahara_device_programmer.x`) is decrypted
-        // to the plaintext `.xml` beside it before use, so its per-id images
-        // (referenced relative to that directory) still resolve. Some Lenovo
-        // firmware packs ship the manifest only in this encrypted form. This
-        // is the single point loaders are consumed, so decrypting here covers
-        // every caller (Flash / Unroot / Rescue / DetectArb / Dump).
-        // Kept across the decryption shadow below: what the caller handed in is
-        // what a wizard holds and what gets remembered, not the sibling `.xml`
-        // an encrypted pick expands into.
-        let picked_loader = loader_path;
-        let decrypted_holder;
-        let loader_path: &Path =
-            if ltbox_core::sahara_xml::is_encrypted_manifest_filename(loader_path) {
-                let out = loader_path.with_file_name(ltbox_core::sahara_xml::MANIFEST_FILENAME);
-                ltbox_core::crypto::decrypt_file(loader_path, &out).map_err(|e| {
-                    EdlError::Session(format!(
-                        "Decrypt loader manifest {}: {e}",
-                        loader_path.display()
-                    ))
-                })?;
-                decrypted_holder = out;
-                decrypted_holder.as_path()
-            } else {
-                loader_path
-            };
-
         // Manifest (TB323FU): slot array indexed by Sahara image-id.
         // Single loader (.melf/.mbn/.elf): one-element slice at slot 0.
         let mut slots: Vec<Option<Vec<u8>>> =
@@ -822,7 +796,7 @@ impl EdlSession {
         // that it is the right loader for whatever is on the other end of the
         // cable. Published here rather than on `Ok(Self)` so a later Firehose
         // failure, which says nothing about the loader, still counts.
-        publish_uploaded_loader(picked_loader);
+        publish_uploaded_loader(loader_path);
 
         // Keep qdl's own reset_on_drop false to dodge its recursive reset;
         // `EdlSession`'s `Drop` owns the missed-exit cleanup instead.
@@ -941,22 +915,16 @@ impl EdlSession {
         Ok(out)
     }
 
-    /// Resolve a partition's UFS LUN: the static [`ltbox_core::partition_lun`]
-    /// table first (no I/O), then a GPT scan across LUNs `0..=5` as a fallback
-    /// for partitions not in the table (a model whose rawprogram wasn't compared,
-    /// or a future layout). Slot suffix / case are normalised. Errors when the
-    /// label is on no LUN's GPT.
+    /// Resolve a partition's UFS LUN from a GPT scan across LUNs `0..=5`.
+    /// Slot suffix / case are normalised. Errors when the label is on no
+    /// LUN's GPT.
     pub fn lun_for(&mut self, label: &str, log: &mut Vec<String>) -> Result<u8> {
-        if let Some(lun) = ltbox_core::partition_lun::lun_for_partition(label) {
-            return Ok(lun);
-        }
         let parts = self.scan_partitions(0..=5, log)?;
         // Resolve from the device GPT: an EXACT label match first, then the
         // slot-stripped base. Within each tier the matches MUST agree on one LUN.
-        // A deliberately multi-LUN label (e.g. `xbl` on LUN 1+2, `last_parti` on
-        // every LUN) is omitted from the static map precisely because it has no
-        // single LUN, so returning an arbitrary first hit would defeat that
-        // omission — error on ambiguity instead. A slot-suffixed `xbl_a` / `xbl_b`
+        // A multi-LUN label (e.g. `xbl` on LUN 1+2, `last_parti` on every LUN)
+        // has no single LUN, so returning an arbitrary first hit would be
+        // wrong — error on ambiguity instead. A slot-suffixed `xbl_a` / `xbl_b`
         // resolves through the exact tier to its own entry.
         let exact: Vec<u8> = parts
             .iter()
@@ -966,12 +934,10 @@ impl EdlSession {
         if let Some(lun) = Self::single_matching_lun(&exact, label)? {
             return Ok(lun);
         }
-        let want = ltbox_core::partition_lun::strip_slot_suffix(label).to_ascii_lowercase();
+        let want = strip_slot_suffix(label).to_ascii_lowercase();
         let stripped: Vec<u8> = parts
             .iter()
-            .filter(|p| {
-                ltbox_core::partition_lun::strip_slot_suffix(&p.name).to_ascii_lowercase() == want
-            })
+            .filter(|p| strip_slot_suffix(&p.name).to_ascii_lowercase() == want)
             .map(|p| p.lun)
             .collect();
         Self::single_matching_lun(&stripped, label)?
@@ -982,7 +948,7 @@ impl EdlSession {
     /// `Ok(None)` = no match (caller tries the next tier or reports not-found);
     /// `Ok(Some(lun))` = every match shares one LUN; `Err(AmbiguousPartitionLun)`
     /// = the label spans more than one distinct LUN and cannot be targeted
-    /// unambiguously (a multi-LUN label deliberately absent from the static map).
+    /// unambiguously.
     fn single_matching_lun(luns: &[u8], label: &str) -> Result<Option<u8>> {
         match luns.first() {
             None => Ok(None),
@@ -1564,28 +1530,6 @@ impl EdlSession {
         ltbox_core::live!(log, "[EDL] {}", tr("log_edl_reset_to_edl_sent"));
         Ok(())
     }
-
-    /// Mark `xbl_a`'s LUN as the boot drive (Firehose
-    /// `<setbootablestoragedrive value="1"/>`, equivalent to fh_loader's
-    /// `setactivepartition=1`). LUN 1 is hardcoded — every supported
-    /// Lenovo Qualcomm tablet (TB320FC / TB321FU / TB322FC / TB323FU /
-    /// TB520FU / TB710FU) places `xbl_a` on LUN 1.
-    ///
-    /// Lenovo firmware rawprograms only target `_a`, so a full firmware
-    /// flash always lands on `_a`. Call this after the flash so the SoC
-    /// boots from the freshly-written `_a` on the next reset; without
-    /// it a device that was previously running on `_b` would continue
-    /// booting `_b`'s pre-flash firmware.
-    pub fn set_active_slot_a(&mut self, log: &mut Vec<String>) -> Result<()> {
-        const XBL_A_LUN: u8 = 1;
-        ltbox_core::live!(
-            log,
-            "[Flash] {}",
-            ltbox_core::tr_args!("live_flash_set_bootable", lun = XBL_A_LUN)
-        );
-        qdl::firehose_set_bootable(&mut self.dev, XBL_A_LUN)
-            .map_err(|e| EdlError::Session(format!("setbootablestoragedrive failed: {e}")))
-    }
 }
 
 impl Drop for EdlSession {
@@ -1602,6 +1546,19 @@ impl Drop for EdlSession {
         if let Err(e) = self.reset_to_edl(&mut log) {
             ltbox_core::live_debug!(log, "[EDL] drop-time reset_to_edl failed: {e}");
         }
+    }
+}
+
+/// Strip the trailing `_a` / `_b` slot suffix if present.
+fn strip_slot_suffix(label: &str) -> &str {
+    if label.len() < 2 {
+        return label;
+    }
+    let tail = &label[label.len() - 2..];
+    if tail.eq_ignore_ascii_case("_a") || tail.eq_ignore_ascii_case("_b") {
+        &label[..label.len() - 2]
+    } else {
+        label
     }
 }
 

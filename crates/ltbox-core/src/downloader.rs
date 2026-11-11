@@ -15,14 +15,14 @@ pub const USER_AGENT: &str = concat!("ltbox/", env!("CARGO_PKG_VERSION"));
 
 /// Process-wide shared `ureq::Agent`. Reuses TLS roots + the connection
 /// pool across every outbound HTTP request in the workspace (downloader,
-/// github / nightly.link clients, lenovo PTSTPD, lenovo OTA). Building a
+/// github / nightly.link clients). Building a
 /// fresh agent per call rebuilt the rustls config + spun up a new pool
 /// each time, which on a Magisk-update flow alone meant 5+ redundant
 /// TLS-config setups in seconds.
 ///
 /// Per-stage timeouts (15 s connect, 30 s recv-response, 600 s recv-body),
-/// not a single global timeout, so a slow-link download (Lenovo /
-/// GitHub-release pulls) is not cut off mid-body once it is making progress.
+/// not a single global timeout, so a slow-link download
+/// (GitHub-release pulls) is not cut off mid-body once it is making progress.
 fn shared_agent() -> &'static ureq::Agent {
     use std::sync::OnceLock;
     static AGENT: OnceLock<ureq::Agent> = OnceLock::new();

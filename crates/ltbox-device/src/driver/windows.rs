@@ -13,12 +13,16 @@ use ltbox_core::github::GitHubClient;
 use ltbox_core::i18n::tr;
 use ltbox_core::{live, tr_args};
 
-use crate::software_fix::escape_powershell_single_quoted;
-
 use super::{
     DriverError, DriverStatus, DriverUpdate, QcomDriverMode, Result, parse_version,
     qcom_driver_mode, version_from_tag, version_lt,
 };
+
+/// Escape a value for embedding inside a PowerShell single-quoted string
+/// literal (`'` -> `''`). Callers must still wrap the result in `'...'`.
+fn escape_powershell_single_quoted(value: &str) -> String {
+    value.replace('\'', "''")
+}
 
 /// `Command::new` with no console window.
 fn silent_command(program: impl AsRef<OsStr>) -> Command {

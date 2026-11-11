@@ -601,6 +601,25 @@ impl AdbManager {
         }
     }
 
+    pub fn shell_with_status(&mut self, command: &str) -> Result<(String, i32)> {
+        let output = self.shell_inner(&format!("{command}\necho \"{EXIT_STATUS_MARKER}$?\""))?;
+        split_exit_status(&output).ok_or_else(|| {
+            AdbError::CommandFailed("the device shell returned no exit status".to_string())
+        })
+    }
+
+    pub fn pull_file(&mut self, remote: &str, local: &Path) -> Result<()> {
+        let mut file = std::fs::File::create(local)
+            .map_err(|e| AdbError::CommandFailed(format!("create {}: {e}", local.display())))?;
+        let device = self.connect_device()?;
+        if let Err(error) = device.pull(&remote, &mut file) {
+            self.drop_device();
+            return Err(AdbError::CommandFailed(error.to_string()));
+        }
+        file.sync_all()
+            .map_err(|e| AdbError::CommandFailed(format!("sync {}: {e}", local.display())))
+    }
+
     pub fn get_model(&mut self) -> Result<Option<String>> {
         match self.shell_inner("getprop ro.product.model") {
             Ok(m) if !m.is_empty() => Ok(Some(m)),
@@ -862,6 +881,14 @@ fn write_key_atomic(path: &Path, pem: &[u8]) -> Result<()> {
     Ok(())
 }
 
+const EXIT_STATUS_MARKER: &str = "__adb_exit_status:";
+
+fn split_exit_status(output: &str) -> Option<(String, i32)> {
+    let (text, status) = output.rsplit_once(EXIT_STATUS_MARKER)?;
+    let status = status.trim().parse().ok()?;
+    Some((text.trim().to_string(), status))
+}
+
 const ADB_SHELL_REFUSED: &str =
     "ADB request failed - Open session failed: got CLSE in response instead of OKAY";
 
@@ -912,7 +939,7 @@ impl Default for AdbManager {
 mod tests {
     use super::{
         AdbError, ensure_key_at_path, is_adbd_dropped_after_reboot, is_sideload_shell_refusal,
-        remove_corrupt_key, validate_key_file, write_key_atomic,
+        remove_corrupt_key, split_exit_status, validate_key_file, write_key_atomic,
     };
     use super::{
         AdbManager, ServerDevice, ServerProbe, parse_server_devices, probe_server,
@@ -1042,6 +1069,28 @@ mod tests {
             let mut adb = AdbManager::with_server_address(fake_adb_server(devices, None));
             assert_eq!(adb.check_device_state().expect("state"), expected);
         }
+    }
+
+    #[test]
+    fn exit_status_is_split_from_the_shell_output() {
+        assert_eq!(
+            split_exit_status("line one\nline two\n__adb_exit_status:0"),
+            Some(("line one\nline two".to_string(), 0))
+        );
+        assert_eq!(
+            split_exit_status("__adb_exit_status:13"),
+            Some((String::new(), 13))
+        );
+        assert_eq!(
+            split_exit_status("__adb_exit_status:7\nreal\n__adb_exit_status:1"),
+            Some(("__adb_exit_status:7\nreal".to_string(), 1))
+        );
+        assert_eq!(split_exit_status("output cut before the status"), None);
+        assert_eq!(split_exit_status("text\n__adb_exit_status:"), None);
+        assert_eq!(
+            split_exit_status("text\n__adb_exit_status:0 trailing"),
+            None
+        );
     }
 
     #[test]

@@ -175,7 +175,7 @@ fn build_fixture_output(
         release_tag: None,
     };
     let mut log = Vec::new();
-    let artifacts = build_patched_artifacts(&config, false, &mut log).unwrap();
+    let artifacts = build_patched_artifacts(&config, &mut log).unwrap();
     assert_eq!(artifacts.root_partition, "boot_a");
     let log_text = log.join("\n");
     assert!(log_text.contains("boot.img"), "{log_text}");

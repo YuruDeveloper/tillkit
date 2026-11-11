@@ -3,7 +3,6 @@ members = [
     "crates/ltbox-core",
     "crates/ltbox-device",
     "crates/ltbox-patch",
-    "crates/ltbox-gui",
 ]
 # Vendored third-party crate — built as a path dependency, not a member,
 # so it keeps its own edition/lints and doesn't inherit workspace config.
@@ -29,8 +28,6 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 
 # Crypto — RustCrypto 2026 bundle.
-aes = "0.9"
-cbc = "0.2"
 sha1 = "0.11"
 sha2 = "0.11"
 digest = "0.11"
@@ -46,22 +43,9 @@ zip = { version = "9", default-features = false, features = ["deflate"] }
 flate2 = "1"
 # Strict base64 decoding (KonaBess export URIs).
 base64 = "0.22"
-tar = { version = "0.4", default-features = false }
-# Zstd (decompress ported-ROM `*.img.zst` payloads, e.g. `super.img.zst`).
-# Already linked transitively via kptools, so this adds no new C build surface.
-zstd = "0.13"
 # LZMA-alone decoding for compressed ABL LinuxLoader images. This is already
 # present transitively through kptools/magiskboot.
 lzma-rust2 = "0.16.5"
-
-# UTF-8-guaranteed paths. `camino::Utf8PathBuf` is a drop-in `PathBuf`
-# replacement that rejects non-UTF-8 byte sequences at construction time,
-# which means `.to_string_lossy()` / `.display()` noise disappears at
-# the boundaries where we serialize paths into JSON settings or surface
-# them in the log/UI. Introduced at low-blast-radius sites first; a full
-# sweep would touch ~100 call sites for a modest win so we keep `PathBuf`
-# everywhere else for now.
-camino = "1"
 
 # XML
 roxmltree = "0.21"
@@ -74,14 +58,8 @@ roxmltree = "0.21"
 # to one request per endpoint per run without coordinating the clients.
 moka = { version = "0.12", features = ["sync"] }
 
-# Logging — tracing for structured `info!` macros, tracing-subscriber
-# for the global dispatcher, tracing-appender for daily-rotated log files
-# under the user's config dir. `non_blocking` writes move the fs I/O off
-# the main thread so `info!` calls in hot paths (flash / dump loops)
-# don't hiccup on slow antivirus scans.
+# Logging — tracing for structured `info!` macros.
 tracing = "0.1"
-tracing-subscriber = { version = "0.3", features = ["env-filter"] }
-tracing-appender = "0.2"
 
 # ADB
 adb_client = { version = "3", features = ["usb"] }
@@ -102,13 +80,9 @@ serialport = "4"
 iced = { version = "0.14", features = ["tokio", "svg", "image", "advanced", "canvas"] }
 rfd = "0.17"
 dirs = "7"
-fs4 = { version = "1", default-features = false }
 dark-light = "3"
-sys-locale = "0.3"
 semver = "1"
-open = "5"
 windows-sys = { version = "0.61", features = ["Win32_UI_Shell", "Win32_UI_WindowsAndMessaging", "Win32_Foundation", "Win32_System_Console", "Win32_System_Diagnostics_Debug", "Win32_System_Threading"] }
-winresource = "0.1"
 tokio = { version = "1", features = ["rt"] }
 gptman = "3"
 
@@ -119,11 +93,6 @@ kptools = { git = "https://github.com/miner7222/kptools-rs", tag = "v0.2.1+kp0.1
 # Vendored under vendor/qdl — qualcomm/qdlrs + some local fixes.
 # See vendor/qdl/VENDORING.md.
 qdl = { path = "vendor/qdl", features = ["serial", "usb"] }
-# Build-time Lucide icon subsetter — generates `src/icon.rs` at build
-# time with one Text-returning function per icon declared in
-# `fonts/lucide.toml`. No runtime dependency on the crate itself; the
-# generated code only uses `iced::widget::text` + `iced::Font`.
-iced_lucide = "0.1.0"
 
 # Release tuning for the shipped GUI binary. `panic` is left at the default
 # "unwind" on purpose: worker threads rely on unwinding so a single failed
