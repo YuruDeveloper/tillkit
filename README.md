@@ -154,5 +154,7 @@ Third-party components keep their licenses:
 | kptools-rs | GPL-2.0-or-later |
 | avbtool-rs | Apache-2.0 |
 | IBM Plex Mono (`crates/frontbox/assets/fonts`) | SIL Open Font License 1.1 |
+| IBM Plex Sans KR (`crates/frontbox/assets/fonts`) | SIL Open Font License 1.1 |
+| Archivo Narrow (`crates/frontbox/assets/fonts`) | SIL Open Font License 1.1 |
 
 [![GPLv3](https://www.gnu.org/graphics/gplv3-127x51.png)](https://www.gnu.org/licenses/gpl-3.0)

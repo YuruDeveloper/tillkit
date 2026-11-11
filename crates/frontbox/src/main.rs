@@ -50,5 +50,7 @@ fn main() -> iced::Result {
         })
         .font(fonts::MONO_REGULAR_BYTES)
         .font(fonts::MONO_BOLD_BYTES)
+        .font(fonts::BODY_BYTES)
+        .font(fonts::DISPLAY_BYTES)
         .run()
 }

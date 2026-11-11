@@ -24,7 +24,7 @@ pub fn bar<'a>(color: Color, width: Length, height: Length) -> Element<'a, Messa
 
 pub fn display<'a>(content: &'a str, palette: Palette) -> Element<'a, Message> {
     text(content)
-        .font(fonts::MONO_BOLD)
+        .font(fonts::DISPLAY)
         .size(40)
         .color(palette.ink)
         .into()
