@@ -195,13 +195,18 @@ pub fn fault<'a>(
     block(content, palette.tint_idol, palette)
 }
 
-pub fn caution<'a>(caption: &str, sentence: &str, palette: Palette) -> Element<'a, Message> {
-    let heading = row![
+pub fn warned<'a>(caption: &str, palette: Palette) -> Element<'a, Message> {
+    row![
         square(palette.warn, Some(palette.ink)),
         strong(format!("{caption} · warn"), palette)
     ]
     .spacing(8)
-    .align_y(iced::Alignment::Center);
+    .align_y(iced::Alignment::Center)
+    .into()
+}
+
+pub fn caution<'a>(caption: &str, sentence: &str, palette: Palette) -> Element<'a, Message> {
+    let heading = warned(caption, palette);
     let content = column![heading, body(sentence.to_string(), palette)].spacing(8);
     block(content, palette.tint_warn, palette)
 }
@@ -237,6 +242,23 @@ pub fn key_value<'a>(
     ]
     .spacing(12)
     .into()
+}
+
+pub fn fact<'a>(name: &str, word: &str, code: &str, palette: Palette) -> Element<'a, Message> {
+    let name = text(name.to_string())
+        .font(fonts::BODY)
+        .size(14)
+        .color(palette.ink_2);
+    let mut content = row![container(name).width(Length::Fixed(KEY_WIDTH))]
+        .spacing(12)
+        .align_y(iced::Alignment::Center);
+    if !word.is_empty() {
+        content = content.push(body(word.to_string(), palette));
+    }
+    if !code.is_empty() {
+        content = content.push(value(code.to_string(), palette));
+    }
+    content.into()
 }
 
 pub fn ruled<'a>(rows: Vec<Element<'a, Message>>, palette: Palette) -> Element<'a, Message> {

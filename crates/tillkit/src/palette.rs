@@ -55,10 +55,6 @@ impl Palette {
         if self.is_dusk { PAPER } else { DUSK }
     }
 
-    pub fn idol_word(self) -> Color {
-        if self.is_dusk { self.ink } else { self.idol }
-    }
-
     pub fn theme(self) -> iced::Theme {
         let name = if self.is_dusk { "dusk" } else { "paper" };
         iced::Theme::custom(

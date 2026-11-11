@@ -1,11 +1,13 @@
+pub mod confirm;
 pub mod device;
 pub mod gsi;
+pub mod info;
 pub mod kernel;
 pub mod pairs;
 pub mod parts;
 pub mod rabbit;
 pub mod rail;
-pub mod scope;
+pub mod support_rows;
 pub mod write;
 
 use crate::app::App;
@@ -27,7 +29,7 @@ pub fn root(app: &App) -> Element<'_, Message> {
         Screen::Kernel => kernel::view(app),
         Screen::Write => write::view(app),
         Screen::Gsi => gsi::view(app),
-        Screen::Scope => scope::view(app),
+        Screen::Info => info::view(app),
     };
     let center = scrollable(
         container(content)
@@ -51,7 +53,11 @@ pub fn root(app: &App) -> Element<'_, Message> {
         .height(Length::Fill)
         .content_fit(ContentFit::Cover)
         .filter_method(FilterMethod::Nearest);
-    container(stack![grain, layout])
+    let mut layers = stack![grain, layout];
+    if let Some(confirmation) = app.confirmation {
+        layers = layers.push(confirm::layer(app, confirmation));
+    }
+    container(layers)
         .width(Length::Fill)
         .height(Length::Fill)
         .style(move |_| parts::fill(palette.paper))

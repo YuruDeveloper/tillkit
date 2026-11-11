@@ -27,6 +27,8 @@ pub fn view(app: &App) -> Element<'_, Message> {
         ),
         Space::new().height(18),
         navigation,
+        Space::new().height(12),
+        forced_mark(app),
         Space::new().height(Length::Fill),
         parts::bracket(theme_caption, Some(Message::ToggleTheme), palette),
         parts::label("MODIFIED LTBOX · GPL-3.0-OR-LATER", palette),
@@ -36,6 +38,15 @@ pub fn view(app: &App) -> Element<'_, Message> {
         .padding([24, 18])
         .width(Length::Fixed(RAIL_WIDTH))
         .height(Length::Fill)
+        .into()
+}
+
+fn forced_mark<'a>(app: &App) -> Element<'a, Message> {
+    if !app.forced {
+        return Space::new().into();
+    }
+    container(parts::warned("FORCED", app.palette))
+        .padding([0, 12])
         .into()
 }
 
@@ -96,7 +107,7 @@ mod tests {
             let counts = Screen::ALL.map(|current| drawn_line_count(current, palette));
             assert!(counts.iter().all(|count| *count == 1));
             assert_eq!(
-                selected_line_colors([Screen::Device, Screen::Gsi, Screen::Scope], palette),
+                selected_line_colors([Screen::Device, Screen::Gsi, Screen::Info], palette),
                 [palette.idol; 3]
             );
             assert_eq!(

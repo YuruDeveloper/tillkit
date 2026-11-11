@@ -1,4 +1,5 @@
 use crate::clock::now_unix;
+use crate::confirmation::Confirmation;
 use crate::data_paths::DataPaths;
 use crate::diagnosis::Diagnosis;
 use crate::grain;
@@ -9,6 +10,7 @@ use crate::message::Message;
 use crate::palette::Palette;
 use crate::plan_review::PlanReview;
 use crate::screen::Screen;
+use crate::support_words;
 use crate::view;
 use crate::worker::{self, run_blocking};
 use crate::write_flow::WriteFlow;
@@ -29,6 +31,9 @@ pub struct App {
     pub activity: Option<&'static str>,
     pub diagnosis: Option<Diagnosis>,
     pub device_error: Option<String>,
+    pub details_open: bool,
+    pub forced: bool,
+    pub confirmation: Option<Confirmation>,
     pub pairs: Vec<PairManifest>,
     pub pairs_error: Option<String>,
     pub selected_pair: Option<String>,
@@ -57,6 +62,9 @@ impl App {
             activity: None,
             diagnosis: None,
             device_error: None,
+            details_open: false,
+            forced: false,
+            confirmation: None,
             pairs: Vec::new(),
             pairs_error: None,
             selected_pair: None,
@@ -112,6 +120,10 @@ impl App {
             Message::RebootChanged(text) => self.write.reboot_input = text,
             Message::DiscardPlan => self.discard_plan(),
             Message::DeviceRead(result) => self.device_read(result),
+            Message::ToggleDetails => self.details_open = !self.details_open,
+            Message::AskForce => self.ask_force(),
+            Message::Confirm => self.confirm(),
+            Message::Cancel => self.confirmation = None,
             Message::PairStored(result) => self.pair_stored(result),
             Message::PlanReady(result) => self.plan_ready(result),
             Message::PlanStaged(result) => self.plan_staged(result),
@@ -159,6 +171,27 @@ impl App {
         };
         self.diagnosis = diagnosis;
         self.device_error = error;
+        self.forced = false;
+        self.confirmation = None;
+    }
+
+    fn can_be_forced(&self) -> bool {
+        self.diagnosis
+            .as_ref()
+            .is_some_and(|diagnosis| support_words::can_be_forced(&diagnosis.report))
+    }
+
+    fn ask_force(&mut self) {
+        if self.can_be_forced() && !self.is_busy() {
+            self.confirmation = Some(Confirmation::ForceSupport);
+        }
+    }
+
+    fn confirm(&mut self) {
+        match self.confirmation.take() {
+            Some(Confirmation::ForceSupport) => self.forced = self.can_be_forced(),
+            None => {}
+        }
     }
 
     fn read_current_pair(&mut self) -> Task<Message> {

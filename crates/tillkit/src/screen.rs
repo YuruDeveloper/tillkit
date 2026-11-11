@@ -5,7 +5,7 @@ pub enum Screen {
     Kernel,
     Write,
     Gsi,
-    Scope,
+    Info,
 }
 
 impl Screen {
@@ -15,7 +15,7 @@ impl Screen {
         Self::Kernel,
         Self::Write,
         Self::Gsi,
-        Self::Scope,
+        Self::Info,
     ];
 
     pub fn caption(self) -> &'static str {
@@ -25,7 +25,7 @@ impl Screen {
             Self::Kernel => "03 KERNEL",
             Self::Write => "04 WRITE",
             Self::Gsi => "05 GSI",
-            Self::Scope => "06 SCOPE",
+            Self::Info => "06 INFO",
         }
     }
 
