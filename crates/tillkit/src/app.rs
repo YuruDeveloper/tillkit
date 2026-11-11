@@ -14,7 +14,8 @@ use crate::worker::{self, run_blocking};
 use crate::write_flow::WriteFlow;
 use front2::gsi::backup_manifest::BACKUP_MANIFEST_FILE;
 use front2::kernel::{KernelSet, KernelStore};
-use front2::{PairKind, PairManifest, PairStore, SupportOverride};
+use front2::profiles::toss_front2;
+use front2::{DeviceProfile, PairKind, PairManifest, PairStore, SupportOverride};
 use iced::widget::image::Handle;
 use iced::{Element, Task, Theme};
 use std::path::PathBuf;
@@ -156,6 +157,12 @@ impl App {
             .unwrap_or_default()
     }
 
+    pub fn device_profile(&self) -> &'static DeviceProfile {
+        self.diagnosis
+            .as_ref()
+            .map_or(&toss_front2::PROFILE, |diagnosis| diagnosis.profile)
+    }
+
     fn can_be_forced(&self) -> bool {
         self.diagnosis
             .as_ref()
@@ -209,8 +216,9 @@ impl App {
     }
 
     fn reload_backups(&mut self) {
-        let pairs = PairStore::new(self.paths.pairs()).list();
-        let kernel_sets = KernelStore::new(self.paths.kernel_sets()).list();
+        let profile = self.device_profile();
+        let pairs = PairStore::new(self.paths.pairs(), profile).list();
+        let kernel_sets = KernelStore::new(self.paths.kernel_sets(), profile).list();
         let pairs_error = pairs.as_ref().err().map(ToString::to_string);
         let kernel_error = kernel_sets.as_ref().err().map(ToString::to_string);
         self.store_error = pairs_error.or(kernel_error);
@@ -296,7 +304,11 @@ mod tests {
             magisk_version: None,
             kernel_release: None,
         };
-        app.diagnosis = Some(Diagnosis { state, report });
+        app.diagnosis = Some(Diagnosis {
+            state,
+            report,
+            profile: &toss_front2::PROFILE,
+        });
         assert!(app.support_override().is_empty());
         app.forced = true;
         assert_eq!(app.support_override().accepted, [other_slot]);

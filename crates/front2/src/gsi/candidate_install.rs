@@ -1,3 +1,4 @@
+use crate::device_profile::DeviceProfile;
 use crate::error::{Front2Error, Result};
 use crate::gpt::{GptCopyKind, PartitionMap, SECTOR_BYTES, SlotActivation, misc_wipe_sector};
 use crate::gsi::backup_manifest::BackupManifest;
@@ -18,7 +19,9 @@ pub fn install_inputs(
     candidate: &GsiCandidate,
     candidate_directory: &Path,
     backup_directory: &Path,
+    profile: &DeviceProfile,
 ) -> Result<InstallInputs> {
+    profile.require_gsi()?;
     install_inputs_from_images(
         &candidate.images(),
         &candidate.original_super.sha256,

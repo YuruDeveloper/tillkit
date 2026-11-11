@@ -207,7 +207,7 @@ pub mod tests {
             id: "plan-1".into(),
             created_unix: 1,
             purpose: WritePurpose::ApplyCandidate,
-            profile: front2::profile::ID.into(),
+            profile: front2::profiles::toss_front2::ID.into(),
             support_override: front2::SupportOverride::none(),
             new_pair: "new".into(),
             old_pair: "old".into(),

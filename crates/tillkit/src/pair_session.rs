@@ -1,6 +1,7 @@
 use crate::adb_shell::AdbShell;
 use crate::clock::now_unix;
 use crate::data_paths::DataPaths;
+use crate::diagnosis::Diagnosis;
 use crate::plan_review::PlanReview;
 use crate::plan_source::PlanSource;
 use crate::worker::current_backup;
@@ -22,8 +23,9 @@ impl PairSession {
     pub fn open(paths: &DataPaths, support_override: SupportOverride) -> Result<Self> {
         let mut shell = AdbShell::connect()?;
         let state = DeviceState::read(&mut shell)?;
-        SupportReport::evaluate(&state).require_allowed_with(&support_override)?;
-        let store = PairStore::new(paths.pairs());
+        let profile = Diagnosis::profile_for(&state);
+        SupportReport::evaluate(profile, &state).require_allowed_with(&support_override)?;
+        let store = PairStore::new(paths.pairs(), profile);
         let backup = current_backup(&mut shell, &state, &store)?;
         Ok(Self {
             shell,

@@ -45,7 +45,7 @@ pub fn preview(app: &mut App) {
     use crate::write_step::WriteStep;
     use front2::kernel::KernelPlanFacts;
     use front2::magisk::MagiskPackage;
-    use front2::{ApplyOutcome, ApplyState, DeviceState, SupportReport, WritePlan};
+    use front2::{ApplyOutcome, ApplyState, DeviceState, WritePlan};
     use std::path::PathBuf;
 
     fn outcome(review: &PlanReview, state: ApplyState, matches: bool) -> ApplyOutcome {
@@ -110,8 +110,7 @@ pub fn preview(app: &mut App) {
     }
 
     if let Some(state) = read::<DeviceState>("TILLKIT_PREVIEW_DEVICE") {
-        let report = SupportReport::evaluate(&state);
-        app.diagnosis = Some(Diagnosis { state, report });
+        app.diagnosis = Some(Diagnosis::evaluate(state));
     }
     app.details_open = std::env::var_os("TILLKIT_PREVIEW_DETAILS").is_some();
     if let Some(folder) = std::env::var_os("TILLKIT_PREVIEW_FULL_BACKUP").map(PathBuf::from) {

@@ -30,12 +30,21 @@ pub fn read_current_pair(
     let directory = store.begin(request.id)?;
     let remote = format!(
         "{}/front2-read-{}",
-        profile::REMOTE_STAGE_PARENT,
+        store.profile().remote_stage_parent,
         request.id
     );
     let outcome = shell
         .run_checked(&root.command(&format!("mkdir {}", quote(&remote))))
-        .and_then(|_| read_both(shell, root, slot_suffix, &remote, &directory));
+        .and_then(|_| {
+            read_both(
+                shell,
+                root,
+                slot_suffix,
+                &remote,
+                &directory,
+                store.profile().storage_block_bytes,
+            )
+        });
     let cleanup = shell.run(&root.command(&format!("rm -rf {}", quote(&remote))));
     let committed = outcome.and_then(|()| {
         store.commit(
@@ -61,19 +70,21 @@ fn read_both(
     slot_suffix: &str,
     remote: &str,
     directory: &Path,
+    block_bytes: u64,
 ) -> Result<()> {
     for (base, file) in [
         (profile::INIT_BOOT_BASE, INIT_BOOT_FILE),
         (profile::VBMETA_BASE, VBMETA_FILE),
     ] {
         let label = profile::slot_label(base, slot_suffix);
-        let target = PartitionTarget::resolve(shell, root, &label)?;
+        let target = PartitionTarget::resolve(shell, root, &label, block_bytes)?;
         read_partition(
             shell,
             root,
             &target,
             &format!("{remote}/{file}"),
             &directory.join(file),
+            block_bytes,
         )?;
     }
     Ok(())
@@ -85,14 +96,15 @@ fn read_partition(
     target: &PartitionTarget,
     remote_file: &str,
     local_file: &Path,
+    block_bytes: u64,
 ) -> Result<()> {
     let before = target.sha256(shell, root)?;
     let copy = format!(
         "dd if={} of={} bs={} count={} && chmod 644 {}",
         quote(&target.by_name),
         quote(remote_file),
-        profile::BLOCK_SIZE,
-        target.bytes / profile::BLOCK_SIZE,
+        block_bytes,
+        target.bytes / block_bytes,
         quote(remote_file)
     );
     shell.run_checked(&root.command(&copy))?;

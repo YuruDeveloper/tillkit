@@ -14,6 +14,7 @@ use crate::gsi::vbmeta_template::VbmetaTemplate;
 use crate::gsi::view_verification::{verify_view, view_file};
 use crate::image_record::ImageRecord;
 use crate::profile;
+use crate::profiles::toss_front2;
 use crate::super_image::{
     SuperCandidateRequest, SuperLayoutPlan, SuperVerification, SuperVerificationRequest,
     build_super_candidate, verify_super_candidate,
@@ -51,6 +52,7 @@ pub struct GsiCandidate {
 
 impl GsiCandidate {
     pub fn build(request: &GsiCandidateRequest<'_>) -> Result<Self> {
+        request.profile.require_gsi()?;
         let manifest = BackupManifest::load(request.backup_directory)?;
         fs::create_dir(request.output_directory)?;
         let built = assemble(request, &manifest).and_then(|candidate| {
@@ -76,7 +78,7 @@ impl GsiCandidate {
     }
 
     pub fn images(&self) -> Vec<CandidateImage> {
-        let slot_b = |base: &str| profile::slot_label(base, profile::SUPPORTED_SLOT_SUFFIX);
+        let slot_b = |base: &str| profile::slot_label(base, toss_front2::SUPPORTED_SLOT_SUFFIX);
         let mut images: Vec<CandidateImage> = self
             .physical_images
             .iter()
@@ -86,7 +88,7 @@ impl GsiCandidate {
             })
             .collect();
         images.push(CandidateImage {
-            partition: slot_b(profile::CHAINED_VBMETA_BASE),
+            partition: slot_b(toss_front2::CHAINED_VBMETA_BASE),
             image: in_view(&self.chained_vbmeta.image),
             backup_source: None,
         });
@@ -131,12 +133,13 @@ fn in_view(image: &ImageRecord) -> ImageRecord {
 
 fn assemble(request: &GsiCandidateRequest<'_>, manifest: &BackupManifest) -> Result<GsiCandidate> {
     let stock_name = |base: &str| profile::slot_label(base, STOCK_SLOT_SUFFIX);
-    let target_name = |base: &str| profile::slot_label(base, profile::SUPPORTED_SLOT_SUFFIX);
+    let target_name = |base: &str| profile::slot_label(base, toss_front2::SUPPORTED_SLOT_SUFFIX);
     let stock_top = manifest.verified_partition(&stock_name(profile::VBMETA_BASE))?;
     let original_top = manifest.verified_partition(&target_name(profile::VBMETA_BASE))?;
-    let stock_chained = manifest.verified_partition(&stock_name(profile::CHAINED_VBMETA_BASE))?;
+    let stock_chained =
+        manifest.verified_partition(&stock_name(toss_front2::CHAINED_VBMETA_BASE))?;
     let original_chained =
-        manifest.verified_partition(&target_name(profile::CHAINED_VBMETA_BASE))?;
+        manifest.verified_partition(&target_name(toss_front2::CHAINED_VBMETA_BASE))?;
     require_stock_front2_top(&VbmetaSource::read(&stock_top.path)?)?;
 
     let original_super = manifest.partition(SUPER_PARTITION)?;
@@ -166,7 +169,7 @@ fn assemble(request: &GsiCandidateRequest<'_>, manifest: &BackupManifest) -> Res
     let logical_view = extract_logical_view(&super_path, &view)?;
     require_view_matches(&logical_view, &super_verification)?;
     let mut physical_images = Vec::new();
-    for base in profile::PHYSICAL_BOOT_PARTITIONS {
+    for base in toss_front2::PHYSICAL_BOOT_PARTITIONS {
         let source = manifest.partition(&stock_name(base))?;
         physical_images.push(CandidateImage {
             partition: target_name(base),
@@ -179,8 +182,8 @@ fn assemble(request: &GsiCandidateRequest<'_>, manifest: &BackupManifest) -> Res
             stock_slot_a: &stock_chained.path,
             original_slot_b: &original_chained.path,
         },
-        &view.join(view_file(profile::GSI_SYSTEM_PARTITION)),
-        &view.join(view_file(profile::CHAINED_VBMETA_BASE)),
+        &view.join(view_file(toss_front2::GSI_SYSTEM_PARTITION)),
+        &view.join(view_file(toss_front2::CHAINED_VBMETA_BASE)),
     )?;
     let top_vbmeta = build_top_vbmeta(
         &VbmetaTemplate {

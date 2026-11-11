@@ -1,3 +1,4 @@
+use crate::device_profile::DeviceProfile;
 use crate::error::{Front2Error, Result};
 use crate::init_boot_payload::payload_bytes;
 use crate::pair_kind::PairKind;
@@ -24,10 +25,11 @@ pub fn build_signed_candidate(
             original.kind
         )));
     }
-    original.avb.require_front2_trust()?;
+    let profile = store.profile();
+    original.avb.require_trust(profile)?;
     let source = store.directory(original_id)?;
     let directory = store.begin(request.id)?;
-    let built = sign(&source, patched_init_boot, &directory)
+    let built = sign(&source, patched_init_boot, &directory, profile)
         .and_then(|()| {
             store.commit(
                 request.id,
@@ -38,14 +40,19 @@ pub fn build_signed_candidate(
                 request.note,
             )
         })
-        .and_then(|candidate| verify(&original, candidate, &source, &directory));
+        .and_then(|candidate| verify(&original, candidate, &source, &directory, profile));
     if built.is_err() {
         let _ = fs::remove_dir_all(&directory);
     }
     built
 }
 
-fn sign(source: &Path, patched_init_boot: &Path, directory: &Path) -> Result<()> {
+fn sign(
+    source: &Path,
+    patched_init_boot: &Path,
+    directory: &Path,
+    device: &DeviceProfile,
+) -> Result<()> {
     let original_init_boot = source.join(INIT_BOOT_FILE);
     let original_vbmeta = source.join(VBMETA_FILE);
     let stock = avb::extract_image_avb_info(&original_init_boot)?;
@@ -70,7 +77,7 @@ fn sign(source: &Path, patched_init_boot: &Path, directory: &Path) -> Result<()>
         &original_vbmeta,
         &init_boot,
         profile::INIT_BOOT_BASE,
-        profile::TOP_VBMETA_KEY_SPEC,
+        device.top_vbmeta_key_spec,
     )?;
     Ok(())
 }
@@ -80,6 +87,7 @@ fn verify(
     candidate: PairManifest,
     source: &Path,
     directory: &Path,
+    device: &DeviceProfile,
 ) -> Result<PairManifest> {
     let failure = |reason: String| Front2Error::Verification(format!("candidate: {reason}"));
     if candidate.init_boot.bytes != original.init_boot.bytes
@@ -93,7 +101,7 @@ fn verify(
             original.vbmeta.bytes
         )));
     }
-    candidate.avb.require_front2_trust()?;
+    candidate.avb.require_trust(device)?;
     let unchanged = candidate.avb.top_key_sha1 == original.avb.top_key_sha1
         && candidate.avb.top_rollback_index == original.avb.top_rollback_index
         && candidate.avb.top_rollback_index_location == original.avb.top_rollback_index_location
@@ -113,7 +121,7 @@ fn verify(
         ));
     }
     require_unchanged_except_init_boot(&directory.join(VBMETA_FILE), &source.join(VBMETA_FILE))?;
-    verify_pair_images(directory)?;
+    verify_pair_images(directory, device)?;
     Ok(candidate)
 }
 

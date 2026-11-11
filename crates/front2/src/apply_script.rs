@@ -1,5 +1,5 @@
+use crate::device_profile::DeviceProfile;
 use crate::planned_write::PlannedWrite;
-use crate::profile::BLOCK_SIZE;
 use crate::root_access::quote;
 use crate::support_report::SupportReport;
 use crate::write_plan::WritePlan;
@@ -10,7 +10,8 @@ pub const STATE_FILE: &str = "apply-state.txt";
 pub const LOG_FILE: &str = "apply.log";
 pub const CHECK_PASSED: &str = "ALL_PRECONDITIONS_PASSED";
 
-pub fn render(plan: &WritePlan) -> String {
+pub fn render(plan: &WritePlan, profile: &DeviceProfile) -> String {
+    let block_bytes = profile.storage_block_bytes;
     let mut script = String::new();
     let mut line = |text: String| {
         script.push_str(&text);
@@ -25,7 +26,7 @@ pub fn render(plan: &WritePlan) -> String {
     line("[ \"$#\" = 1 ]".into());
     line("case \"$1\" in --check|--apply) ;; *) exit 2 ;; esac".into());
     line("[ \"$(id -u)\" = 0 ]".into());
-    for (property, expected) in SupportReport::expected_properties() {
+    for (property, expected) in SupportReport::expected_properties(profile) {
         let value = plan.support_override.observed(property).unwrap_or(expected);
         line(format!("PROPERTY=$(getprop {property})"));
         line(format!("[ \"$PROPERTY\" = {} ]", quote(value)));
@@ -46,7 +47,10 @@ pub fn render(plan: &WritePlan) -> String {
     line("    set +e".into());
     line("    echo APPLY_FAILED_RESTORING >\"$STATE\"".into());
     for (index, write) in plan.writes.iter().enumerate() {
-        line(format!("    {}", copy(index, write, &write.staged_old)));
+        line(format!(
+            "    {}",
+            copy(index, write, &write.staged_old, block_bytes)
+        ));
     }
     line("    sync".into());
     line(format!("    if {}; then", all_hold_old(&plan.writes)));
@@ -61,7 +65,7 @@ pub fn render(plan: &WritePlan) -> String {
     line("STARTED=1".into());
     for (index, write) in plan.writes.iter().enumerate() {
         line(format!("echo {} >\"$STATE\"", write.state_while_writing));
-        line(copy(index, write, &write.staged_new));
+        line(copy(index, write, &write.staged_new, block_bytes));
         line(format!(
             "[ \"$(file_sha256 \"$TARGET{index}\")\" = {} ]",
             write.new_image.sha256
@@ -103,10 +107,10 @@ fn preconditions(index: usize, write: &PlannedWrite) -> String {
     text
 }
 
-fn copy(index: usize, write: &PlannedWrite, staged: &str) -> String {
+fn copy(index: usize, write: &PlannedWrite, staged: &str, block_bytes: u64) -> String {
     format!(
-        "dd if=\"$BASE/{staged}\" of=\"$TARGET{index}\" bs={BLOCK_SIZE} count={} conv=fsync",
-        write.target.bytes / BLOCK_SIZE
+        "dd if=\"$BASE/{staged}\" of=\"$TARGET{index}\" bs={block_bytes} count={} conv=fsync",
+        write.target.bytes / block_bytes
     )
 }
 

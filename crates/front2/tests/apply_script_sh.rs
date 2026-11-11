@@ -1,5 +1,6 @@
 use front2::apply_script::{CHECK_PASSED, SCRIPT_FILE, STATE_FILE, render};
 use front2::digest::sha256_bytes;
+use front2::profiles::toss_front2::PROFILE;
 use front2::{
     ImageRecord, PartitionTarget, PlannedWrite, RootAccess, SupportCheck, SupportOverride,
     SupportReport, WritePlan, WritePurpose,
@@ -34,7 +35,7 @@ fn getprop_stub() -> String {
     stub.push_str("[ \"$1\" != \"${FRONT2_GETPROP_FAILS:-}\" ] || exit 1\n");
     stub.push_str("[ \"$1\" != \"${FRONT2_GETPROP_EMPTY:-}\" ] || exit 0\n");
     stub.push_str("case \"$1\" in\n");
-    for (property, expected) in SupportReport::expected_properties() {
+    for (property, expected) in SupportReport::expected_properties(&PROFILE) {
         let variable = property.replace('.', "_").to_ascii_uppercase();
         stub.push_str(&format!(
             "  {property}) echo \"${{FRONT2_FAKE_{variable}:-{expected}}}\" ;;\n"
@@ -137,7 +138,7 @@ fn stage_accepting(support_override: SupportOverride) -> Option<Stage> {
         id: "test".into(),
         created_unix: 0,
         purpose: WritePurpose::ApplyCandidate,
-        profile: front2::profile::ID.into(),
+        profile: PROFILE.id.into(),
         support_override,
         new_pair: "new".into(),
         old_pair: "old".into(),
@@ -155,7 +156,7 @@ fn stage_accepting(support_override: SupportOverride) -> Option<Stage> {
         restore_tested_on_device: false,
         power_loss_recovery: String::new(),
     };
-    let script = render(&plan);
+    let script = render(&plan, &PROFILE);
     plan.script_sha256 = sha256_bytes(script.as_bytes());
     std::fs::write(directory.path().join("stage").join(SCRIPT_FILE), script).expect("script");
     Some(Stage {

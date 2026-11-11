@@ -24,9 +24,10 @@ impl ReferencePartition {
         root: RootAccess,
         slot_suffix: &str,
         descriptor: &HashDescriptor,
+        block_bytes: u64,
     ) -> Result<Self> {
         let label = profile::slot_label(&descriptor.partition, slot_suffix);
-        let target = PartitionTarget::resolve(shell, root, &label)?;
+        let target = PartitionTarget::resolve(shell, root, &label, block_bytes)?;
         let before = target.sha256(shell, root)?;
         let salted = descriptor.device_digest(shell, root, &target)?;
         let after = target.sha256(shell, root)?;
@@ -46,8 +47,13 @@ impl ReferencePartition {
         })
     }
 
-    pub fn require_unchanged(&self, shell: &mut dyn DeviceShell, root: RootAccess) -> Result<()> {
-        let target = PartitionTarget::resolve(shell, root, &self.label)?;
+    pub fn require_unchanged(
+        &self,
+        shell: &mut dyn DeviceShell,
+        root: RootAccess,
+        block_bytes: u64,
+    ) -> Result<()> {
+        let target = PartitionTarget::resolve(shell, root, &self.label, block_bytes)?;
         let current = target.sha256(shell, root)?;
         if target.bytes != self.bytes || current != self.sha256 {
             return Err(Front2Error::Plan(format!(

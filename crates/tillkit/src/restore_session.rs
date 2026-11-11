@@ -1,14 +1,15 @@
 use crate::adb_shell::AdbShell;
 use crate::clock::now_unix;
 use crate::data_paths::DataPaths;
+use crate::diagnosis::Diagnosis;
 use crate::plan_review::PlanReview;
 use crate::plan_source::PlanSource;
 use crate::stored_image::StoredImage;
 use front2::current_pair::find_stored_current_pair;
 use front2::kernel::{KernelPlan, KernelStore, find_stored_current_kernel_set};
 use front2::{
-    DeviceState, Front2Error, PairKind, PairStore, PlanRequest, Result, SupportOverride,
-    SupportReport, WritePlan,
+    DeviceProfile, DeviceState, Front2Error, PairKind, PairStore, PlanRequest, Result,
+    SupportOverride, SupportReport, WritePlan,
 };
 
 pub const SAME_IMAGES: &str = "the device has the images of this backup now";
@@ -22,6 +23,7 @@ pub const OTHER_VBMETA: &str = "the device has the init_boot image and the boot 
 pub struct RestoreSession {
     shell: AdbShell,
     state: DeviceState,
+    profile: &'static DeviceProfile,
     created_unix: u64,
     support_override: SupportOverride,
 }
@@ -30,17 +32,19 @@ impl RestoreSession {
     pub fn open(support_override: SupportOverride) -> Result<Self> {
         let mut shell = AdbShell::connect()?;
         let state = DeviceState::read(&mut shell)?;
-        SupportReport::evaluate(&state).require_allowed_with(&support_override)?;
+        let profile = Diagnosis::profile_for(&state);
+        SupportReport::evaluate(profile, &state).require_allowed_with(&support_override)?;
         Ok(Self {
             shell,
             state,
+            profile,
             created_unix: now_unix(),
             support_override,
         })
     }
 
     pub fn plan(mut self, paths: &DataPaths, backup_unix: u64) -> Result<PlanReview> {
-        let pairs = PairStore::new(paths.pairs());
+        let pairs = PairStore::new(paths.pairs(), self.profile);
         let mut saved_pairs = pairs.list()?;
         saved_pairs.retain(|pair| {
             pair.kind == PairKind::DeviceReadback && pair.created_unix == backup_unix
@@ -52,7 +56,7 @@ impl RestoreSession {
         if let Some((backup, current)) = differing(saved_image, current_image) {
             return self.plan_pair(paths, &pairs, backup, current);
         }
-        let kernel_sets = KernelStore::new(paths.kernel_sets());
+        let kernel_sets = KernelStore::new(paths.kernel_sets(), self.profile);
         let mut saved_sets = kernel_sets.list()?;
         saved_sets
             .retain(|set| set.kind == PairKind::DeviceReadback && set.created_unix == backup_unix);

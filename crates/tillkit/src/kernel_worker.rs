@@ -1,6 +1,7 @@
 use crate::adb_shell::AdbShell;
 use crate::clock::now_unix;
 use crate::data_paths::DataPaths;
+use crate::diagnosis::Diagnosis;
 use crate::plan_review::PlanReview;
 use crate::plan_source::PlanSource;
 use crate::worker::NO_BACKUP;
@@ -40,8 +41,9 @@ pub fn prepare_write(
 ) -> Result<PlanReview> {
     let mut shell = AdbShell::connect()?;
     let state = DeviceState::read(&mut shell)?;
-    SupportReport::evaluate(&state).require_allowed_with(&support_override)?;
-    let store = KernelStore::new(paths.kernel_sets());
+    let profile = Diagnosis::profile_for(&state);
+    SupportReport::evaluate(profile, &state).require_allowed_with(&support_override)?;
+    let store = KernelStore::new(paths.kernel_sets(), profile);
     let backup = current_backup(&mut shell, &state, &store)?;
     let created_unix = now_unix();
     let candidate_id = format!("candidate-{created_unix}");

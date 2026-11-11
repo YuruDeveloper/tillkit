@@ -10,9 +10,10 @@ use front2::candidate::build_signed_candidate;
 use front2::current_pair::find_stored_current_pair;
 use front2::kernel::{KernelPlan, KernelStore, read_current_kernel_set};
 use front2::pair_backup;
+use front2::profiles;
 use front2::{
     ApplyOutcome, Authorization, DeviceState, Front2Error, PairKind, PairManifest, PairRequest,
-    PairStore, Result, SupportOverride, SupportReport, WritePlan, pair_apply,
+    PairStore, Result, SupportOverride, WritePlan, pair_apply,
 };
 use iced::Task;
 use std::path::Path;
@@ -43,8 +44,7 @@ where
 pub fn read_device() -> Result<Diagnosis> {
     let mut shell = AdbShell::connect()?;
     let state = DeviceState::read(&mut shell)?;
-    let report = SupportReport::evaluate(&state);
-    Ok(Diagnosis { state, report })
+    Ok(Diagnosis::evaluate(state))
 }
 
 pub fn back_up(paths: &DataPaths) -> Result<()> {
@@ -57,9 +57,10 @@ pub fn back_up(paths: &DataPaths) -> Result<()> {
         created_unix,
         note: "",
     };
-    let pairs = PairStore::new(paths.pairs());
+    let profile = Diagnosis::profile_for(&state);
+    let pairs = PairStore::new(paths.pairs(), profile);
     pair_backup::read_current_pair(&mut shell, &state, &pairs, request())?;
-    let kernel_sets = KernelStore::new(paths.kernel_sets());
+    let kernel_sets = KernelStore::new(paths.kernel_sets(), profile);
     read_current_kernel_set(&mut shell, &state, &kernel_sets, request())?;
     Ok(())
 }
@@ -111,11 +112,12 @@ fn load_reviewed(review: &PlanReview) -> Result<WritePlan> {
 }
 
 fn load_stored(review: &PlanReview) -> Result<(WritePlan, String, PlanSource)> {
+    let profile = profiles::find(&review.plan.profile)?;
     if review.source == PlanSource::Pair {
-        let (plan, sha256) = WritePlan::load(&review.directory)?;
+        let (plan, sha256) = WritePlan::load(&review.directory, profile)?;
         return Ok((plan, sha256, PlanSource::Pair));
     }
-    let (kernel_plan, sha256) = KernelPlan::load(&review.directory)?;
+    let (kernel_plan, sha256) = KernelPlan::load(&review.directory, profile)?;
     let source = PlanSource::Kernel(Box::new(kernel_plan.facts));
     Ok((kernel_plan.plan, sha256, source))
 }
@@ -123,7 +125,10 @@ fn load_stored(review: &PlanReview) -> Result<(WritePlan, String, PlanSource)> {
 pub fn stage_plan(paths: &DataPaths, review: &PlanReview) -> Result<()> {
     let plan = load_reviewed(review)?;
     let mut shell = AdbShell::connect()?;
-    let store = PairStore::new(review.source.store_root(paths));
+    let store = PairStore::new(
+        review.source.store_root(paths),
+        profiles::find(&plan.profile)?,
+    );
     pair_apply::stage(&mut shell, &store, &plan, &review.directory)?;
     pair_apply::check(&mut shell, &plan)
 }
@@ -150,7 +155,8 @@ pub fn reboot(
     let plan = load_reviewed(review)?;
     let mut shell = AdbShell::connect()?;
     if let Some(facts) = review.source.kernel_facts() {
-        facts.require_references_unchanged(&mut shell, plan.root_access)?;
+        let block_bytes = profiles::find(&plan.profile)?.storage_block_bytes;
+        facts.require_references_unchanged(&mut shell, plan.root_access, block_bytes)?;
     }
     pair_apply::reboot(
         &mut shell,

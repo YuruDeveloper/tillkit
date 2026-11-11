@@ -4,6 +4,7 @@ use front2::candidate::build_signed_candidate;
 use front2::current_pair::find_stored_current_pair;
 use front2::pair_apply::{apply, check, reboot, stage};
 use front2::pair_backup::read_current_pair;
+use front2::profiles::toss_front2::PROFILE;
 use front2::{
     ApplyOutcome, ApplyState, Authorization, DeviceState, PairKind, PairManifest, PairRequest,
     PairStore, PlanRequest, Scope, SupportOverride, SupportReport, WritePlan, WritePurpose,
@@ -44,7 +45,7 @@ fn bench() -> Bench {
         std::fs::read(source.join("vbmeta.img")).expect("vbmeta"),
     );
     let state = DeviceState::read(&mut device).expect("device state");
-    let store = PairStore::new(directory.path().join("pairs"));
+    let store = PairStore::new(directory.path().join("pairs"), &PROFILE);
     Bench {
         directory,
         store,
@@ -227,7 +228,8 @@ fn with_property(state: &DeviceState, key: &str, value: &str) -> DeviceState {
 }
 
 fn accepted_differences(state: &DeviceState) -> SupportOverride {
-    SupportOverride::accept_unmet(&SupportReport::evaluate(state)).expect("acceptable differences")
+    SupportOverride::accept_unmet(&SupportReport::evaluate(&PROFILE, state))
+        .expect("acceptable differences")
 }
 
 fn prepare_accepting(
@@ -264,10 +266,10 @@ fn plan_records_the_differences_that_the_approval_accepts() {
 
     let plan = prepare_accepting(&mut bench, &other_build, accepted.clone()).expect("plan");
     assert_eq!(plan.support_override, accepted);
-    assert_eq!(plan.profile, front2::profile::ID);
+    assert_eq!(plan.profile, PROFILE.id);
     let directory = bench.directory.path().join("2000-apply");
     let digest = plan.save(&directory).expect("save plan");
-    let (loaded, loaded_digest) = WritePlan::load(&directory).expect("load plan");
+    let (loaded, loaded_digest) = WritePlan::load(&directory, &PROFILE).expect("load plan");
     assert_eq!((loaded, loaded_digest), (plan, digest));
 
     let strict = SupportOverride::none();
@@ -298,7 +300,7 @@ fn no_approval_accepts_a_missing_root_an_unknown_slot_or_an_unfinished_boot() {
     let slots = ["", "_c"].map(|slot| with_property(&bench.state, "ro.boot.slot_suffix", slot));
     let booting = with_property(&bench.state, "sys.boot_completed", "0");
     for state in [rootless, slots[0].clone(), slots[1].clone(), booting] {
-        let report = SupportReport::evaluate(&state);
+        let report = SupportReport::evaluate(&PROFILE, &state);
         assert!(SupportOverride::accept_unmet(&report).is_err());
         let forged = SupportOverride {
             accepted: report.unmet().into_iter().cloned().collect(),
@@ -306,7 +308,7 @@ fn no_approval_accepts_a_missing_root_an_unknown_slot_or_an_unfinished_boot() {
         assert!(prepare_accepting(&mut bench, &state, forged).is_err());
     }
     let other_slot = with_property(&bench.state, "ro.boot.slot_suffix", "_a");
-    let report = SupportReport::evaluate(&other_slot);
+    let report = SupportReport::evaluate(&PROFILE, &other_slot);
     assert!(SupportOverride::accept_unmet(&report).is_ok());
 }
 
@@ -504,7 +506,7 @@ fn saved_plan_reloads_with_the_same_digest_and_rejects_edits() {
     readback_and_candidate(&mut bench);
     let (plan, digest) = staged_plan(&mut bench, CANDIDATE, READBACK, "2000-apply");
     let plan_directory = bench.directory.path().join("2000-apply");
-    let (loaded, loaded_digest) = WritePlan::load(&plan_directory).expect("load");
+    let (loaded, loaded_digest) = WritePlan::load(&plan_directory, &PROFILE).expect("load");
     assert_eq!(
         (loaded, loaded_digest.as_str()),
         (plan.clone(), digest.as_str())
@@ -515,7 +517,7 @@ fn saved_plan_reloads_with_the_same_digest_and_rejects_edits() {
         .expect("plan text")
         .replace("/dev/block/sde62", "/dev/block/sde63");
     std::fs::write(&path, edited).expect("edit plan");
-    assert!(WritePlan::load(&plan_directory).is_err());
+    assert!(WritePlan::load(&plan_directory, &PROFILE).is_err());
 }
 
 #[test]

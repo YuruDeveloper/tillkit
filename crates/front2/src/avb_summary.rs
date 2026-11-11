@@ -1,3 +1,4 @@
+use crate::device_profile::DeviceProfile;
 use crate::digest::hex;
 use crate::error::{Front2Error, Result};
 use crate::profile;
@@ -48,20 +49,18 @@ impl AvbSummary {
         self.init_boot_digest_in_top == self.init_boot_footer_digest
     }
 
-    pub fn require_front2_trust(&self) -> Result<()> {
-        if self.top_algorithm != profile::TOP_VBMETA_ALGORITHM {
+    pub fn require_trust(&self, profile: &DeviceProfile) -> Result<()> {
+        if self.top_algorithm != profile.top_vbmeta_algorithm {
             return Err(Front2Error::Verification(format!(
                 "top vbmeta algorithm is {}, expected {}",
-                self.top_algorithm,
-                profile::TOP_VBMETA_ALGORITHM
+                self.top_algorithm, profile.top_vbmeta_algorithm
             )));
         }
         let key_spec = ltbox_patch::key_map::key_spec_for_pubkey(Some(&self.top_key_sha1));
-        if key_spec != Some(profile::TOP_VBMETA_KEY_SPEC) {
+        if key_spec != Some(profile.top_vbmeta_key_spec) {
             return Err(Front2Error::Verification(format!(
                 "top vbmeta key SHA-1 {:?} is not the {} key",
-                self.top_key_sha1,
-                profile::TOP_VBMETA_KEY_SPEC
+                self.top_key_sha1, profile.top_vbmeta_key_spec
             )));
         }
         if self.top_flags != 0 {

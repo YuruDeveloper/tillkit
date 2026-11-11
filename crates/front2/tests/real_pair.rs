@@ -1,5 +1,6 @@
 use front2::candidate::build_signed_candidate;
 use front2::digest::sha256_file;
+use front2::profiles::toss_front2::PROFILE;
 use front2::{PairKind, PairRequest, PairStore};
 use std::path::PathBuf;
 
@@ -13,7 +14,7 @@ fn candidate_from_a_real_readback_when_available() {
         return;
     };
     let directory = tempfile::tempdir().expect("tempdir");
-    let store = PairStore::new(directory.path().join("pairs"));
+    let store = PairStore::new(directory.path().join("pairs"), &PROFILE);
     let readback_directory = store.begin(READBACK).expect("begin");
     for (from, to) in [
         ("current-init_boot_b.img", "init_boot.img"),
@@ -24,8 +25,8 @@ fn candidate_from_a_real_readback_when_available() {
     let readback = store
         .commit(READBACK, PairKind::DeviceReadback, 1, "_b", None, "real")
         .expect("commit readback");
-    readback.avb.require_front2_trust().expect("front2 trust");
-    front2::pair_verification::verify_pair_images(&readback_directory)
+    readback.avb.require_trust(&PROFILE).expect("front2 trust");
+    front2::pair_verification::verify_pair_images(&readback_directory, &PROFILE)
         .expect("the real readback passes the write boundary verification");
     println!("readback avb: {:#?}", readback.avb);
 

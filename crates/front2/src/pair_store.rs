@@ -1,3 +1,4 @@
+use crate::device_profile::DeviceProfile;
 use crate::error::{Front2Error, Result};
 use crate::pair_kind::PairKind;
 use crate::pair_manifest::{MANIFEST_FILE, MANIFEST_SCHEMA, PairManifest};
@@ -7,11 +8,19 @@ use std::path::{Path, PathBuf};
 #[derive(Debug, Clone)]
 pub struct PairStore {
     root: PathBuf,
+    profile: &'static DeviceProfile,
 }
 
 impl PairStore {
-    pub fn new(root: impl Into<PathBuf>) -> Self {
-        Self { root: root.into() }
+    pub fn new(root: impl Into<PathBuf>, profile: &'static DeviceProfile) -> Self {
+        Self {
+            root: root.into(),
+            profile,
+        }
+    }
+
+    pub fn profile(&self) -> &'static DeviceProfile {
+        self.profile
     }
 
     pub fn root(&self) -> &Path {
@@ -111,10 +120,11 @@ pub fn is_safe_id(id: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::profiles::toss_front2::PROFILE;
 
     #[test]
     fn ids_cannot_leave_the_store() {
-        let store = PairStore::new("store");
+        let store = PairStore::new("store", &PROFILE);
         assert!(store.directory("20261112-004000-readback").is_ok());
         for id in ["", "..", "a/b", "a\\b", "A", "a b"] {
             assert!(store.directory(id).is_err(), "{id:?}");
@@ -124,7 +134,7 @@ mod tests {
     #[test]
     fn listing_a_missing_store_is_empty() {
         let directory = tempfile::tempdir().expect("tempdir");
-        let store = PairStore::new(directory.path().join("absent"));
+        let store = PairStore::new(directory.path().join("absent"), &PROFILE);
         assert!(store.list().expect("list").is_empty());
     }
 }

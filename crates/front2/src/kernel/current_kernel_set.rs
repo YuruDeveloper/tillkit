@@ -15,8 +15,9 @@ pub fn find_stored_current_kernel_set(
     let root = state
         .root_access
         .ok_or_else(|| Front2Error::Unsupported("root access is not available".into()))?;
-    let boot = current_sha256(shell, root, state, BOOT_BASE)?;
-    let vbmeta = current_sha256(shell, root, state, profile::VBMETA_BASE)?;
+    let block_bytes = store.profile().storage_block_bytes;
+    let boot = current_sha256(shell, root, state, BOOT_BASE, block_bytes)?;
+    let vbmeta = current_sha256(shell, root, state, profile::VBMETA_BASE, block_bytes)?;
     store
         .list()?
         .into_iter()
@@ -37,7 +38,8 @@ fn current_sha256(
     root: RootAccess,
     state: &DeviceState,
     base: &str,
+    block_bytes: u64,
 ) -> Result<String> {
     let label = profile::slot_label(base, state.slot_suffix());
-    PartitionTarget::resolve(shell, root, &label)?.sha256(shell, root)
+    PartitionTarget::resolve(shell, root, &label, block_bytes)?.sha256(shell, root)
 }
