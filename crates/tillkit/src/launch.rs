@@ -45,12 +45,10 @@ pub fn preview(app: &mut App) {
     use std::path::PathBuf;
 
     fn preview_source(plan: &WritePlan) -> PlanSource {
-        match read::<KernelPlanFacts>("TILLKIT_PREVIEW_KERNEL_FACTS") {
-            Some(facts) if facts.require_matches(plan).is_ok() => {
-                PlanSource::Kernel(Box::new(facts))
-            }
-            _ => PlanSource::Pair,
-        }
+        read::<KernelPlanFacts>("TILLKIT_PREVIEW_KERNEL_FACTS")
+            .filter(|facts| facts.require_matches(plan).is_ok())
+            .map(Box::new)
+            .map_or(PlanSource::Pair, PlanSource::Kernel)
     }
 
     fn read<T: serde::de::DeserializeOwned>(variable: &str) -> Option<T> {

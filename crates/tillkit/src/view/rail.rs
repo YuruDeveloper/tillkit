@@ -78,23 +78,31 @@ mod tests {
     use super::*;
     use crate::palette::{DUSK, PAPER};
 
+    fn drawn_line_count(current: Screen, palette: Palette) -> usize {
+        Screen::ALL
+            .map(|screen| selection_line(screen, current, palette))
+            .iter()
+            .filter(|line| **line != Color::TRANSPARENT)
+            .count()
+    }
+
+    fn selected_line_colors(screens: [Screen; 3], palette: Palette) -> [Color; 3] {
+        screens.map(|screen| selection_line(screen, screen, palette))
+    }
+
     #[test]
     fn letter_1161_only_the_selected_item_has_a_line_and_one_selection_line_is_idol() {
         for palette in [PAPER, DUSK] {
-            for current in Screen::ALL {
-                let lines = Screen::ALL.map(|screen| selection_line(screen, current, palette));
-                let drawn = lines
-                    .iter()
-                    .filter(|line| **line != Color::TRANSPARENT)
-                    .count();
-                assert_eq!(drawn, 1);
-            }
-            for screen in [Screen::Device, Screen::Gsi, Screen::Scope] {
-                assert_eq!(selection_line(screen, screen, palette), palette.idol);
-            }
-            for screen in [Screen::Pairs, Screen::Kernel, Screen::Write] {
-                assert_eq!(selection_line(screen, screen, palette), palette.ink);
-            }
+            let counts = Screen::ALL.map(|current| drawn_line_count(current, palette));
+            assert!(counts.iter().all(|count| *count == 1));
+            assert_eq!(
+                selected_line_colors([Screen::Device, Screen::Gsi, Screen::Scope], palette),
+                [palette.idol; 3]
+            );
+            assert_eq!(
+                selected_line_colors([Screen::Pairs, Screen::Kernel, Screen::Write], palette),
+                [palette.ink; 3]
+            );
         }
     }
 }
