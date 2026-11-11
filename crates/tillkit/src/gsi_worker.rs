@@ -9,7 +9,12 @@ use std::path::{Path, PathBuf};
 
 const CANDIDATE_PREFIX: &str = "gsi-";
 
-pub fn build_candidate(paths: &DataPaths, backup: &Path, gsi_image: &Path) -> Result<GsiReview> {
+pub fn prepare(paths: &DataPaths, backup: &Path, gsi_image: &Path) -> Result<InstallReview> {
+    let review = build_candidate(paths, backup, gsi_image)?;
+    plan_install(paths, &review, backup)
+}
+
+fn build_candidate(paths: &DataPaths, backup: &Path, gsi_image: &Path) -> Result<GsiReview> {
     let root = paths.gsi_candidates();
     std::fs::create_dir_all(&root)?;
     let directory = root.join(format!("{CANDIDATE_PREFIX}{}", now_unix()));
@@ -29,7 +34,7 @@ pub fn build_candidate(paths: &DataPaths, backup: &Path, gsi_image: &Path) -> Re
     Ok(review)
 }
 
-pub fn plan_install(paths: &DataPaths, review: &GsiReview, backup: &Path) -> Result<InstallReview> {
+fn plan_install(paths: &DataPaths, review: &GsiReview, backup: &Path) -> Result<InstallReview> {
     let (candidate, sha256) = GsiCandidate::load(&review.directory)?;
     if sha256 != review.sha256 || candidate != review.candidate {
         return Err(Front2Error::Plan(
@@ -50,27 +55,6 @@ pub fn plan_install(paths: &DataPaths, review: &GsiReview, backup: &Path) -> Res
     })
 }
 
-pub fn newest_candidate(paths: &DataPaths) -> Option<GsiReview> {
-    let mut directories: Vec<PathBuf> = std::fs::read_dir(paths.gsi_candidates())
-        .ok()?
-        .filter_map(|entry| Some(entry.ok()?.path()))
-        .filter(|path| is_candidate_directory(path))
-        .collect();
-    directories.sort();
-    directories
-        .into_iter()
-        .rev()
-        .find_map(|directory| load(directory).ok())
-}
-
-fn is_candidate_directory(path: &Path) -> bool {
-    let named = path
-        .file_name()
-        .and_then(|name| name.to_str())
-        .is_some_and(|name| name.starts_with(CANDIDATE_PREFIX));
-    named && path.is_dir()
-}
-
 fn load(directory: PathBuf) -> Result<GsiReview> {
     let (candidate, sha256) = GsiCandidate::load(&directory)?;
     Ok(GsiReview {
@@ -85,19 +69,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn a_store_without_a_readable_candidate_gives_none() {
-        let directory = tempfile::tempdir().expect("tempdir");
-        let paths = DataPaths::new(directory.path());
-        assert!(newest_candidate(&paths).is_none());
-
-        let root = paths.gsi_candidates();
-        std::fs::create_dir_all(root.join("gsi-1700000000")).expect("empty candidate folder");
-        std::fs::create_dir_all(root.join("other")).expect("other folder");
-        std::fs::write(root.join("gsi-1800000000"), b"a file").expect("a file");
-        assert!(newest_candidate(&paths).is_none());
-    }
-
-    #[test]
     fn a_build_without_a_manifest_leaves_no_candidate_folder() {
         let directory = tempfile::tempdir().expect("tempdir");
         let paths = DataPaths::new(directory.path().join("data"));
@@ -106,7 +77,7 @@ mod tests {
         let image = directory.path().join("gsi.img");
         std::fs::write(&image, b"not an image").expect("image");
 
-        assert!(build_candidate(&paths, &backup, &image).is_err());
+        assert!(prepare(&paths, &backup, &image).is_err());
         let left: Vec<_> = std::fs::read_dir(paths.gsi_candidates())
             .expect("the store exists")
             .collect();

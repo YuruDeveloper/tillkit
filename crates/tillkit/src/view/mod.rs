@@ -1,10 +1,7 @@
 pub mod backup;
 pub mod confirm;
 pub mod device;
-pub mod gsi;
 pub mod info;
-pub mod kernel;
-pub mod pairs;
 pub mod parts;
 pub mod rabbit;
 pub mod rail;
@@ -27,10 +24,7 @@ pub fn root(app: &App) -> Element<'_, Message> {
     let content = match app.screen {
         Screen::Device => device::view(app),
         Screen::Backup => backup::view(app),
-        Screen::Pairs => pairs::view(app),
-        Screen::Kernel => kernel::view(app),
         Screen::Write => write::view(app),
-        Screen::Gsi => gsi::view(app),
         Screen::Info => info::view(app),
     };
     let center = scrollable(

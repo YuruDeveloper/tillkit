@@ -2,21 +2,17 @@
 
 mod adb_shell;
 mod app;
-mod app_gsi;
-mod app_kernel;
+mod app_write;
 mod clock;
 mod confirmation;
 mod data_paths;
 mod diagnosis;
+mod folder_refusal;
 mod fonts;
 mod grain;
-mod gsi_action;
-mod gsi_flow;
-mod gsi_message;
 mod gsi_review;
 mod gsi_worker;
 mod install_review;
-mod kernel_message;
 mod kernel_worker;
 mod launch;
 mod message;
@@ -30,6 +26,8 @@ mod support_words;
 mod view;
 mod worker;
 mod write_flow;
+mod write_kind;
+mod write_message;
 mod write_step;
 
 use app::App;

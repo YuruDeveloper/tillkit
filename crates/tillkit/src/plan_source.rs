@@ -22,11 +22,4 @@ impl PlanSource {
             Self::Kernel(facts) => Some(facts),
         }
     }
-
-    pub fn set_word(&self) -> &'static str {
-        match self {
-            Self::Pair => "PAIR",
-            Self::Kernel(_) => "KERNEL SET",
-        }
-    }
 }

@@ -14,10 +14,7 @@ pub fn paths() -> DataPaths {
 pub fn screen() -> Screen {
     match std::env::var(SCREEN_VARIABLE).as_deref() {
         Ok("backup") => Screen::Backup,
-        Ok("pairs") => Screen::Pairs,
-        Ok("kernel") => Screen::Kernel,
         Ok("write") => Screen::Write,
-        Ok("gsi") => Screen::Gsi,
         Ok("info") => Screen::Info,
         _ => Screen::Device,
     }
@@ -38,15 +35,54 @@ pub fn preview(_app: &mut App) {}
 pub fn preview(app: &mut App) {
     use crate::confirmation::Confirmation;
     use crate::diagnosis::Diagnosis;
-    use crate::gsi_message::GsiMessage;
-    use crate::install_review::InstallReview;
     use crate::message::Message;
     use crate::plan_review::PlanReview;
     use crate::plan_source::PlanSource;
-    use front2::install::InstallPlan;
+    use crate::write_flow::WriteFlow;
+    use crate::write_step::WriteStep;
     use front2::kernel::KernelPlanFacts;
-    use front2::{DeviceState, SupportReport, WritePlan};
+    use front2::{ApplyOutcome, ApplyState, DeviceState, SupportReport, WritePlan};
     use std::path::PathBuf;
+
+    fn outcome(review: &PlanReview, state: ApplyState, matches: bool) -> ApplyOutcome {
+        ApplyOutcome {
+            plan_id: review.plan.id.clone(),
+            plan_sha256: review.sha256.clone(),
+            state,
+            device_log: "WRITING_INIT_BOOT\nWRITING_VBMETA".into(),
+            readback_sha256: Vec::new(),
+            readback_matches_new_pair: matches,
+            reboot_requested: false,
+        }
+    }
+
+    fn pose(app: &mut App, review: PlanReview, pose: &str) {
+        let verified = outcome(&review, ApplyState::VerifiedPendingReboot, true);
+        let rolled_back = outcome(&review, ApplyState::RollbackVerified, false);
+        let unknown = outcome(&review, ApplyState::Writing("WRITING_VBMETA".into()), false);
+        let flow = &mut app.write;
+        flow.review = Some(review);
+        if pose == "confirm" {
+            app.confirmation = Some(Confirmation::Write);
+            return;
+        }
+        flow.approve();
+        let upload_failed = (WriteStep::Stage, "adb push: no space left".to_string());
+        match pose {
+            "uploading" => flow.running = Some(WriteStep::Stage),
+            "upload-failed" => flow.failure = Some(upload_failed),
+            "writing" => flow.running = Some(WriteStep::Write),
+            "verified" | "reboot" | "rebooted" => flow.outcome = Some(verified),
+            "rolled-back" => flow.outcome = Some(rolled_back),
+            "unknown" => flow.outcome = Some(unknown),
+            _ => {}
+        }
+        flow.staged = !matches!(pose, "uploading" | "upload-failed");
+        flow.rebooted = pose == "rebooted";
+        if pose == "reboot" {
+            app.confirmation = Some(Confirmation::Reboot);
+        }
+    }
 
     fn preview_source(plan: &WritePlan) -> PlanSource {
         read::<KernelPlanFacts>("TILLKIT_PREVIEW_KERNEL_FACTS")
@@ -66,7 +102,10 @@ pub fn preview(app: &mut App) {
     }
     app.details_open = std::env::var_os("TILLKIT_PREVIEW_DETAILS").is_some();
     if let Some(folder) = std::env::var_os("TILLKIT_PREVIEW_FULL_BACKUP").map(PathBuf::from) {
-        let _ = app.update(Message::Gsi(GsiMessage::BackupPicked(Some(folder))));
+        let _ = app.update(Message::FullBackupPicked(Some(folder)));
+    }
+    if let Some(folder) = std::env::var_os("TILLKIT_PREVIEW_IMAGES").map(PathBuf::from) {
+        app.write = WriteFlow::for_folder(folder);
     }
     match std::env::var("TILLKIT_PREVIEW_FORCE").as_deref() {
         Ok("ask") => app.confirmation = Some(Confirmation::ForceSupport),
@@ -75,25 +114,16 @@ pub fn preview(app: &mut App) {
     }
     if let Some(plan) = read::<WritePlan>("TILLKIT_PREVIEW_PLAN") {
         let source = preview_source(&plan);
-        app.write.review = Some(PlanReview {
+        let review = PlanReview {
             plan,
             sha256: "5d1f0c9a".repeat(8),
             directory: PathBuf::from("preview"),
             source,
-        });
-        app.write.staged = std::env::var_os("TILLKIT_PREVIEW_STAGED").is_some();
+        };
+        let chosen = std::env::var("TILLKIT_PREVIEW_WRITE").unwrap_or_default();
+        pose(app, review, &chosen);
     }
-    if let Some(directory) = std::env::var_os("TILLKIT_PREVIEW_INSTALL_PLAN").map(PathBuf::from) {
-        app.gsi.install = InstallPlan::load(&directory)
-            .ok()
-            .map(|stored| InstallReview {
-                plan: stored.plan().clone(),
-                sha256: stored.plan_sha256().to_string(),
-                directory,
-            });
-    }
-    if std::env::var_os("TILLKIT_PREVIEW_SELECT").is_some() {
-        app.selected_pair = app.pairs.first().map(|pair| pair.id.clone());
-        app.selected_kernel_set = app.kernel_sets.first().map(|set| set.id.clone());
+    if let Ok(error) = std::env::var("TILLKIT_PREVIEW_PREPARE_ERROR") {
+        app.write.failure = Some((WriteStep::Prepare, error));
     }
 }

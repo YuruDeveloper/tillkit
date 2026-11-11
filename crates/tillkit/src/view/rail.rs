@@ -110,15 +110,12 @@ mod tests {
             let counts = Screen::ALL.map(|current| drawn_line_count(current, palette));
             assert!(counts.iter().all(|count| *count == 1));
             assert_eq!(
-                selected_line_colors(
-                    [Screen::Device, Screen::Backup, Screen::Gsi, Screen::Info],
-                    palette
-                ),
-                [palette.idol; 4]
+                selected_line_colors([Screen::Device, Screen::Backup, Screen::Info], palette),
+                [palette.idol; 3]
             );
             assert_eq!(
-                selected_line_colors([Screen::Pairs, Screen::Kernel, Screen::Write], palette),
-                [palette.ink; 3]
+                selected_line_colors([Screen::Write], palette),
+                [palette.ink; 1]
             );
         }
     }

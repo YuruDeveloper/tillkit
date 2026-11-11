@@ -1,6 +1,5 @@
 use crate::app::App;
 use crate::clock::format_utc;
-use crate::gsi_message::GsiMessage;
 use crate::message::Message;
 use crate::palette::Palette;
 use crate::saved_backup::SavedBackup;
@@ -68,8 +67,8 @@ fn saved_row<'a>(backup: &SavedBackup, palette: Palette) -> Element<'a, Message>
 
 fn full_backup(app: &App, idle: bool) -> Element<'_, Message> {
     let palette = app.palette;
-    let choose = idle.then_some(Message::Gsi(GsiMessage::PickBackup));
-    let folder = app.gsi.backup_directory.as_ref();
+    let choose = idle.then_some(Message::PickFullBackup);
+    let folder = app.full_backup.as_ref();
     let path = folder.map_or_else(|| NOT_CHOSEN.to_string(), |path| path.display().to_string());
     let chosen = row![
         container(parts::value(path, palette)).width(Length::Fill),

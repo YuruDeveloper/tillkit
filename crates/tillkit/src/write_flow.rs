@@ -1,23 +1,68 @@
+use crate::folder_refusal::FolderRefusal;
+use crate::install_review::InstallReview;
 use crate::plan_review::PlanReview;
 use crate::step_status::StepStatus;
+use crate::write_kind::WriteKind;
 use crate::write_step::WriteStep;
 use front2::{ApplyOutcome, ApplyState, Authorization, Scope};
-
-pub const REBOOT_WORD: &str = "reboot";
+use std::path::PathBuf;
 
 #[derive(Debug, Default)]
 pub struct WriteFlow {
+    pub folder: Option<PathBuf>,
+    pub kind: Option<Result<WriteKind, FolderRefusal>>,
     pub review: Option<PlanReview>,
+    pub approved_sha256: Option<String>,
     pub staged: bool,
-    pub approval_input: String,
     pub outcome: Option<ApplyOutcome>,
-    pub reboot_input: String,
     pub rebooted: bool,
+    pub install: Option<InstallReview>,
     pub running: Option<WriteStep>,
     pub failure: Option<(WriteStep, String)>,
 }
 
 impl WriteFlow {
+    pub fn for_folder(folder: PathBuf) -> Self {
+        Self {
+            kind: Some(WriteKind::in_folder(&folder)),
+            folder: Some(folder),
+            ..Self::default()
+        }
+    }
+
+    pub fn start_over(&mut self) {
+        *self = self.folder.take().map(Self::for_folder).unwrap_or_default();
+    }
+
+    pub fn image(&self) -> Option<(WriteKind, PathBuf)> {
+        let kind = self.kind?.ok()?;
+        let folder = self.folder.as_ref()?;
+        Some((kind, folder.join(kind.file_name())))
+    }
+
+    pub fn has_result(&self) -> bool {
+        self.review.is_some() || self.install.is_some()
+    }
+
+    pub fn can_start(&self) -> bool {
+        self.running.is_none() && !self.has_result() && self.image().is_some()
+    }
+
+    pub fn is_unapproved(&self) -> bool {
+        self.review.is_some() && self.approved_sha256.is_none()
+    }
+
+    pub fn approve(&mut self) -> bool {
+        let Some(review) = self.review.as_ref() else {
+            return false;
+        };
+        if self.next_step() != Some(WriteStep::Stage) {
+            return false;
+        }
+        self.approved_sha256 = Some(review.sha256.clone());
+        true
+    }
+
     pub fn write_verified(&self) -> bool {
         self.outcome.as_ref().is_some_and(|outcome| {
             outcome.state == ApplyState::VerifiedPendingReboot && outcome.readback_matches_new_pair
@@ -26,7 +71,7 @@ impl WriteFlow {
 
     fn is_done(&self, step: WriteStep) -> bool {
         match step {
-            WriteStep::Plan => self.review.is_some(),
+            WriteStep::Prepare => self.has_result(),
             WriteStep::Stage => self.staged,
             WriteStep::Write => self.write_verified(),
             WriteStep::Reboot => self.rebooted,
@@ -34,9 +79,12 @@ impl WriteFlow {
     }
 
     fn is_stopped(&self) -> bool {
-        let plan_failed = matches!(self.failure, Some((WriteStep::Plan, _)));
-        let failed_after_plan = self.failure.is_some() && !plan_failed;
-        failed_after_plan || (self.outcome.is_some() && !self.write_verified())
+        let bad_write = self.outcome.is_some() && !self.write_verified();
+        self.failure.is_some() || self.install.is_some() || bad_write
+    }
+
+    fn is_closed(&self, step: WriteStep) -> bool {
+        self.kind == Some(Ok(WriteKind::Gsi)) && step != WriteStep::Prepare
     }
 
     pub fn next_step(&self) -> Option<WriteStep> {
@@ -50,25 +98,30 @@ impl WriteFlow {
         let failed = self.failure.as_ref().map(|(step, _)| *step);
         let bad_write =
             (self.outcome.is_some() && !self.write_verified()).then_some(WriteStep::Write);
+        let resting = if self.rebooted {
+            WriteStep::Reboot
+        } else {
+            WriteStep::Prepare
+        };
         self.running
             .or(self.next_step())
             .or(failed)
             .or(bad_write)
-            .unwrap_or(WriteStep::Reboot)
+            .unwrap_or(resting)
     }
 
     pub fn status(&self, step: WriteStep) -> StepStatus {
         let failed_here = matches!(&self.failure, Some((failed, _)) if *failed == step);
         let bad_write =
             step == WriteStep::Write && self.outcome.is_some() && !self.write_verified();
-        if self.running == Some(step) {
+        if self.is_closed(step) {
+            StepStatus::Closed
+        } else if self.running == Some(step) {
             StepStatus::Running
         } else if self.is_done(step) {
             StepStatus::Done
         } else if failed_here || bad_write {
             StepStatus::Failed
-        } else if self.next_step() == Some(step) {
-            StepStatus::Ready
         } else {
             StepStatus::Waiting
         }
@@ -76,10 +129,8 @@ impl WriteFlow {
 
     pub fn write_authorization(&self, granted_unix: u64) -> Option<Authorization> {
         let review = self.review.as_ref()?;
-        let typed = self.approval_input.trim();
         let approved = self.next_step() == Some(WriteStep::Write)
-            && !typed.is_empty()
-            && typed == review.approval_code();
+            && self.approved_sha256.as_deref() == Some(review.sha256.as_str());
         approved.then(|| Authorization {
             plan_sha256: review.sha256.clone(),
             scopes: vec![Scope::WritePair],
@@ -89,8 +140,7 @@ impl WriteFlow {
 
     pub fn reboot_authorization(&self, granted_unix: u64) -> Option<Authorization> {
         let review = self.review.as_ref()?;
-        let approved =
-            self.next_step() == Some(WriteStep::Reboot) && self.reboot_input.trim() == REBOOT_WORD;
+        let approved = self.next_step() == Some(WriteStep::Reboot);
         approved.then(|| Authorization {
             plan_sha256: review.sha256.clone(),
             scopes: vec![Scope::Reboot],
@@ -104,7 +154,6 @@ mod tests {
     use super::*;
     use crate::plan_source::PlanSource;
     use front2::{RootAccess, WritePlan, WritePurpose};
-    use std::path::PathBuf;
 
     fn plan() -> WritePlan {
         WritePlan {
@@ -151,18 +200,53 @@ mod tests {
         }
     }
 
-    fn staged() -> WriteFlow {
+    fn chosen(kind: WriteKind) -> WriteFlow {
         WriteFlow {
-            review: Some(review()),
-            staged: true,
+            folder: Some(PathBuf::from("images")),
+            kind: Some(Ok(kind)),
             ..WriteFlow::default()
         }
     }
 
+    fn approved() -> WriteFlow {
+        let mut flow = chosen(WriteKind::RootImage);
+        flow.review = Some(review());
+        assert!(flow.approve());
+        flow
+    }
+
+    fn staged() -> WriteFlow {
+        let mut flow = approved();
+        flow.staged = true;
+        flow
+    }
+
+    #[test]
+    fn a_start_needs_one_image_and_no_earlier_result() {
+        assert!(!WriteFlow::default().can_start());
+        let mut refused = chosen(WriteKind::Kernel);
+        refused.kind = Some(Err(FolderRefusal::SeveralImages));
+        assert!(!refused.can_start());
+
+        let mut flow = chosen(WriteKind::Kernel);
+        assert!(flow.can_start());
+        assert_eq!(
+            flow.image(),
+            Some((WriteKind::Kernel, PathBuf::from("images").join("boot.img")))
+        );
+        flow.failure = Some((WriteStep::Prepare, "no device".into()));
+        assert!(flow.can_start(), "a failed preparation can start again");
+        flow.running = Some(WriteStep::Prepare);
+        assert!(!flow.can_start());
+        flow.running = None;
+        flow.review = Some(review());
+        assert!(!flow.can_start());
+    }
+
     #[test]
     fn steps_open_one_at_a_time() {
-        let mut flow = WriteFlow::default();
-        assert_eq!(flow.next_step(), Some(WriteStep::Plan));
+        let mut flow = chosen(WriteKind::RootImage);
+        assert_eq!(flow.next_step(), Some(WriteStep::Prepare));
         assert_eq!(flow.status(WriteStep::Stage), StepStatus::Waiting);
         flow.review = Some(review());
         assert_eq!(flow.next_step(), Some(WriteStep::Stage));
@@ -187,34 +271,41 @@ mod tests {
         flow.outcome = Some(outcome(ApplyState::RollbackVerified, false));
         assert_eq!(flow.focus_step(), WriteStep::Write);
 
-        let mut stopped = staged();
-        stopped.staged = false;
+        let mut stopped = approved();
         stopped.failure = Some((WriteStep::Stage, "push failed".into()));
         assert_eq!(stopped.focus_step(), WriteStep::Stage);
+        assert_eq!(stopped.next_step(), None);
+        assert_eq!(stopped.status(WriteStep::Stage), StepStatus::Failed);
     }
 
     #[test]
-    fn write_approval_needs_the_code_of_this_plan_at_the_write_step() {
+    fn the_write_needs_the_approval_of_this_plan() {
+        let mut flow = chosen(WriteKind::RootImage);
+        assert!(!flow.approve(), "no plan");
+        flow.review = Some(review());
+        assert!(flow.is_unapproved());
+        flow.staged = true;
+        assert!(flow.write_authorization(5).is_none(), "not approved");
+
         let mut flow = staged();
-        assert!(flow.write_authorization(5).is_none());
-        flow.approval_input = "01234568".into();
-        assert!(flow.write_authorization(5).is_none());
-        flow.approval_input = " 01234567 ".into();
         let approval = flow.write_authorization(5).expect("approval");
         assert_eq!(approval.scopes, vec![Scope::WritePair]);
         assert_eq!(approval.plan_sha256, review().sha256);
 
+        flow.approved_sha256 = Some("f".repeat(64));
+        assert!(flow.write_authorization(5).is_none(), "another plan");
+        flow.approved_sha256 = Some(review().sha256);
         flow.staged = false;
-        assert!(flow.write_authorization(5).is_none(), "not staged yet");
+        assert!(flow.write_authorization(5).is_none(), "not staged");
         flow.staged = true;
         flow.running = Some(WriteStep::Write);
         assert!(flow.write_authorization(5).is_none(), "already running");
+        assert!(!flow.approve(), "no second approval while it runs");
     }
 
     #[test]
-    fn reboot_approval_needs_a_verified_write() {
+    fn the_reboot_needs_a_verified_write() {
         let mut flow = staged();
-        flow.reboot_input = REBOOT_WORD.into();
         assert!(flow.reboot_authorization(5).is_none(), "nothing written");
         for (state, matches) in [
             (ApplyState::RollbackVerified, false),
@@ -230,24 +321,25 @@ mod tests {
         flow.outcome = Some(outcome(ApplyState::VerifiedPendingReboot, true));
         let approval = flow.reboot_authorization(5).expect("approval");
         assert_eq!(approval.scopes, vec![Scope::Reboot]);
-        flow.reboot_input = "REBOOT now".into();
-        assert!(flow.reboot_authorization(5).is_none());
+        flow.rebooted = true;
+        assert!(flow.reboot_authorization(5).is_none(), "one reboot");
     }
 
     #[test]
-    fn a_failure_after_the_plan_stops_the_flow() {
-        let mut flow = staged();
-        flow.failure = Some((WriteStep::Stage, "push failed".into()));
-        flow.staged = false;
-        assert_eq!(flow.next_step(), None);
-        assert_eq!(flow.status(WriteStep::Stage), StepStatus::Failed);
+    fn a_gsi_folder_stops_after_the_plan() {
+        let flow = chosen(WriteKind::Gsi);
+        assert_eq!(flow.status(WriteStep::Prepare), StepStatus::Waiting);
+        for step in [WriteStep::Stage, WriteStep::Write, WriteStep::Reboot] {
+            assert_eq!(flow.status(step), StepStatus::Closed);
+        }
+        assert_eq!(flow.focus_step(), WriteStep::Prepare);
+    }
 
-        let mut retry = WriteFlow {
-            failure: Some((WriteStep::Plan, "no device".into())),
-            ..WriteFlow::default()
-        };
-        assert_eq!(retry.next_step(), Some(WriteStep::Plan));
-        retry.failure = None;
-        assert_eq!(retry.status(WriteStep::Plan), StepStatus::Ready);
+    #[test]
+    fn a_new_start_keeps_the_folder_only() {
+        let mut flow = staged();
+        flow.folder = None;
+        flow.start_over();
+        assert!(flow.review.is_none() && flow.kind.is_none() && !flow.staged);
     }
 }

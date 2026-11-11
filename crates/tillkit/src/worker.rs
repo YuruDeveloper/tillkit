@@ -10,14 +10,15 @@ use front2::current_pair::find_stored_current_pair;
 use front2::kernel::{KernelPlan, KernelStore, read_current_kernel_set};
 use front2::pair_backup;
 use front2::{
-    ApplyOutcome, Authorization, DeviceState, Front2Error, PairManifest, PairRequest, PairStore,
-    Result, SupportReport, WritePlan, pair_apply,
+    ApplyOutcome, Authorization, DeviceState, Front2Error, PairKind, PairManifest, PairRequest,
+    PairStore, Result, SupportReport, WritePlan, pair_apply,
 };
 use iced::Task;
 use std::path::Path;
 use std::time::Duration;
 
 const STATE_POLL_INTERVAL: Duration = Duration::from_secs(1);
+pub const NO_BACKUP: &str = "no backup holds the images that the device has now";
 
 pub fn run_blocking<T, F>(
     work: F,
@@ -62,54 +63,47 @@ pub fn back_up(paths: &DataPaths) -> Result<()> {
     Ok(())
 }
 
-pub fn read_current_pair(paths: &DataPaths, note: &str) -> Result<PairManifest> {
-    let mut shell = AdbShell::connect()?;
-    let state = DeviceState::read(&mut shell)?;
-    let created_unix = now_unix();
-    let id = format!("readback-{created_unix}");
-    let request = PairRequest {
-        id: &id,
-        created_unix,
-        note,
-    };
-    pair_backup::read_current_pair(&mut shell, &state, &PairStore::new(paths.pairs()), request)
+pub fn is_backup_of(pair: &PairManifest, current: &PairManifest) -> bool {
+    pair.kind == PairKind::DeviceReadback
+        && pair.slot_suffix == current.slot_suffix
+        && pair.init_boot.sha256 == current.init_boot.sha256
+        && pair.vbmeta.sha256 == current.vbmeta.sha256
 }
 
-pub fn build_candidate(
-    paths: &DataPaths,
-    original: &str,
-    patched_init_boot: &Path,
-    note: &str,
+fn current_backup(
+    shell: &mut AdbShell,
+    state: &DeviceState,
+    store: &PairStore,
 ) -> Result<PairManifest> {
-    let created_unix = now_unix();
-    let id = format!("candidate-{created_unix}");
-    let request = PairRequest {
-        id: &id,
-        created_unix,
-        note,
-    };
-    build_signed_candidate(
-        &PairStore::new(paths.pairs()),
-        original,
-        patched_init_boot,
-        request,
-    )
+    let current = find_stored_current_pair(shell, state, store)?;
+    store
+        .list()?
+        .into_iter()
+        .find(|pair| is_backup_of(pair, &current))
+        .ok_or_else(|| Front2Error::Store(NO_BACKUP.into()))
 }
 
-pub fn plan_write(paths: &DataPaths, new_pair: &str) -> Result<PlanReview> {
+pub fn prepare_root_write(paths: &DataPaths, patched_init_boot: &Path) -> Result<PlanReview> {
     let mut shell = AdbShell::connect()?;
     let state = DeviceState::read(&mut shell)?;
     SupportReport::evaluate(&state).require_writes_allowed()?;
     let store = PairStore::new(paths.pairs());
-    let old_pair = find_stored_current_pair(&mut shell, &state, &store)?;
+    let backup = current_backup(&mut shell, &state, &store)?;
     let created_unix = now_unix();
+    let candidate_id = format!("candidate-{created_unix}");
+    let request = PairRequest {
+        id: &candidate_id,
+        created_unix,
+        note: "",
+    };
+    let candidate = build_signed_candidate(&store, &backup.id, patched_init_boot, request)?;
     let id = format!("plan-{created_unix}");
     let plan = WritePlan::prepare(
         &mut shell,
         &state,
         &store,
-        new_pair,
-        &old_pair.id,
+        &candidate.id,
+        &backup.id,
         &id,
         created_unix,
     )?;
@@ -183,4 +177,62 @@ pub fn reboot(
         &mut outcome,
     )?;
     Ok(outcome)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const MANIFEST: &str = r#"{
+        "schema": 1,
+        "id": "readback-1",
+        "kind": "DeviceReadback",
+        "created_unix": 1,
+        "slot_suffix": "_b",
+        "init_boot": { "file": "init_boot.img", "bytes": 8, "sha256": "11" },
+        "vbmeta": { "file": "vbmeta.img", "bytes": 8, "sha256": "33" },
+        "avb": {
+            "top_algorithm": "SHA256_RSA4096",
+            "top_key_sha1": "",
+            "top_rollback_index": 0,
+            "top_rollback_index_location": 0,
+            "top_flags": 0,
+            "top_hash_partitions": [],
+            "top_chain_partitions": [],
+            "init_boot_digest_in_top": "55",
+            "init_boot_footer_digest": "55",
+            "init_boot_footer_rollback_index": 0,
+            "init_boot_payload_bytes": 4
+        },
+        "parent": null,
+        "note": ""
+    }"#;
+
+    fn pair(id: &str, kind: PairKind) -> PairManifest {
+        let mut pair: PairManifest = serde_json::from_str(MANIFEST).expect("manifest");
+        pair.id = id.into();
+        pair.kind = kind;
+        pair
+    }
+
+    #[test]
+    fn the_backup_of_a_written_candidate_is_the_readback_with_the_same_images() {
+        let current = pair("candidate-2", PairKind::SignedCandidate);
+        assert!(
+            !is_backup_of(&current, &current),
+            "a candidate is no backup"
+        );
+        let readback = pair("readback-3", PairKind::DeviceReadback);
+        assert!(is_backup_of(&readback, &current));
+
+        let mut other_slot = readback.clone();
+        other_slot.slot_suffix = "_a".into();
+        assert!(!is_backup_of(&other_slot, &current));
+        let mut earlier = readback.clone();
+        earlier.init_boot.sha256 = "00".into();
+        assert!(!is_backup_of(&earlier, &current));
+        let mut other_vbmeta = readback;
+        other_vbmeta.vbmeta.sha256 = "00".into();
+        assert!(!is_backup_of(&other_vbmeta, &current));
+    }
 }

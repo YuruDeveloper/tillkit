@@ -1,11 +1,13 @@
 use crate::fonts;
 use crate::message::Message;
 use crate::palette::Palette;
-use iced::widget::{Column, Space, button, column, container, row, scrollable, text, text_input};
+use iced::widget::{Column, Space, button, column, container, row, scrollable, text};
 use iced::{Border, Color, Element, Length, Theme};
 
 pub const KEY_WIDTH: f32 = 210.0;
 pub const VALUE_COLUMN_CHARACTERS: usize = 36;
+const TRIANGLE_WIDTH: f32 = 7.0;
+const TRIANGLE_ROWS: [f32; 9] = [1.0, 3.0, 4.0, 6.0, 7.0, 6.0, 4.0, 3.0, 1.0];
 
 pub fn fill(color: Color) -> container::Style {
     container::Style {
@@ -163,17 +165,19 @@ pub fn panel<'a>(
     block(content, palette.paper_2, palette)
 }
 
+pub fn triangle<'a>(color: Color) -> Element<'a, Message> {
+    let mut shape = Column::new().width(Length::Fixed(TRIANGLE_WIDTH));
+    for width in TRIANGLE_ROWS {
+        shape = shape.push(bar(color, Length::Fixed(width), Length::Fixed(1.0)));
+    }
+    shape.into()
+}
+
 pub fn running<'a>(caption: &str, palette: Palette) -> Element<'a, Message> {
-    row![
-        text("\u{25B6}")
-            .font(fonts::MONO)
-            .size(11)
-            .color(palette.idol),
-        strong(caption.to_string(), palette),
-    ]
-    .spacing(8)
-    .align_y(iced::Alignment::Center)
-    .into()
+    row![triangle(palette.idol), strong(caption.to_string(), palette),]
+        .spacing(8)
+        .align_y(iced::Alignment::Center)
+        .into()
 }
 
 pub fn fault<'a>(
@@ -270,34 +274,6 @@ pub fn ruled<'a>(rows: Vec<Element<'a, Message>>, palette: Palette) -> Element<'
     }
     list.push(bar(palette.rule, Length::Fill, Length::Fixed(1.0)))
         .into()
-}
-
-pub fn input<'a>(
-    placeholder: &str,
-    current: &str,
-    on_input: fn(String) -> Message,
-    palette: Palette,
-) -> Element<'a, Message> {
-    text_input(placeholder, current)
-        .on_input(on_input)
-        .font(fonts::MONO)
-        .size(13)
-        .padding([7, 9])
-        .style(move |_, status| input_style(status, palette))
-        .into()
-}
-
-fn input_style(status: text_input::Status, palette: Palette) -> text_input::Style {
-    let focused = matches!(status, text_input::Status::Focused { .. });
-    let width = if focused { 2.0 } else { 1.0 };
-    text_input::Style {
-        background: palette.paper.into(),
-        border: outline(palette.ink, width),
-        icon: palette.ink_2,
-        placeholder: palette.ink_2,
-        value: palette.ink,
-        selection: palette.tint_warn,
-    }
 }
 
 pub fn scroll_style(
