@@ -22,6 +22,7 @@ mod message;
 mod palette;
 mod plan_review;
 mod plan_source;
+mod reboot;
 mod screen;
 mod step_status;
 mod view;
