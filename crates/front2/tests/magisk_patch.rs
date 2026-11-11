@@ -1,10 +1,10 @@
 mod support;
 
 use front2::magisk::{
-    MagiskPackage, build_magisk_candidate, dispatch_magiskboot_helper, patch_init_boot,
-    register_magiskboot_host,
+    InitBootState, MagiskPackage, PatchInputs, build_magisk_candidate, dispatch_magiskboot_helper,
+    patch_init_boot, register_magiskboot_host,
 };
-use front2::{PairKind, PairRequest, PairStore};
+use front2::{Front2Error, PairKind, PairRequest, PairStore, RootAccess};
 use std::path::Path;
 use support::{BOOT_DIGEST_BYTE, write_readback_pair_from};
 
@@ -18,7 +18,7 @@ fn main() {
     }
     register_magiskboot_host(std::env::current_exe().expect("test executable"))
         .expect("register the magiskboot host");
-    let tests: [(&str, fn()); 5] = [
+    let tests: [(&str, fn()); 7] = [
         (
             "stock_init_boot_becomes_a_signed_magisk_candidate",
             stock_init_boot_becomes_a_signed_magisk_candidate,
@@ -30,6 +30,14 @@ fn main() {
         (
             "an_already_patched_init_boot_is_refused",
             an_already_patched_init_boot_is_refused,
+        ),
+        (
+            "a_device_without_root_access_is_refused",
+            a_device_without_root_access_is_refused,
+        ),
+        (
+            "an_existing_work_folder_is_refused",
+            an_existing_work_folder_is_refused,
         ),
         (
             "a_package_without_the_magisk_payload_is_refused",
@@ -70,9 +78,7 @@ fn real_front2_image_matches_the_magisk_app() {
     let mut log = Vec::new();
     let patched = patch_init_boot(
         &inputs[1],
-        &package,
-        &preinit,
-        &root.path().join("work"),
+        patch_inputs(&package, &preinit, &root.path().join("work")),
         &mut log,
     )
     .expect("patch the real image");
@@ -95,6 +101,10 @@ fn real_front2_image_matches_the_magisk_app() {
     let our_header = header_page(&patched);
     let reference_header = header_page(&inputs[2]);
     assert_eq!(our_header, reference_header);
+    assert_eq!(
+        InitBootState::inspect(&inputs[2], &root.path().join("inspect-app")).expect("inspect"),
+        InitBootState::MagiskPatched
+    );
     real_candidate_verifies(&inputs[1], &package, &preinit, root.path());
     println!("test real_front2_image_matches_the_magisk_app ... ok");
 }
@@ -115,9 +125,8 @@ fn real_candidate_verifies(stock: &Path, package: &MagiskPackage, preinit: &str,
     build_magisk_candidate(
         &store,
         READBACK,
-        package,
-        preinit,
-        &root.join("candidate-work"),
+        Some(RootAccess::Su),
+        patch_inputs(package, preinit, &root.join("candidate-work")),
         request(CANDIDATE),
         &mut log,
     )
@@ -180,6 +189,18 @@ fn config_value(entries: &CpioEntries, key: &str) -> String {
         .lines()
         .find_map(|line| line.strip_prefix(key)?.strip_prefix('=').map(str::to_owned))
         .unwrap_or_default()
+}
+
+fn patch_inputs<'a>(
+    package: &'a MagiskPackage,
+    preinit_device: &'a str,
+    work_dir: &'a Path,
+) -> PatchInputs<'a> {
+    PatchInputs {
+        package,
+        preinit_device,
+        work_dir,
+    }
 }
 
 fn request(id: &str) -> PairRequest<'_> {
@@ -327,7 +348,7 @@ fn a_package_with_a_stub_adds_stub_xz() {
     for with_stub in [true, false] {
         let package = admitted_package(root.path(), with_stub);
         let work = root.path().join(format!("work-{with_stub}"));
-        let patched = patch_init_boot(&stock, &package, "", &work, &mut Vec::new())
+        let patched = patch_init_boot(&stock, patch_inputs(&package, "", &work), &mut Vec::new())
             .expect("patch the stock image");
         let entries =
             unpacked_entries(&patched, &root.path().join(format!("unpacked-{with_stub}")));
@@ -371,9 +392,8 @@ fn stock_init_boot_becomes_a_signed_magisk_candidate() {
     let candidate = build_magisk_candidate(
         &store,
         READBACK,
-        &package,
-        "metadata",
-        &root.path().join("work"),
+        Some(RootAccess::AdbRoot),
+        patch_inputs(&package, "metadata", &root.path().join("work")),
         request(CANDIDATE),
         &mut log,
     )
@@ -415,10 +435,64 @@ fn an_already_patched_init_boot_is_refused() {
         .expect("readback directory")
         .join("init_boot.img");
     let mut log = Vec::new();
-    let first = patch_init_boot(&stock, &package, "", &root.path().join("first"), &mut log)
+    let first_work = root.path().join("first");
+    let first = patch_init_boot(&stock, patch_inputs(&package, "", &first_work), &mut log)
         .expect("patch the stock image");
-    let again = patch_init_boot(&first, &package, "", &root.path().join("second"), &mut log);
-    assert!(again.is_err(), "a patched image must not be patched again");
+    assert_eq!(
+        InitBootState::inspect(&stock, &root.path().join("inspect-stock")).expect("inspect"),
+        InitBootState::Stock
+    );
+    assert_eq!(
+        InitBootState::inspect(&first, &root.path().join("inspect-patched")).expect("inspect"),
+        InitBootState::MagiskPatched
+    );
+    let second_work = root.path().join("second");
+    let again = patch_init_boot(&first, patch_inputs(&package, "", &second_work), &mut log);
+    assert!(
+        matches!(again, Err(Front2Error::AlreadyPatched(_))),
+        "{again:?}"
+    );
+    assert!(!second_work.join("magiskinit").exists());
+}
+
+fn a_device_without_root_access_is_refused() {
+    let root = tempfile::tempdir().expect("tempdir");
+    let store = store_with_readback(root.path());
+    let package = admitted_package(root.path(), false);
+    let work = root.path().join("work");
+    let refused = build_magisk_candidate(
+        &store,
+        READBACK,
+        None,
+        patch_inputs(&package, "", &work),
+        request(CANDIDATE),
+        &mut Vec::new(),
+    );
+    assert!(
+        matches!(refused, Err(Front2Error::Unsupported(_))),
+        "{refused:?}"
+    );
+    assert!(!work.exists());
+    assert!(!store.directory(CANDIDATE).expect("directory").exists());
+}
+
+fn an_existing_work_folder_is_refused() {
+    let root = tempfile::tempdir().expect("tempdir");
+    let store = store_with_readback(root.path());
+    let package = admitted_package(root.path(), false);
+    let stock = store
+        .directory(READBACK)
+        .expect("readback directory")
+        .join("init_boot.img");
+    let work = root.path().join("work");
+    std::fs::create_dir(&work).expect("old work folder");
+    std::fs::write(work.join("magiskinit"), b"old payload").expect("old payload");
+    let refused = patch_init_boot(&stock, patch_inputs(&package, "", &work), &mut Vec::new());
+    assert!(matches!(refused, Err(Front2Error::Plan(_))), "{refused:?}");
+    assert_eq!(
+        std::fs::read(work.join("magiskinit")).expect("old payload"),
+        b"old payload"
+    );
 }
 
 fn a_package_without_the_magisk_payload_is_refused() {

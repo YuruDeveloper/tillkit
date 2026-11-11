@@ -14,6 +14,9 @@ pub enum Front2Error {
     #[error("Image: {0}")]
     Image(String),
 
+    #[error("Already patched by Magisk: {0}")]
+    AlreadyPatched(String),
+
     #[error("Plan: {0}")]
     Plan(String),
 
