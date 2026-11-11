@@ -76,10 +76,14 @@ pub fn preview(app: &mut App) {
             "uploading" => flow.running = Some(WriteStep::Stage),
             "upload-failed" => flow.failure = Some(upload_failed),
             "writing" => flow.running = Some(WriteStep::Write),
-            "verified" | "reboot" | "rebooted" => flow.outcome = Some(verified),
+            "verified" | "reboot" | "rebooted" | "reboot-refused" => flow.outcome = Some(verified),
             "rolled-back" => flow.outcome = Some(rolled_back),
             "unknown" => flow.outcome = Some(unknown),
             _ => {}
+        }
+        if pose == "reboot-refused" {
+            let refused = "the device state file no longer reports a verified write";
+            flow.failure = Some((WriteStep::Reboot, refused.to_string()));
         }
         flow.staged = !matches!(pose, "uploading" | "upload-failed");
         flow.rebooted = pose == "rebooted";

@@ -28,7 +28,8 @@ pub fn render(plan: &WritePlan, profile: &DeviceProfile) -> String {
     line("[ \"$(id -u)\" = 0 ]".into());
     for (property, expected) in SupportReport::expected_properties(profile) {
         let value = plan.support_override.observed(property).unwrap_or(expected);
-        line(format!("[ \"$(getprop {property})\" = {} ]", quote(value)));
+        line(format!("PROPERTY=$(getprop {property})"));
+        line(format!("[ \"$PROPERTY\" = {} ]", quote(value)));
     }
     for (index, write) in plan.writes.iter().enumerate() {
         line(preconditions(index, write));

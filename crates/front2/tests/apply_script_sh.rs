@@ -31,7 +31,10 @@ type Breaker = fn(&Stage);
 type Environment = &'static [(&'static str, &'static str)];
 
 fn getprop_stub() -> String {
-    let mut stub = String::from("#!/bin/sh\ncase \"$1\" in\n");
+    let mut stub = String::from("#!/bin/sh\n");
+    stub.push_str("[ \"$1\" != \"${FRONT2_GETPROP_FAILS:-}\" ] || exit 1\n");
+    stub.push_str("[ \"$1\" != \"${FRONT2_GETPROP_EMPTY:-}\" ] || exit 0\n");
+    stub.push_str("case \"$1\" in\n");
     for (property, expected) in SupportReport::expected_properties(&PROFILE) {
         let variable = property.replace('.', "_").to_ascii_uppercase();
         stub.push_str(&format!(
@@ -310,6 +313,32 @@ fn doc_1054_an_accepted_value_must_be_the_same_when_the_script_runs() {
     assert!(!stage.path("dd-count").exists(), "dd ran");
     assert!(stage.run("--check", same_device).status.success());
     assert!(stage.run("--apply", same_device).status.success());
+    assert_eq!(stage.targets(), stage.new);
+}
+
+#[test]
+fn doc_1055_a_failed_property_read_is_not_an_accepted_empty_value() {
+    let no_build = SupportCheck::exact(
+        FINGERPRINT,
+        "TOSSPLACE/toss_front2/toss_front2:13/TKQ1.230110.001/475:user/dev-keys",
+        "",
+    );
+    let accepted = SupportOverride {
+        accepted: vec![no_build],
+    };
+    let Some(stage) = stage_accepting(accepted) else {
+        return;
+    };
+    let failed_read: Environment = &[("FRONT2_GETPROP_FAILS", FINGERPRINT)];
+    let empty_value: Environment = &[("FRONT2_GETPROP_EMPTY", FINGERPRINT)];
+    for argument in ["--check", "--apply"] {
+        let output = stage.run(argument, failed_read);
+        assert!(!output.status.success(), "{argument}");
+    }
+    assert_eq!(stage.targets(), stage.old);
+    assert!(!stage.path("dd-count").exists(), "dd ran");
+    assert!(stage.run("--check", empty_value).status.success());
+    assert!(stage.run("--apply", empty_value).status.success());
     assert_eq!(stage.targets(), stage.new);
 }
 

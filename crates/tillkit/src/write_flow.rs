@@ -49,12 +49,16 @@ impl WriteFlow {
         *self = self.folder.take().map(Self::for_folder).unwrap_or_default();
     }
 
+    pub fn reboot_failed(&self) -> bool {
+        matches!(&self.failure, Some((WriteStep::Reboot, _)))
+    }
+
     pub fn write_is_uncertain(&self) -> bool {
         let write_failed = matches!(&self.failure, Some((WriteStep::Write, _)));
         let unsettled = self.outcome.as_ref().is_some_and(|outcome| {
             !self.write_verified() && outcome.state != ApplyState::RollbackVerified
         });
-        write_failed || unsettled
+        write_failed || self.reboot_failed() || unsettled
     }
 
     pub fn can_start_over(&self) -> bool {
@@ -223,7 +227,7 @@ pub mod tests {
         }
     }
 
-    fn outcome(state: ApplyState, matches: bool) -> ApplyOutcome {
+    pub fn outcome(state: ApplyState, matches: bool) -> ApplyOutcome {
         ApplyOutcome {
             plan_id: "plan-1".into(),
             plan_sha256: "0123456789abcdef".repeat(4),
@@ -403,16 +407,7 @@ pub mod tests {
         rolled_back.outcome = Some(outcome(ApplyState::RollbackVerified, false));
         let mut verified = staged();
         verified.outcome = Some(outcome(ApplyState::VerifiedPendingReboot, true));
-        let mut reboot_failed = staged();
-        reboot_failed.outcome = Some(outcome(ApplyState::VerifiedPendingReboot, true));
-        reboot_failed.failure = Some((WriteStep::Reboot, "no device".into()));
-        for flow in [
-            unapproved,
-            upload_failed,
-            rolled_back,
-            verified,
-            reboot_failed,
-        ] {
+        for flow in [unapproved, upload_failed, rolled_back, verified] {
             assert!(!flow.write_is_uncertain(), "{flow:?}");
             assert!(flow.can_start_over(), "{flow:?}");
         }
@@ -420,6 +415,18 @@ pub mod tests {
         running.running = Some(WriteStep::Write);
         assert!(!running.can_start_over());
         assert!(!chosen(WriteKind::RootImage).can_start_over(), "no result");
+    }
+
+    #[test]
+    fn doc_1055_a_failed_reboot_step_leaves_no_known_result() {
+        let mut flow = staged();
+        flow.outcome = Some(outcome(ApplyState::VerifiedPendingReboot, true));
+        assert!(flow.can_start_over() && !flow.reboot_failed());
+        flow.failure = Some((WriteStep::Reboot, "not the new pair".into()));
+        assert!(flow.reboot_failed() && flow.write_is_uncertain());
+        assert!(!flow.can_start_over());
+        assert_eq!(flow.next_step(), None);
+        assert_eq!(flow.status(WriteStep::Reboot), StepStatus::Failed);
     }
 
     #[test]

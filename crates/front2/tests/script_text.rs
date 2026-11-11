@@ -7,9 +7,9 @@ use front2::{
 };
 
 const PLAIN_SCRIPT_SHA256: &str =
-    "450df869906fb2394ca7cf391694349dbbbd901bed1eef300ab4cb20eab01f58";
+    "ca13eebe35cfd4b38239de36726e155123fa50ddd2b100a5474a87306a26bbea";
 const ACCEPTING_SCRIPT_SHA256: &str =
-    "8739d882be1501c519849cc51845874b6bcab974cb8a4ed181ad01fadb20e123";
+    "947fa0f40276ba3ec15239ad741ea6b1c6e3ee158e1f8291b2a2b046b0cbd724";
 
 fn planned(base: &str, node: &str, bytes: u64) -> PlannedWrite {
     let record = |seed: &str| ImageRecord {
@@ -111,7 +111,10 @@ fn the_storage_unit_of_the_profile_sets_the_dd_block_size() {
     let plan = fixed_plan(SupportOverride::none());
     let script = render(&plan, &OTHER_DEVICE);
     assert!(script.contains("bs=512 count=16384 conv=fsync"), "{script}");
-    assert!(script.contains("[ \"$(getprop ro.product.vendor.device)\" = 'other' ]"));
+    assert!(
+        script
+            .contains("PROPERTY=$(getprop ro.product.vendor.device)\n[ \"$PROPERTY\" = 'other' ]")
+    );
     assert!(!script.contains("ro.soc.model"));
 }
 
