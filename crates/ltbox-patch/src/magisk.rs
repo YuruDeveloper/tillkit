@@ -213,10 +213,21 @@ pub fn extract_apk_payload(apk_path: &Path, staging_dir: &Path) -> Result<()> {
             )));
         }
         if !staged {
-            let _ = fs::remove_file(staging_dir.join(dst_name));
+            remove_stale_payload(&staging_dir.join(dst_name))?;
         }
     }
     Ok(())
+}
+
+fn remove_stale_payload(path: &Path) -> Result<()> {
+    match fs::remove_file(path) {
+        Ok(()) => Ok(()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(error) => Err(LtboxError::Patch(format!(
+            "remove the old payload {}: {error}",
+            path.display()
+        ))),
+    }
 }
 
 /// Patch the selected root image with Magisk. `work_dir` must contain the image
@@ -494,11 +505,9 @@ mod tests {
         assert_eq!(without.last(), Some(&"add 000 .backup/.magisk config"));
     }
 
-    #[test]
-    fn package_without_a_stub_extracts_and_clears_an_old_stub() {
+    fn package_without_a_stub(directory: &Path) -> PathBuf {
         use std::io::Write;
-        let directory = tempfile::tempdir().unwrap();
-        let apk = directory.path().join("magisk.apk");
+        let apk = directory.join("magisk.apk");
         let mut writer = zip::ZipWriter::new(std::fs::File::create(&apk).unwrap());
         let options = zip::write::SimpleFileOptions::default()
             .compression_method(zip::CompressionMethod::Stored);
@@ -511,12 +520,66 @@ mod tests {
             writer.write_all(name.as_bytes()).unwrap();
         }
         writer.finish().unwrap();
-        let staging = directory.path().join("staging");
+        apk
+    }
+
+    fn new_staging(directory: &Path) -> PathBuf {
+        let staging = directory.join("staging");
         std::fs::create_dir(&staging).unwrap();
+        staging
+    }
+
+    #[test]
+    fn package_without_a_stub_extracts_and_clears_an_old_stub() {
+        let directory = tempfile::tempdir().unwrap();
+        let apk = package_without_a_stub(directory.path());
+        let staging = new_staging(directory.path());
         std::fs::write(staging.join(STUB_APK), b"old stub").unwrap();
         extract_apk_payload(&apk, &staging).unwrap();
         assert!(staging.join("magiskinit").is_file());
         assert!(!staging.join(STUB_APK).exists());
+    }
+
+    #[test]
+    fn doc_1053_package_without_a_stub_and_no_old_stub_extracts() {
+        let directory = tempfile::tempdir().unwrap();
+        let apk = package_without_a_stub(directory.path());
+        let staging = new_staging(directory.path());
+        extract_apk_payload(&apk, &staging).unwrap();
+        assert!(staging.join("magiskinit").is_file());
+        assert!(!staging.join(STUB_APK).exists());
+    }
+
+    #[test]
+    fn doc_1053_an_old_stub_that_cannot_be_removed_is_an_error() {
+        let directory = tempfile::tempdir().unwrap();
+        let apk = package_without_a_stub(directory.path());
+        let staging = new_staging(directory.path());
+        std::fs::create_dir(staging.join(STUB_APK)).unwrap();
+        let refused = extract_apk_payload(&apk, &staging);
+        assert!(matches!(refused, Err(LtboxError::Patch(_))), "{refused:?}");
+        assert!(staging.join(STUB_APK).exists());
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn doc_1053_an_old_stub_held_open_without_delete_sharing_is_an_error() {
+        use std::os::windows::fs::OpenOptionsExt;
+        let directory = tempfile::tempdir().unwrap();
+        let apk = package_without_a_stub(directory.path());
+        let staging = new_staging(directory.path());
+        let old_stub = staging.join(STUB_APK);
+        std::fs::write(&old_stub, b"old stub").unwrap();
+        let read_and_write_sharing = 3;
+        let handle = std::fs::OpenOptions::new()
+            .read(true)
+            .share_mode(read_and_write_sharing)
+            .open(&old_stub)
+            .unwrap();
+        let refused = extract_apk_payload(&apk, &staging);
+        drop(handle);
+        assert!(matches!(refused, Err(LtboxError::Patch(_))), "{refused:?}");
+        assert_eq!(std::fs::read(&old_stub).unwrap(), b"old stub");
     }
 
     #[test]
