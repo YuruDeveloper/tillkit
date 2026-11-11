@@ -1,16 +1,30 @@
 /target
 /dist
-ltbox.log
+/temp/
+/.worktree/
 
-# iced_lucide codegen output — regenerated every build from fonts/lucide.toml
-crates/ltbox-gui/src/icon.rs
-crates/ltbox-gui/fonts/lucide.ttf
-
+# Device material. A public repository must never hold images, firmware,
+# loaders, device logs, keys or read-back pairs of a real device.
 *.apk
 *.img
+*.bin
 *.zip
+*.elf
+*.melf
+*.mbn
+*.x
+*.log
+*.pem
+*.pk8
+*.key
+adbkey
+adbkey.pub
+rawprogram*.xml
+patch*.xml
 backup*/
 output*/
+pairs/
+plans/
 
 .claude/
 AGENTS.md
@@ -19,3 +33,5 @@ CLAUDE.md
 /DESIGN.md
 desktop.ini
 .DS_Store
+*.png
+!crates/frontbox/assets/**
