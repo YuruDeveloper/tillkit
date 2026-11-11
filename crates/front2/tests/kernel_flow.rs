@@ -8,7 +8,7 @@ use front2::kernel::kernel_plan_facts::{
 use front2::kernel::kernel_set::SET_FILE;
 use front2::kernel::{
     BootImageHeader, KernelPlan, KernelRelease, KernelSet, KernelStore, build_kernel_candidate,
-    read_current_kernel_set, verify_kernel_images,
+    find_stored_current_kernel_set, read_current_kernel_set, verify_kernel_images,
 };
 use front2::pair_apply::{apply, check, reboot, stage};
 use front2::{
@@ -476,6 +476,49 @@ fn plan_refuses_a_changed_reference_partition() {
             .expect_err("a changed reference partition blocks the plan");
         assert!(error.to_string().contains(label), "{error}");
     }
+}
+
+#[test]
+fn the_stored_current_set_is_found_only_when_the_device_holds_it() {
+    let mut bench = bench();
+    let missing = find_stored_current_kernel_set(&mut bench.device, &bench.state, &bench.store)
+        .expect_err("the store is empty");
+    assert!(
+        missing.to_string().contains("no stored kernel set"),
+        "{missing}"
+    );
+
+    let (readback, candidate) = readback_and_candidate(&mut bench);
+    let found = find_stored_current_kernel_set(&mut bench.device, &bench.state, &bench.store)
+        .expect("the readback matches the device");
+    assert_eq!(found.id, readback.id);
+
+    let (plan, digest) = staged_plan(&mut bench, CANDIDATE, READBACK, "2000-apply");
+    run_apply(&mut bench, &plan.plan, &digest);
+    let found = find_stored_current_kernel_set(&mut bench.device, &bench.state, &bench.store)
+        .expect("the candidate matches the device after the write");
+    assert_eq!(found.id, candidate.id);
+
+    bench.device.partition_mut("boot_b")[4096] ^= 1;
+    assert!(find_stored_current_kernel_set(&mut bench.device, &bench.state, &bench.store).is_err());
+}
+
+#[test]
+fn the_plan_facts_refuse_a_reference_partition_that_changed_after_the_plan() {
+    let mut bench = bench();
+    readback_and_candidate(&mut bench);
+    let plan = prepare(&mut bench, CANDIDATE, READBACK, "2000-apply").expect("plan");
+    plan.facts
+        .require_references_unchanged(&mut bench.device, RootAccess::Su)
+        .expect("nothing changed");
+    assert_eq!(plan.facts.reference_partitions.len(), 4);
+
+    bench.device.partition_mut("recovery_b")[0] ^= 1;
+    let error = plan
+        .facts
+        .require_references_unchanged(&mut bench.device, RootAccess::Su)
+        .expect_err("recovery_b changed");
+    assert!(error.to_string().contains("recovery_b"), "{error}");
 }
 
 #[test]

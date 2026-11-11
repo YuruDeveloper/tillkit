@@ -1,5 +1,6 @@
 pub mod boot_descriptors;
 pub mod boot_image_header;
+pub mod current_kernel_set;
 pub mod hash_descriptor;
 pub mod kernel_avb_summary;
 pub mod kernel_candidate;
@@ -15,6 +16,7 @@ pub mod reference_partition;
 
 pub use boot_descriptors::require_unchanged_except_boot;
 pub use boot_image_header::BootImageHeader;
+pub use current_kernel_set::find_stored_current_kernel_set;
 pub use hash_descriptor::HashDescriptor;
 pub use kernel_avb_summary::KernelAvbSummary;
 pub use kernel_candidate::build_kernel_candidate;

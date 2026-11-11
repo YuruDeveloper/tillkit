@@ -1,7 +1,9 @@
+use crate::device_shell::DeviceShell;
 use crate::device_state::DeviceState;
 use crate::error::{Front2Error, Result};
 use crate::kernel::kernel_set::KernelSet;
 use crate::kernel::reference_partition::ReferencePartition;
+use crate::root_access::RootAccess;
 use crate::write_plan::WritePlan;
 use serde::{Deserialize, Serialize};
 use std::fs;
@@ -84,6 +86,17 @@ impl KernelPlanFacts {
                 "the kernel plan facts for plan {:?} do not match plan {:?} or were edited",
                 self.plan_id, plan.id
             )));
+        }
+        Ok(())
+    }
+
+    pub fn require_references_unchanged(
+        &self,
+        shell: &mut dyn DeviceShell,
+        root: RootAccess,
+    ) -> Result<()> {
+        for reference in &self.reference_partitions {
+            reference.require_unchanged(shell, root)?;
         }
         Ok(())
     }
