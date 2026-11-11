@@ -432,6 +432,73 @@ fn system_refuses_a_stock_image_without_one_product_hashtree() {
     );
 }
 
+fn flip_signature_byte(path: &Path) {
+    let source = VbmetaSource::read(path).expect("source");
+    let offset = 256 + source.info.header.signature_offset as usize;
+    let mut bytes = std::fs::read(path).expect("read source");
+    bytes[offset] ^= 1;
+    std::fs::write(path, bytes).expect("write source");
+}
+
+#[test]
+fn letter_1134_top_refuses_an_original_slot_b_with_a_damaged_signature() {
+    let bench = Bench::new();
+    let output = bench
+        .top(&stock_top(), &original_top())
+        .expect("the control builds");
+    std::fs::remove_file(&output).expect("remove the control");
+
+    let stock = bench.path("stock-top.bin");
+    let original = bench.path("original-top.bin");
+    flip_signature_byte(&original);
+    let template = VbmetaTemplate {
+        stock_slot_a: &stock,
+        original_slot_b: &original,
+    };
+    let error = build_top_vbmeta(&template, &[], &output).expect_err("damaged signature");
+    assert!(
+        matches!(error, front2::Front2Error::Verification(_)),
+        "{error}"
+    );
+    assert!(
+        error
+            .to_string()
+            .contains("RSA verification rejected the signature"),
+        "{error}"
+    );
+    assert!(!output.exists());
+}
+
+#[test]
+fn letter_1134_system_refuses_an_original_slot_b_with_a_damaged_signature() {
+    let bench = Bench::new();
+    let output = bench
+        .system(&stock_system(), &original_system(), &gsi())
+        .expect("the control builds");
+    std::fs::remove_file(&output).expect("remove the control");
+
+    let stock = bench.path("stock-system.bin");
+    let original = bench.path("original-system.bin");
+    flip_signature_byte(&original);
+    let template = VbmetaTemplate {
+        stock_slot_a: &stock,
+        original_slot_b: &original,
+    };
+    let error = build_system_vbmeta(&template, &bench.path("gsi.bin"), &output)
+        .expect_err("damaged signature");
+    assert!(
+        matches!(error, front2::Front2Error::Verification(_)),
+        "{error}"
+    );
+    assert!(
+        error
+            .to_string()
+            .contains("RSA verification rejected the signature"),
+        "{error}"
+    );
+    assert!(!output.exists());
+}
+
 #[test]
 fn real_images_give_the_bytes_that_started_the_device_when_available() {
     let Some(evidence) = std::env::var_os("FRONT2_REAL_EVIDENCE_DIR").map(PathBuf::from) else {
