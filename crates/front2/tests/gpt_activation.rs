@@ -567,6 +567,46 @@ fn a_usable_range_that_covers_a_gpt_copy_is_rejected() {
 }
 
 #[test]
+fn letter_1136_a_main_copy_whose_usable_range_covers_the_backup_table_is_rejected() {
+    let gpt = SyntheticGpt::standard();
+    for last_usable in [LAST_LBA - 4, LAST_LBA - 1] {
+        let main = main_with(&gpt, |main| {
+            main[MAIN_HEADER + 48..MAIN_HEADER + 56].copy_from_slice(&last_usable.to_le_bytes());
+        });
+        rejection(
+            GptCopy::parse(GptCopyKind::Main, &main),
+            &format!("gives the usable LBA range 6 to {last_usable}"),
+        );
+    }
+
+    let main = main_with(&gpt, |main| {
+        main[MAIN_HEADER + 48..MAIN_HEADER + 56].copy_from_slice(&(LAST_LBA - 1).to_le_bytes());
+        main[MAIN_TABLE + 32..MAIN_TABLE + 40].copy_from_slice(&(LAST_LBA - 4).to_le_bytes());
+        main[MAIN_TABLE + 40..MAIN_TABLE + 48].copy_from_slice(&(LAST_LBA - 1).to_le_bytes());
+    });
+    let err = rejection(
+        PartitionMap::from_main_copies(&[(LUN, &main)]),
+        "gives the usable LBA range 6 to 4094",
+    );
+    assert!(matches!(err, Front2Error::Image(_)));
+
+    let main = main_with(&gpt, |main| {
+        let entry = MAIN_TABLE + ENTRY_BYTES * 6;
+        main[entry + 32..entry + 40].copy_from_slice(&(LAST_LBA - 8).to_le_bytes());
+        main[entry + 40..entry + 48].copy_from_slice(&(LAST_LBA - 5).to_le_bytes());
+    });
+    let map = PartitionMap::from_main_copies(&[(LUN, &main)]).expect("the last usable sectors");
+    assert_eq!(
+        map.locate("misc").expect("misc"),
+        PartitionLocation {
+            lun: LUN,
+            start_sector: LAST_LBA - 8,
+            sectors: 4
+        }
+    );
+}
+
+#[test]
 fn the_partition_map_rejects_a_lun_that_is_given_twice() {
     let gpt = SyntheticGpt::empty().with_entry("misc", 0);
     let other = SyntheticGpt::empty().with_entry("persist", 0);

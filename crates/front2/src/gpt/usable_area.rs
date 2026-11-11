@@ -17,7 +17,9 @@ impl UsableArea {
         alternate_lba: u64,
     ) -> Result<()> {
         let main_table_end = entries_lba.checked_add(TABLE_AREA_SECTORS as u64);
-        let after_main = main_table_end <= Some(self.first_lba) && self.last_lba < alternate_lba;
+        let backup_table_start = alternate_lba.checked_sub(TABLE_AREA_SECTORS as u64);
+        let after_main = main_table_end <= Some(self.first_lba)
+            && backup_table_start.is_some_and(|start| self.last_lba < start);
         let before_backup = self.last_lba < entries_lba && alternate_lba < self.first_lba;
         let separate = match kind {
             GptCopyKind::Main => after_main,
