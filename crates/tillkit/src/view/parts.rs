@@ -64,6 +64,14 @@ pub fn body<'a>(content: impl Into<String>, palette: Palette) -> Element<'a, Mes
         .into()
 }
 
+pub fn note<'a>(content: impl Into<String>, palette: Palette) -> Element<'a, Message> {
+    text(content.into())
+        .font(fonts::BODY)
+        .size(13)
+        .color(palette.ink_2)
+        .into()
+}
+
 pub fn outline(color: Color, width: f32) -> Border {
     Border {
         color,

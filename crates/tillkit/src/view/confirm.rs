@@ -4,12 +4,13 @@ use crate::fonts;
 use crate::message::Message;
 use crate::palette::Palette;
 use crate::plan_review::PlanReview;
+use crate::reboot_words;
 use crate::support_words;
 use crate::view::{parts, rail, support_rows};
 use crate::write_kind::WriteKind;
+use crate::write_origin::WriteOrigin;
 use iced::widget::{Column, Space, column, container, opaque, row, text};
 use iced::{Color, Element, Length, Padding};
-use std::path::Path;
 
 const DIALOG_WIDTH: f32 = 620.0;
 const SCRIM_ALPHA: f32 = 0.92;
@@ -22,6 +23,8 @@ const WRITE_KEPT: &str = "기록이 중간에 실패하면 백업해 둔 이미�
 const FORCED_WARNING: &str = "지원하는 조건과 맞지 않는 기기에 강제로 진행하는 기록입니다. 기록한 뒤에 기기가 부팅하는 것을 보장하지 않습니다.";
 const KERNEL_WARNING: &str =
     "새 커널로 부팅하지 못하면, 이 프로그램으로는 이전 커널로 되돌릴 수 없습니다.";
+const ROOT_WORK: &str = "Magisk 루트 패치 기록";
+const ROOT_WARNING: &str = "TillKit이 Magisk로 직접 패치한 이미지로 이 기기가 부팅하는지는 아직 실제 기기에서 확인하지 못했습니다.";
 const REBOOT_QUESTION: &str = "기록한 내용을 다시 읽어서 확인했습니다. 기기를 지금 다시 시작하면 새 이미지로 부팅합니다. 나중에 하려면 LATER를 눌러 주세요.";
 
 pub fn layer(app: &App, confirmation: Confirmation) -> Element<'_, Message> {
@@ -30,6 +33,7 @@ pub fn layer(app: &App, confirmation: Confirmation) -> Element<'_, Message> {
         Confirmation::ForceSupport => force_support(app),
         Confirmation::Write => write(app),
         Confirmation::Reboot => reboot(palette),
+        Confirmation::RebootTo => reboot_to(app),
     };
     let scrim = Color {
         a: SCRIM_ALPHA,
@@ -71,10 +75,13 @@ fn write(app: &App) -> Element<'_, Message> {
         .push(parts::warned("WRITE TO DEVICE", palette))
         .push(parts::body(WRITE_WARNING, palette));
     let image = app.write.image();
-    if let (Some((kind, image)), Some(review)) = (&image, &app.write.review) {
-        content = content.push(write_facts(*kind, image, review, palette));
+    if let (Some(source), Some(review)) = (source(app), &app.write.review) {
+        content = content.push(write_facts(source, review, palette));
     }
     content = content.push(parts::body(WRITE_KEPT, palette));
+    if app.write.origin == WriteOrigin::Magisk {
+        content = content.push(parts::body(ROOT_WARNING, palette));
+    }
     let forced = app
         .write
         .review
@@ -90,12 +97,22 @@ fn write(app: &App) -> Element<'_, Message> {
     parts::block(content, palette.tint_warn, palette)
 }
 
+fn source(app: &App) -> Option<[(&'static str, String); 2]> {
+    if let Some((kind, image)) = app.write.image() {
+        let image = image.display().to_string();
+        return Some([("하는 일", kind.work().into()), ("고른 이미지", image)]);
+    }
+    let package = app.write.package.as_ref()?;
+    let magisk = format!("{} · SHA-256 {}", package.version, package.short_sha256());
+    Some([("하는 일", ROOT_WORK.into()), ("Magisk", magisk)])
+}
+
 fn write_facts<'a>(
-    kind: WriteKind,
-    image: &Path,
+    source: [(&'static str, String); 2],
     review: &PlanReview,
     palette: Palette,
 ) -> Element<'a, Message> {
+    let [(work_name, work), (origin_name, origin)] = source;
     let targets: Vec<&str> = review
         .plan
         .writes
@@ -110,12 +127,8 @@ fn write_facts<'a>(
         .map(support_words::name)
         .collect();
     let mut rows = vec![
-        stated("하는 일", parts::body(kind.work(), palette), palette),
-        stated(
-            "고른 이미지",
-            parts::value(image.display().to_string(), palette),
-            palette,
-        ),
+        stated(work_name, parts::body(work, palette), palette),
+        stated(origin_name, parts::value(origin, palette), palette),
         stated(
             "기록할 영역",
             parts::value(targets.join(" · "), palette),
@@ -158,6 +171,17 @@ fn reboot<'a>(palette: Palette) -> Element<'a, Message> {
     ]
     .spacing(12);
     parts::panel(content, palette)
+}
+
+fn reboot_to(app: &App) -> Element<'_, Message> {
+    let palette = app.palette;
+    let mut content = Column::new()
+        .spacing(12)
+        .push(parts::strong("REBOOT THE DEVICE", palette));
+    if let Some(target) = app.reboot.asked {
+        content = content.push(parts::body(reboot_words::question(target), palette));
+    }
+    parts::panel(content.push(answers("REBOOT", "CANCEL", palette)), palette)
 }
 
 fn answers<'a>(confirm: &str, cancel: &str, palette: Palette) -> Element<'a, Message> {

@@ -3,6 +3,7 @@ use crate::clock::now_unix;
 use crate::data_paths::DataPaths;
 use crate::diagnosis::Diagnosis;
 use crate::message::Message;
+use crate::pair_session::PairSession;
 use crate::plan_review::PlanReview;
 use crate::plan_source::PlanSource;
 use front2::candidate::build_signed_candidate;
@@ -11,7 +12,7 @@ use front2::kernel::{KernelPlan, KernelStore, read_current_kernel_set};
 use front2::pair_backup;
 use front2::{
     ApplyOutcome, Authorization, DeviceState, Front2Error, PairKind, PairManifest, PairRequest,
-    PairStore, PlanRequest, Result, SupportOverride, SupportReport, WritePlan, pair_apply,
+    PairStore, Result, SupportOverride, SupportReport, WritePlan, pair_apply,
 };
 use iced::Task;
 use std::path::Path;
@@ -70,7 +71,7 @@ pub fn is_backup_of(pair: &PairManifest, current: &PairManifest) -> bool {
         && pair.vbmeta.sha256 == current.vbmeta.sha256
 }
 
-fn current_backup(
+pub fn current_backup(
     shell: &mut AdbShell,
     state: &DeviceState,
     store: &PairStore,
@@ -88,41 +89,15 @@ pub fn prepare_root_write(
     patched_init_boot: &Path,
     support_override: SupportOverride,
 ) -> Result<PlanReview> {
-    let mut shell = AdbShell::connect()?;
-    let state = DeviceState::read(&mut shell)?;
-    SupportReport::evaluate(&state).require_allowed_with(&support_override)?;
-    let store = PairStore::new(paths.pairs());
-    let backup = current_backup(&mut shell, &state, &store)?;
-    let created_unix = now_unix();
-    let candidate_id = format!("candidate-{created_unix}");
-    let request = PairRequest {
-        id: &candidate_id,
-        created_unix,
-        note: "",
-    };
-    let candidate = build_signed_candidate(&store, &backup.id, patched_init_boot, request)?;
-    let id = format!("plan-{created_unix}");
-    let plan_request = PlanRequest {
-        id: &id,
-        created_unix,
-        support_override,
-    };
-    let plan = WritePlan::prepare(
-        &mut shell,
-        &state,
-        &store,
-        &candidate.id,
-        &backup.id,
-        plan_request,
+    let session = PairSession::open(paths, support_override)?;
+    let candidate_id = format!("candidate-{}", session.created_unix);
+    let candidate = build_signed_candidate(
+        &session.store,
+        &session.backup.id,
+        patched_init_boot,
+        session.request(&candidate_id),
     )?;
-    let directory = paths.plans().join(&id);
-    let sha256 = plan.save(&directory)?;
-    Ok(PlanReview {
-        plan,
-        sha256,
-        directory,
-        source: PlanSource::Pair,
-    })
+    session.plan(paths, &candidate)
 }
 
 fn load_reviewed(review: &PlanReview) -> Result<WritePlan> {

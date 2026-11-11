@@ -11,6 +11,7 @@ pub const MAGISK_REPOSITORY: &str = "topjohnwu/Magisk";
 pub const LOCAL_VERSION: &str = "local";
 const DOWNLOAD_FILE: &str = "download.apk";
 const PAYLOAD_CHECK_DIRECTORY: &str = "payload-check";
+const SHORT_SHA256_LENGTH: usize = 16;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MagiskPackage {
@@ -91,6 +92,12 @@ impl MagiskPackage {
             version: version.to_string(),
             sha256,
         })
+    }
+
+    pub fn short_sha256(&self) -> &str {
+        self.sha256
+            .get(..SHORT_SHA256_LENGTH)
+            .unwrap_or(&self.sha256)
     }
 
     pub fn require_unchanged(&self) -> Result<()> {

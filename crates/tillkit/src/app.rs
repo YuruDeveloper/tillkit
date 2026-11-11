@@ -5,6 +5,7 @@ use crate::grain;
 use crate::launch;
 use crate::message::Message;
 use crate::palette::Palette;
+use crate::reboot_flow::RebootFlow;
 use crate::saved_backup::SavedBackup;
 use crate::screen::Screen;
 use crate::support_words;
@@ -38,6 +39,8 @@ pub struct App {
     pub pairs: Vec<PairManifest>,
     pub kernel_sets: Vec<KernelSet>,
     pub write: WriteFlow,
+    pub magisk_apk: Option<PathBuf>,
+    pub reboot: RebootFlow,
 }
 
 impl App {
@@ -67,6 +70,8 @@ impl App {
             pairs: Vec::new(),
             kernel_sets: Vec::new(),
             write: WriteFlow::default(),
+            magisk_apk: None,
+            reboot: RebootFlow::default(),
         };
         app.reload_backups();
         app
@@ -99,6 +104,8 @@ impl App {
             Message::BackUp => return self.back_up(),
             Message::PickFullBackup => return self.pick_full_backup(),
             Message::Write(message) => return self.update_write(message),
+            Message::Root(message) => return self.update_root(message),
+            Message::Reboot(message) => return self.update_reboot(message),
         }
         Task::none()
     }
@@ -174,11 +181,13 @@ impl App {
             Some(Confirmation::ForceSupport) => self.force_support(),
             Some(Confirmation::Write) => self.stage_plan(),
             Some(Confirmation::Reboot) => self.reboot(),
+            Some(Confirmation::RebootTo) => self.reboot_to(),
             None => Task::none(),
         }
     }
 
     fn cancel(&mut self) {
+        self.reboot.asked = None;
         if self.confirmation.take() == Some(Confirmation::Write) {
             self.drop_unapproved_plan();
         }

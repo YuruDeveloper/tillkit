@@ -3,22 +3,33 @@ pub enum Screen {
     Device,
     Backup,
     Write,
+    Root,
+    Advanced,
     Info,
 }
 
 impl Screen {
-    pub const ALL: [Self; 4] = [Self::Device, Self::Backup, Self::Write, Self::Info];
+    pub const ALL: [Self; 6] = [
+        Self::Device,
+        Self::Backup,
+        Self::Write,
+        Self::Root,
+        Self::Advanced,
+        Self::Info,
+    ];
 
     pub fn caption(self) -> &'static str {
         match self {
             Self::Device => "01 DEVICE",
             Self::Backup => "02 BACKUP",
             Self::Write => "03 WRITE",
-            Self::Info => "04 INFO",
+            Self::Root => "04 ROOT",
+            Self::Advanced => "05 ADVANCED",
+            Self::Info => "06 INFO",
         }
     }
 
     pub fn has_selection_line(self) -> bool {
-        self == Self::Write
+        matches!(self, Self::Write | Self::Root)
     }
 }

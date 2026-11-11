@@ -36,4 +36,12 @@ impl DataPaths {
     pub fn gsi_candidates(&self) -> PathBuf {
         self.root.join("gsi")
     }
+
+    pub fn magisk_cache(&self) -> PathBuf {
+        self.root.join("magisk")
+    }
+
+    pub fn magisk_work(&self) -> PathBuf {
+        self.root.join("magisk-work")
+    }
 }

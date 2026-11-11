@@ -15,6 +15,8 @@ pub fn screen() -> Screen {
     match std::env::var(SCREEN_VARIABLE).as_deref() {
         Ok("backup") => Screen::Backup,
         Ok("write") => Screen::Write,
+        Ok("root") => Screen::Root,
+        Ok("advanced") => Screen::Advanced,
         Ok("info") => Screen::Info,
         _ => Screen::Device,
     }
@@ -38,9 +40,11 @@ pub fn preview(app: &mut App) {
     use crate::message::Message;
     use crate::plan_review::PlanReview;
     use crate::plan_source::PlanSource;
+    use crate::reboot::{DeviceConnection, RebootTarget};
     use crate::write_flow::WriteFlow;
     use crate::write_step::WriteStep;
     use front2::kernel::KernelPlanFacts;
+    use front2::magisk::MagiskPackage;
     use front2::{ApplyOutcome, ApplyState, DeviceState, SupportReport, WritePlan};
     use std::path::PathBuf;
 
@@ -91,6 +95,11 @@ pub fn preview(app: &mut App) {
             .map_or(PlanSource::Pair, PlanSource::Kernel)
     }
 
+    fn ask_edl(app: &mut App) {
+        app.reboot.asked = Some(RebootTarget::Edl);
+        app.confirmation = Some(Confirmation::RebootTo);
+    }
+
     fn read<T: serde::de::DeserializeOwned>(variable: &str) -> Option<T> {
         let path = std::env::var_os(variable)?;
         serde_json::from_slice(&std::fs::read(path).ok()?).ok()
@@ -110,6 +119,27 @@ pub fn preview(app: &mut App) {
     match std::env::var("TILLKIT_PREVIEW_FORCE").as_deref() {
         Ok("ask") => app.confirmation = Some(Confirmation::ForceSupport),
         Ok("forced") => app.forced = true,
+        _ => {}
+    }
+    if let Ok(version) = std::env::var("TILLKIT_PREVIEW_ROOT") {
+        app.write = WriteFlow::for_magisk();
+        app.write.package = Some(MagiskPackage {
+            path: PathBuf::from(format!("Magisk-{version}.apk")),
+            version,
+            sha256: "7c41e09b".repeat(8),
+        });
+    }
+    app.reboot.connection = match std::env::var("TILLKIT_PREVIEW_CONNECTION").as_deref() {
+        Ok("android") => Some(DeviceConnection::Android),
+        Ok("bootloader") => Some(DeviceConnection::Bootloader),
+        Ok("edl") => Some(DeviceConnection::Edl),
+        Ok("unauthorized") => Some(DeviceConnection::Unauthorized),
+        _ => None,
+    };
+    match std::env::var("TILLKIT_PREVIEW_REBOOT").as_deref() {
+        Ok("ask") => ask_edl(app),
+        Ok("sent") => app.reboot.sent = Some(RebootTarget::Recovery),
+        Ok("failed") => app.reboot.failure = Some("ADB is absent".into()),
         _ => {}
     }
     if let Some(plan) = read::<WritePlan>("TILLKIT_PREVIEW_PLAN") {

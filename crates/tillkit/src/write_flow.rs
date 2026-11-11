@@ -3,12 +3,16 @@ use crate::install_review::InstallReview;
 use crate::plan_review::PlanReview;
 use crate::step_status::StepStatus;
 use crate::write_kind::WriteKind;
+use crate::write_origin::WriteOrigin;
 use crate::write_step::WriteStep;
+use front2::magisk::MagiskPackage;
 use front2::{ApplyOutcome, ApplyState, Authorization, Scope};
 use std::path::PathBuf;
 
 #[derive(Debug, Default)]
 pub struct WriteFlow {
+    pub origin: WriteOrigin,
+    pub package: Option<MagiskPackage>,
     pub folder: Option<PathBuf>,
     pub kind: Option<Result<WriteKind, FolderRefusal>>,
     pub review: Option<PlanReview>,
@@ -28,6 +32,17 @@ impl WriteFlow {
             folder: Some(folder),
             ..Self::default()
         }
+    }
+
+    pub fn for_magisk() -> Self {
+        Self {
+            origin: WriteOrigin::Magisk,
+            ..Self::default()
+        }
+    }
+
+    pub fn is_open(&self) -> bool {
+        self.running.is_some() || self.has_result()
     }
 
     pub fn start_over(&mut self) {
@@ -168,7 +183,7 @@ impl WriteFlow {
 }
 
 #[cfg(test)]
-mod tests {
+pub mod tests {
     use super::*;
     use crate::plan_source::PlanSource;
     use front2::{RootAccess, WritePlan, WritePurpose};
@@ -199,7 +214,7 @@ mod tests {
         }
     }
 
-    fn review() -> PlanReview {
+    pub fn review() -> PlanReview {
         PlanReview {
             plan: plan(),
             sha256: "0123456789abcdef".repeat(4),
@@ -424,6 +439,20 @@ mod tests {
         pair.outcome = Some(outcome(ApplyState::Writing("WRITING_VBMETA".into()), false));
         pair.full_backup_changed();
         assert!(pair.outcome.is_some() && pair.review.is_some());
+    }
+
+    #[test]
+    fn a_root_flow_goes_back_to_an_empty_folder_flow_at_a_new_start() {
+        let mut flow = WriteFlow::for_magisk();
+        assert!(!flow.is_open() && !flow.can_start(), "no image folder");
+        flow.running = Some(WriteStep::Prepare);
+        assert!(flow.is_open());
+        flow.running = None;
+        flow.review = Some(review());
+        assert!(flow.is_open() && flow.can_start_over());
+        flow.start_over();
+        assert_eq!(flow.origin, WriteOrigin::Folder);
+        assert!(flow.review.is_none() && flow.package.is_none() && !flow.is_open());
     }
 
     #[test]

@@ -1,4 +1,6 @@
 use crate::diagnosis::Diagnosis;
+use crate::reboot_message::RebootMessage;
+use crate::root_message::RootMessage;
 use crate::screen::Screen;
 use crate::write_message::WriteMessage;
 use std::path::PathBuf;
@@ -18,4 +20,6 @@ pub enum Message {
     PickFullBackup,
     FullBackupPicked(Option<PathBuf>),
     Write(WriteMessage),
+    Root(RootMessage),
+    Reboot(RebootMessage),
 }

@@ -3,4 +3,5 @@ pub enum Confirmation {
     ForceSupport,
     Write,
     Reboot,
+    RebootTo,
 }

@@ -1,10 +1,13 @@
+pub mod advanced;
 pub mod backup;
 pub mod confirm;
 pub mod device;
+pub mod flow;
 pub mod info;
 pub mod parts;
 pub mod rabbit;
 pub mod rail;
+pub mod root;
 pub mod support_rows;
 pub mod write;
 
@@ -25,6 +28,8 @@ pub fn root(app: &App) -> Element<'_, Message> {
         Screen::Device => device::view(app),
         Screen::Backup => backup::view(app),
         Screen::Write => write::view(app),
+        Screen::Root => root::view(app),
+        Screen::Advanced => advanced::view(app),
         Screen::Info => info::view(app),
     };
     let center = scrollable(

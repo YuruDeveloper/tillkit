@@ -54,7 +54,7 @@ impl App {
         }
     }
 
-    fn can_choose_write_folder(&self) -> bool {
+    pub fn can_choose_write_folder(&self) -> bool {
         !self.is_busy() && !self.write.has_result()
     }
 
@@ -103,7 +103,7 @@ impl App {
         }
     }
 
-    fn review_ready(&mut self, review: PlanReview) {
+    pub fn review_ready(&mut self, review: PlanReview) {
         self.write.review = Some(review);
         self.confirmation = Some(Confirmation::Write);
     }
