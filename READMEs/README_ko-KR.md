@@ -1,9 +1,9 @@
-# FrontBox (가칭)
+# TillKit
 
-FrontBox는 기기 하나만을 위한 데스크톱 도구입니다. 대상은 순정 1.609.5에서 슬롯 B의 GSI로 전환한 토스 프론트 2 단말입니다.
+TillKit은 기기 하나만을 위한 데스크톱 도구입니다. 대상은 순정 1.609.5에서 슬롯 B의 GSI로 전환한 토스 프론트 2 단말입니다.
 이 도구는 그 기기의 `init_boot_b`와 `vbmeta_b` 쌍을 보관하고, 서명하고, 기록합니다.
 
-FrontBox는 miner7222의 [LTBox](https://github.com/miner7222/LTBox)를 고친 판입니다.
+TillKit은 miner7222의 [LTBox](https://github.com/miner7222/LTBox)를 고친 판입니다.
 LTBox의 Lenovo 전용 기능은 이 저장소에 없습니다. 도구의 이름은 아직 정해지지 않았습니다.
 
 [English](../README.md)
@@ -82,16 +82,16 @@ LTBox에서 온 엔진 크레이트는 이 작업을 위해 저장소에 남아 
 
 실제 기기의 이미지, 펌웨어, 로더, 기기 로그, 키, 읽어 온 쌍을 저장소에 넣지 않습니다.
 `.gitignore`가 흔한 파일 형식을 막지만, 커밋마다 직접 확인해야 합니다.
-도구의 데이터는 로컬 애플리케이션 데이터 폴더의 `frontbox/pairs`와 `frontbox/plans`에 저장됩니다.
+도구의 데이터는 로컬 애플리케이션 데이터 폴더의 `tillkit/pairs`와 `tillkit/plans`에 저장됩니다.
 
 ## 빌드
 
 ```sh
-cargo build --release --locked -p frontbox
+cargo build --release --locked -p tillkit
 ```
 
-실행 파일은 `target/release/frontbox`(Windows에서는 `frontbox.exe`)입니다. 지금까지는 Windows에서만 빌드하고 실행했습니다.
+실행 파일은 `target/release/tillkit`(Windows에서는 `tillkit.exe`)입니다. 지금까지는 Windows에서만 빌드하고 실행했습니다.
 
 ## 라이선스와 고지
 
-FrontBox는 LTBox와 같은 [GPL-3.0-or-later](../LICENSE)를 따릅니다. 원저작물과 제3자 구성 요소의 고지, LTBox에서 바뀐 내용은 [영문 README](../README.md)에 있습니다.
+TillKit은 LTBox와 같은 [GPL-3.0-or-later](../LICENSE)를 따릅니다. 원저작물과 제3자 구성 요소의 고지, LTBox에서 바뀐 내용은 [영문 README](../README.md)에 있습니다.

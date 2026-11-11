@@ -4,7 +4,7 @@ members = [
     "crates/ltbox-device",
     "crates/ltbox-patch",
     "crates/front2",
-    "crates/frontbox",
+    "crates/tillkit",
 ]
 # Vendored third-party crate — built as a path dependency, not a member,
 # so it keeps its own edition/lints and doesn't inherit workspace config.

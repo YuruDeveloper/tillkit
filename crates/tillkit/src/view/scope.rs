@@ -41,7 +41,7 @@ const NOT_IMPLEMENTED: [&str; 5] = [
 
 const NOTICES: [(&str, &str); 7] = [
     (
-        "FRONTBOX (WORKING NAME)",
+        "TILLKIT",
         "LTBox 3.3.5를 고친 판 · GPL-3.0-or-later · 2026-11: Lenovo 기능 제거, 프론트 2 쌍·커널·GSI 준비 추가",
     ),
     ("LTBOX", "원저작물 · miner7222 · GPL-3.0-or-later"),

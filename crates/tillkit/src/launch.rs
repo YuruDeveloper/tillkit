@@ -3,9 +3,9 @@ use crate::data_paths::DataPaths;
 use crate::palette::{DUSK, PAPER, Palette};
 use crate::screen::Screen;
 
-pub const DATA_DIRECTORY_VARIABLE: &str = "FRONTBOX_DATA_DIR";
-pub const SCREEN_VARIABLE: &str = "FRONTBOX_SCREEN";
-pub const THEME_VARIABLE: &str = "FRONTBOX_THEME";
+pub const DATA_DIRECTORY_VARIABLE: &str = "TILLKIT_DATA_DIR";
+pub const SCREEN_VARIABLE: &str = "TILLKIT_SCREEN";
+pub const THEME_VARIABLE: &str = "TILLKIT_THEME";
 
 pub fn paths() -> DataPaths {
     std::env::var_os(DATA_DIRECTORY_VARIABLE).map_or_else(DataPaths::for_user, DataPaths::new)
@@ -45,7 +45,7 @@ pub fn preview(app: &mut App) {
     use std::path::PathBuf;
 
     fn preview_source(plan: &WritePlan) -> PlanSource {
-        match read::<KernelPlanFacts>("FRONTBOX_PREVIEW_KERNEL_FACTS") {
+        match read::<KernelPlanFacts>("TILLKIT_PREVIEW_KERNEL_FACTS") {
             Some(facts) if facts.require_matches(plan).is_ok() => {
                 PlanSource::Kernel(Box::new(facts))
             }
@@ -58,11 +58,11 @@ pub fn preview(app: &mut App) {
         serde_json::from_slice(&std::fs::read(path).ok()?).ok()
     }
 
-    if let Some(state) = read::<DeviceState>("FRONTBOX_PREVIEW_DEVICE") {
+    if let Some(state) = read::<DeviceState>("TILLKIT_PREVIEW_DEVICE") {
         let report = SupportReport::evaluate(&state);
         app.diagnosis = Some(Diagnosis { state, report });
     }
-    if let Some(plan) = read::<WritePlan>("FRONTBOX_PREVIEW_PLAN") {
+    if let Some(plan) = read::<WritePlan>("TILLKIT_PREVIEW_PLAN") {
         let source = preview_source(&plan);
         app.write.review = Some(PlanReview {
             plan,
@@ -70,9 +70,9 @@ pub fn preview(app: &mut App) {
             directory: PathBuf::from("preview"),
             source,
         });
-        app.write.staged = std::env::var_os("FRONTBOX_PREVIEW_STAGED").is_some();
+        app.write.staged = std::env::var_os("TILLKIT_PREVIEW_STAGED").is_some();
     }
-    if let Some(directory) = std::env::var_os("FRONTBOX_PREVIEW_INSTALL_PLAN").map(PathBuf::from) {
+    if let Some(directory) = std::env::var_os("TILLKIT_PREVIEW_INSTALL_PLAN").map(PathBuf::from) {
         app.gsi.install = InstallPlan::load(&directory)
             .ok()
             .map(|stored| InstallReview {
@@ -81,7 +81,7 @@ pub fn preview(app: &mut App) {
                 directory,
             });
     }
-    if std::env::var_os("FRONTBOX_PREVIEW_SELECT").is_some() {
+    if std::env::var_os("TILLKIT_PREVIEW_SELECT").is_some() {
         app.selected_pair = app.pairs.first().map(|pair| pair.id.clone());
         app.selected_kernel_set = app.kernel_sets.first().map(|set| set.id.clone());
     }

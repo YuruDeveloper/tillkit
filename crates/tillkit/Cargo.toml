@@ -1,11 +1,11 @@
 [package]
-name = "frontbox"
+name = "tillkit"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
 
 [[bin]]
-name = "frontbox"
+name = "tillkit"
 path = "src/main.rs"
 
 [dependencies]

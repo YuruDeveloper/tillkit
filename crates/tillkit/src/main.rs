@@ -37,7 +37,7 @@ const MINIMUM_WINDOW_SIZE: Size = Size::new(920.0, 600.0);
 
 fn main() -> iced::Result {
     iced::application(App::new, App::update, App::view)
-        .title("FrontBox")
+        .title("TillKit")
         .theme(App::theme)
         .settings(iced::Settings {
             default_font: fonts::BODY,

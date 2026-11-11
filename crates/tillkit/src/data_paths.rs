@@ -1,6 +1,6 @@
 use std::path::PathBuf;
 
-pub const DATA_FOLDER: &str = "frontbox";
+pub const DATA_FOLDER: &str = "tillkit";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DataPaths {

@@ -34,4 +34,4 @@ CLAUDE.md
 desktop.ini
 .DS_Store
 *.png
-!crates/frontbox/assets/**
+!crates/tillkit/assets/**

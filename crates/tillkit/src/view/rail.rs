@@ -17,7 +17,7 @@ pub fn view(app: &App) -> Element<'_, Message> {
     }
     let theme_caption = if palette.is_dusk { "PAPER" } else { "DUSK" };
     let content = column![
-        text("FRONTBOX")
+        text("TILLKIT")
             .font(fonts::MONO_BOLD)
             .size(20)
             .color(palette.ink),

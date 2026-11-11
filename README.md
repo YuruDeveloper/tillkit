@@ -1,10 +1,10 @@
-# FrontBox (working name)
+# TillKit
 
-FrontBox is a tool for one device: the Toss Front 2 terminal.
+TillKit is a tool for one device: the Toss Front 2 terminal.
 The device must have a GSI on slot B, installed from stock firmware 1.609.5.
 The tool keeps, signs and writes the `init_boot_b` and `vbmeta_b` pair of that device.
 
-FrontBox is a modified version of [LTBox](https://github.com/miner7222/LTBox) by miner7222.
+TillKit is a modified version of [LTBox](https://github.com/miner7222/LTBox) by miner7222.
 The Lenovo functions of LTBox are not in this repository.
 The name of the tool can change.
 
@@ -86,7 +86,7 @@ They have no screen in this tool.
 
 Do not add images, firmware, loaders, device logs, keys or read-back pairs of a real device.
 `.gitignore` stops the usual file types, but you must examine each commit.
-The tool keeps its data in the local application data folder, in `frontbox/pairs` and `frontbox/plans`.
+The tool keeps its data in the local application data folder, in `tillkit/pairs` and `tillkit/plans`.
 
 ## Build from source
 
@@ -94,16 +94,16 @@ Install [Rust through rustup](https://rustup.rs/) and the native build tools of 
 The repository pins the Rust toolchain in [rust-toolchain.toml](rust-toolchain.toml).
 
 ```sh
-cargo build --release --locked -p frontbox
+cargo build --release --locked -p tillkit
 ```
 
-The executable is `target/release/frontbox` (`frontbox.exe` on Windows).
+The executable is `target/release/tillkit` (`tillkit.exe` on Windows).
 The only builds until now are Windows builds.
 
 | Crate | Responsibility |
 | --- | --- |
 | [front2](crates/front2) | Device profile, support checks, pair store, candidate signature, write plan, device script and apply flow. |
-| [frontbox](crates/frontbox) | The iced desktop application. |
+| [tillkit](crates/tillkit) | The iced desktop application. |
 | [ltbox-core](crates/ltbox-core) | Shared errors, paths, logs and downloads from LTBox. |
 | [ltbox-device](crates/ltbox-device) | ADB, Fastboot and EDL transport from LTBox. |
 | [ltbox-patch](crates/ltbox-patch) | Boot image and AVB functions from LTBox. |
@@ -129,7 +129,7 @@ This repository started from LTBox 3.3.5, commit `8f6d141c`, in November 2026.
 - Removed the LTBox application, its Lenovo screens and its translations.
 - Removed the Lenovo model table, the Lenovo server queries, the region and country changes, and the fixed partition map.
 - Removed the automatic update, the packages and the release workflow of LTBox.
-- Added the `front2` and `frontbox` crates.
+- Added the `front2` and `tillkit` crates.
 
 ## Credits
 
@@ -144,7 +144,7 @@ The LTBox README gives thanks to these people for their data and guides:
 
 ## License
 
-FrontBox is licensed under [GPL-3.0-or-later](LICENSE), the same license as LTBox.
+TillKit is licensed under [GPL-3.0-or-later](LICENSE), the same license as LTBox.
 Third-party components keep their licenses:
 
 | Component | License |
@@ -153,8 +153,8 @@ Third-party components keep their licenses:
 | magiskboot-rs | GPL-3.0-or-later |
 | kptools-rs | GPL-2.0-or-later |
 | avbtool-rs | Apache-2.0 |
-| IBM Plex Mono (`crates/frontbox/assets/fonts`) | SIL Open Font License 1.1 |
-| IBM Plex Sans KR (`crates/frontbox/assets/fonts`) | SIL Open Font License 1.1 |
-| Archivo Narrow (`crates/frontbox/assets/fonts`) | SIL Open Font License 1.1 |
+| IBM Plex Mono (`crates/tillkit/assets/fonts`) | SIL Open Font License 1.1 |
+| IBM Plex Sans KR (`crates/tillkit/assets/fonts`) | SIL Open Font License 1.1 |
+| Archivo Narrow (`crates/tillkit/assets/fonts`) | SIL Open Font License 1.1 |
 
 [![GPLv3](https://www.gnu.org/graphics/gplv3-127x51.png)](https://www.gnu.org/licenses/gpl-3.0)

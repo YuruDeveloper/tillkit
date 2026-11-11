@@ -1854,22 +1854,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "frontbox"
-version = "3.3.5"
-dependencies = [
- "dark-light",
- "dirs",
- "front2",
- "iced",
- "ltbox-device",
- "rfd",
- "serde",
- "serde_json",
- "tempfile",
- "tokio",
-]
-
-[[package]]
 name = "fs-err"
 version = "3.3.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5729,6 +5713,22 @@ dependencies = [
  "quick-error 2.0.1",
  "weezl",
  "zune-jpeg 0.5.15",
+]
+
+[[package]]
+name = "tillkit"
+version = "3.3.5"
+dependencies = [
+ "dark-light",
+ "dirs",
+ "front2",
+ "iced",
+ "ltbox-device",
+ "rfd",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "tokio",
 ]
 
 [[package]]
