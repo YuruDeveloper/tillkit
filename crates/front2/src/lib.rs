@@ -15,6 +15,7 @@ pub mod image_record;
 pub mod init_boot_payload;
 pub mod install;
 pub mod kernel;
+pub mod magisk;
 pub mod pair_apply;
 pub mod pair_backup;
 pub mod pair_kind;
