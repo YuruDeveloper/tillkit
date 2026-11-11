@@ -925,6 +925,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "front2"
+version = "3.3.5"
+dependencies = [
+ "avbtool-rs",
+ "ltbox-core",
+ "ltbox-patch",
+ "serde",
+ "serde_json",
+ "sha2 0.11.1",
+ "tempfile",
+ "thiserror",
+]
+
+[[package]]
 name = "fs-err"
 version = "3.3.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
