@@ -9,7 +9,9 @@ use iced::{Alignment, Element, Length};
 
 const INTRODUCTION: &str = "기기의 부팅 영역을 PC에 읽어 둡니다. 기록하기 전에 먼저 백업해야, 기록한 것을 이전 상태와 대조하고 되돌릴 수 있습니다.";
 const EMPTY: &str = "저장된 백업이 없습니다. 백업을 누르면 여기에 나타납니다.";
-const BACKUP_FAILED: &str = "백업을 끝내지 못했습니다. 읽다가 만 파일은 남기지 않았습니다.";
+const BACKUP_STOPPED: &str = "백업하는 도중에 오류가 나서 끝까지 하지 못했습니다. 아래 목록에 보이는 것만 저장되었으니, 목록을 확인한 뒤에 다시 백업해 주세요.";
+const STORE_NOT_READ: &str =
+    "PC에 저장된 백업을 읽지 못했습니다. 읽지 못한 백업은 아래 목록에 나오지 않습니다.";
 const FULL_BACKUP: &str = "GSI를 기록할 때 원본으로 쓰는 기기 전체 백업 폴더입니다. 전체 백업은 TillKit이 만들지 않으므로, 이미 가지고 있는 폴더를 골라 주세요.";
 const FULL_BACKUP_FOUND: &str = "전체 백업을 찾았습니다.";
 const FULL_BACKUP_MISSING: &str =
@@ -31,7 +33,20 @@ pub fn view(app: &App) -> Element<'_, Message> {
         page = page.push(parts::running(activity, palette));
     }
     if let Some(error) = &app.backup_error {
-        page = page.push(parts::fault("NOT SAVED", BACKUP_FAILED, error, palette));
+        page = page.push(parts::fault(
+            "BACKUP STOPPED",
+            BACKUP_STOPPED,
+            error,
+            palette,
+        ));
+    }
+    if let Some(error) = &app.store_error {
+        page = page.push(parts::fault(
+            "BACKUPS NOT READ",
+            STORE_NOT_READ,
+            error,
+            palette,
+        ));
     }
     page.push(parts::label("SAVED BACKUPS", palette))
         .push(saved(app, palette))

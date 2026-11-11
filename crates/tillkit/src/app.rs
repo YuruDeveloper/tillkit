@@ -32,6 +32,7 @@ pub struct App {
     pub forced: bool,
     pub confirmation: Option<Confirmation>,
     pub backup_error: Option<String>,
+    pub store_error: Option<String>,
     pub full_backup: Option<PathBuf>,
     pub full_backup_found: bool,
     pub pairs: Vec<PairManifest>,
@@ -60,6 +61,7 @@ impl App {
             forced: false,
             confirmation: None,
             backup_error: None,
+            store_error: None,
             full_backup: None,
             full_backup_found: false,
             pairs: Vec::new(),
@@ -112,6 +114,8 @@ impl App {
         }
         self.activity = Some("READING DEVICE");
         self.device_error = None;
+        self.forced = false;
+        self.confirmation = None;
         run_blocking(worker::read_device, Message::DeviceRead)
     }
 
@@ -189,16 +193,11 @@ impl App {
     fn reload_backups(&mut self) {
         let pairs = PairStore::new(self.paths.pairs()).list();
         let kernel_sets = KernelStore::new(self.paths.kernel_sets()).list();
-        let error = [
-            pairs.as_ref().err().map(ToString::to_string),
-            kernel_sets.as_ref().err().map(ToString::to_string),
-        ]
-        .into_iter()
-        .flatten()
-        .next();
+        let pairs_error = pairs.as_ref().err().map(ToString::to_string);
+        let kernel_error = kernel_sets.as_ref().err().map(ToString::to_string);
+        self.store_error = pairs_error.or(kernel_error);
         self.pairs = pairs.unwrap_or_default();
         self.kernel_sets = kernel_sets.unwrap_or_default();
-        self.backup_error = self.backup_error.take().or(error);
     }
 
     fn back_up(&mut self) -> Task<Message> {
@@ -239,4 +238,48 @@ async fn pick_full_backup_folder() -> Option<PathBuf> {
         .pick_folder()
         .await
         .map(|folder| folder.path().to_path_buf())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn app() -> (tempfile::TempDir, App) {
+        let directory = tempfile::tempdir().expect("tempdir");
+        let app = App::with_paths(DataPaths::new(directory.path()));
+        (directory, app)
+    }
+
+    #[test]
+    fn doc_1051_a_new_device_reading_drops_the_force_state_and_its_question() {
+        let (_directory, mut app) = app();
+        app.forced = true;
+        app.confirmation = Some(Confirmation::ForceSupport);
+        let _ = app.update(Message::ReadDevice);
+        assert!(app.is_busy());
+        assert!(!app.forced && app.confirmation.is_none());
+        let _ = app.update(Message::Confirm);
+        assert!(!app.forced);
+    }
+
+    #[test]
+    fn doc_1051_a_confirmation_waits_while_an_operation_runs() {
+        let (_directory, mut app) = app();
+        app.activity = Some("BACKING UP");
+        app.confirmation = Some(Confirmation::ForceSupport);
+        let _ = app.update(Message::Confirm);
+        assert_eq!(app.confirmation, Some(Confirmation::ForceSupport));
+        assert!(!app.forced);
+    }
+
+    #[test]
+    fn a_store_that_cannot_be_read_is_told_apart_from_a_stopped_backup() {
+        let directory = tempfile::tempdir().expect("tempdir");
+        let paths = DataPaths::new(directory.path());
+        std::fs::create_dir_all(paths.pairs().parent().expect("data folder")).expect("folder");
+        std::fs::write(paths.pairs(), b"a file where the store folder must be").expect("file");
+        let app = App::with_paths(paths);
+        assert!(app.store_error.is_some());
+        assert!(app.backup_error.is_none());
+    }
 }
