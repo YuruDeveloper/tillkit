@@ -28,8 +28,12 @@ pub fn write_readback_pair(directory: &Path) {
 }
 
 pub fn write_readback_pair_with_boot_digest(directory: &Path, boot_digest_byte: u8) {
+    write_readback_pair_from(directory, &boot_image(40_000, 0x33, 0), boot_digest_byte);
+}
+
+pub fn write_readback_pair_from(directory: &Path, init_boot_payload: &[u8], boot_digest_byte: u8) {
     let init_boot = directory.join("init_boot.img");
-    std::fs::write(&init_boot, boot_image(40_000, 0x33, 0)).expect("write init_boot payload");
+    std::fs::write(&init_boot, init_boot_payload).expect("write init_boot payload");
     add_hash_footer(
         &init_boot,
         &HashFooterArgs {
