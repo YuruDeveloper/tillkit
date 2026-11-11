@@ -522,6 +522,31 @@ fn the_plan_facts_refuse_a_reference_partition_that_changed_after_the_plan() {
 }
 
 #[test]
+fn letter_1168_apply_refuses_a_reference_partition_that_changed_after_the_stage() {
+    let mut bench = bench();
+    readback_and_candidate(&mut bench);
+    let (plan, digest) = staged_plan(&mut bench, CANDIDATE, READBACK, "2000-apply");
+    let boot_before = bench.device.partition("boot_b").to_vec();
+    let vbmeta_before = bench.device.partition("vbmeta_b").to_vec();
+
+    bench.device.partition_mut("recovery_b")[0] ^= 1;
+    let error = plan
+        .apply(&mut bench.device, &digest, &approval(&digest), &mut || {})
+        .expect_err("recovery_b changed after the stage");
+    assert!(error.to_string().contains("recovery_b"), "{error}");
+    assert!(bench.device.partition("boot_b") == boot_before.as_slice());
+    assert!(bench.device.partition("vbmeta_b") == vbmeta_before.as_slice());
+
+    bench.device.partition_mut("recovery_b")[0] ^= 1;
+    let outcome = plan
+        .apply(&mut bench.device, &digest, &approval(&digest), &mut || {})
+        .expect("the references hold the planned content again");
+    assert_eq!(outcome.state, ApplyState::VerifiedPendingReboot);
+    assert!(outcome.readback_matches_new_pair);
+    assert!(bench.device.partition("boot_b") != boot_before.as_slice());
+}
+
+#[test]
 fn plan_refuses_a_device_that_does_not_hold_the_old_set() {
     for label in ["boot_b", "vbmeta_b"] {
         let mut bench = bench();

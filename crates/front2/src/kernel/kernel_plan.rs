@@ -1,4 +1,6 @@
+use crate::apply_outcome::ApplyOutcome;
 use crate::apply_script;
+use crate::authorization::Authorization;
 use crate::device_shell::DeviceShell;
 use crate::device_state::DeviceState;
 use crate::digest::sha256_bytes;
@@ -10,12 +12,14 @@ use crate::kernel::kernel_release::KernelRelease;
 use crate::kernel::kernel_set::{BOOT_BASE, KernelSet, VBMETA_FILE};
 use crate::kernel::kernel_store::KernelStore;
 use crate::kernel::kernel_verification::verify_kernel_images;
+use crate::pair_apply;
 use crate::pair_kind::PairKind;
 use crate::pair_store::is_safe_id;
 use crate::partition_target::PartitionTarget;
 use crate::planned_write::PlannedWrite;
 use crate::profile;
 use crate::root_access::RootAccess;
+use crate::scope::Scope;
 use crate::support_report::SupportReport;
 use crate::write_plan::{PLAN_SCHEMA, POWER_LOSS_RECOVERY, WritePlan};
 use crate::write_purpose::WritePurpose;
@@ -109,6 +113,20 @@ impl KernelPlan {
         let facts = KernelPlanFacts::load(directory)?;
         facts.require_matches(&plan)?;
         Ok((Self { plan, facts }, plan_sha256))
+    }
+
+    pub fn apply(
+        &self,
+        shell: &mut dyn DeviceShell,
+        plan_sha256: &str,
+        authorization: &Authorization,
+        wait: &mut dyn FnMut(),
+    ) -> Result<ApplyOutcome> {
+        authorization.require(plan_sha256, Scope::WritePair)?;
+        self.facts.require_matches(&self.plan)?;
+        self.facts
+            .require_references_unchanged(shell, self.plan.root_access)?;
+        pair_apply::apply(shell, &self.plan, plan_sha256, authorization, wait)
     }
 }
 

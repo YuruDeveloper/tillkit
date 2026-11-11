@@ -137,15 +137,15 @@ pub fn stage_plan(paths: &DataPaths, review: &PlanReview) -> Result<()> {
 pub fn write_pair(review: &PlanReview, authorization: &Authorization) -> Result<ApplyOutcome> {
     let plan = load_reviewed(review)?;
     let mut shell = AdbShell::connect()?;
-    pair_apply::apply(
-        &mut shell,
-        &plan,
-        &review.sha256,
-        authorization,
-        &mut || {
-            std::thread::sleep(STATE_POLL_INTERVAL);
-        },
-    )
+    let mut wait = || std::thread::sleep(STATE_POLL_INTERVAL);
+    let Some(facts) = review.source.kernel_facts() else {
+        return pair_apply::apply(&mut shell, &plan, &review.sha256, authorization, &mut wait);
+    };
+    let kernel_plan = KernelPlan {
+        plan,
+        facts: facts.clone(),
+    };
+    kernel_plan.apply(&mut shell, &review.sha256, authorization, &mut wait)
 }
 
 pub fn reboot(
