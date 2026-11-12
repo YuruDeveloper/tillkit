@@ -10,6 +10,7 @@ mod clock;
 mod confirmation;
 mod data_paths;
 mod diagnosis;
+mod folder_choice;
 mod folder_refusal;
 mod fonts;
 mod grain;

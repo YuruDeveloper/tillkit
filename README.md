@@ -82,7 +82,7 @@ You cannot continue with these devices:
 | Screen | Function |
 | --- | --- |
 | DEVICE | Reads the properties of the device and tells you if you can use the tool with it. This screen does not write. |
-| BACKUP | Reads `init_boot`, `boot` and `vbmeta` of the device into a folder on the computer. `RESTORE` in the list writes the images of that backup to the device again. You also select the folder of the full backup for a GSI here. |
+| BACKUP | Reads `init_boot`, `boot` and `vbmeta` of the device into a folder on the computer. You select that folder on this screen. `RESTORE` in the list writes the images of that backup to the device again. |
 | WRITE | You select a folder with an image and push `WRITE`. The tool does the steps in sequence, from the plan to the check. |
 | ROOT | Downloads Magisk, adds the Magisk patch to the `init_boot` of the device and writes it. |
 | ADVANCED | Starts the device again in system, recovery, bootloader (fastboot) or EDL mode. |
@@ -96,7 +96,7 @@ Put only one of these files in the folder.
 | --- | --- |
 | `init_boot.img` | A root patch from a different tool. TillKit signs it and writes `init_boot` and `vbmeta`. |
 | `boot.img` | A kernel image. TillKit signs it and writes `boot` and `vbmeta`. TillKit cannot use a compressed kernel image. |
-| `system.img` | A GSI. TillKit makes an installation plan only and does not write to the device. Select the folder of the full backup on the `BACKUP` screen first. |
+| `system.img` | A GSI. TillKit makes an installation plan only and does not write to the device. For this file, the screen shows a line for the folder of the full backup. Select that folder before you push `WRITE`. |
 
 ### Safety steps of a write
 
@@ -154,8 +154,13 @@ Other functions:
 
 Do not add images, firmware, loaders, device logs, keys or backups of a device.
 `.gitignore` stops the usual file types, but you must examine each commit.
-The tool keeps its data in the `tillkit` folder of the local data folder of the user (`%LOCALAPPDATA%` on Windows).
+The tool keeps its data in the folder that you select on the `BACKUP` screen.
+If you select no folder, the tool uses the `tillkit-data` folder that is adjacent to the program file.
+The tool writes the path of the selected folder into `tillkit-folder.json`, which is also adjacent to the program file.
 Backups are in `pairs` and `kernel-sets`, write plans are in `plans`, and the Magisk download is in `magisk`.
+The tool keeps one ADB key for a USB connection without an ADB server.
+That key is not in the data folder.
+On Windows, the key is in `%LOCALAPPDATA%\ltbox\adb\adbkey`.
 
 ## Build from source
 
@@ -168,6 +173,10 @@ cargo build --release --locked -p tillkit
 
 The executable is `target/release/tillkit` (`tillkit.exe` on Windows).
 The only builds until now are Windows builds.
+
+If you start the executable from `target/release`, the default data folder is `target/release/tillkit-data`.
+`cargo clean` removes that folder together with the build, and your backups go with it.
+Before you make a backup, copy the executable to a different folder or select a data folder on the `BACKUP` screen.
 
 | Crate | Responsibility |
 | --- | --- |

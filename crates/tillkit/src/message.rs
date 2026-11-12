@@ -17,6 +17,8 @@ pub enum Message {
     Cancel,
     BackUp,
     BackedUp(Result<(), String>),
+    PickDataFolder,
+    DataFolderPicked(Option<PathBuf>),
     PickFullBackup,
     FullBackupPicked(Option<PathBuf>),
     RestoreBackup(u64),

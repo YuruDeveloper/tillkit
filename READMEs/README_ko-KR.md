@@ -62,7 +62,7 @@ DEVICE 화면은 아래 값을 모두 확인합니다.
 | 화면 | 기능 |
 | --- | --- |
 | DEVICE | 기기의 속성을 읽어서 지원하는 기기인지 알려 줍니다. 이 화면은 아무것도 기록하지 않습니다. |
-| BACKUP | 기기의 `init_boot`, `boot`, `vbmeta`를 PC에 읽어 둡니다. 목록의 RESTORE는 그 백업의 이미지를 기기에 다시 기록합니다. GSI에 쓸 기기 전체 백업 폴더도 여기에서 고릅니다. |
+| BACKUP | 기기의 `init_boot`, `boot`, `vbmeta`를 PC의 폴더에 읽어 둡니다. 저장할 폴더는 이 화면에서 고릅니다. 목록의 RESTORE는 그 백업의 이미지를 기기에 다시 기록합니다. |
 | WRITE | 이미지가 든 폴더를 고르고 WRITE를 누르면, 준비부터 확인까지 차례로 진행합니다. |
 | ROOT | Magisk를 내려받아서 기기의 `init_boot`를 패치하고 기록합니다. |
 | ADVANCED | 기기를 일반 부팅, 복구 모드, 부트로더(fastboot), EDL 모드로 다시 시작합니다. |
@@ -76,7 +76,7 @@ DEVICE 화면은 아래 값을 모두 확인합니다.
 | --- | --- |
 | `init_boot.img` | 다른 도구로 만든 루트 패치본을 서명해서 `init_boot`와 `vbmeta`에 기록합니다. |
 | `boot.img` | 커널 이미지를 서명해서 `boot`와 `vbmeta`에 기록합니다. 압축된 커널 이미지는 지원하지 않습니다. |
-| `system.img` | GSI 설치 계획까지만 만듭니다. 기기에는 기록하지 않습니다. BACKUP 화면에서 전체 백업 폴더를 먼저 골라야 합니다. |
+| `system.img` | GSI 설치 계획까지만 만듭니다. 기기에는 기록하지 않습니다. 이 파일을 고르면 화면에 전체 백업 폴더를 고르는 칸이 나타나며, WRITE를 누르기 전에 그 폴더를 골라야 합니다. |
 
 ### 기록의 안전 단계
 
@@ -129,8 +129,11 @@ TillKit의 화면으로 실제 기기에서 실행해 본 기능은 아직 없�
 
 실제 기기의 이미지, 펌웨어, 로더, 기기 로그, 키, 백업을 저장소에 넣지 않습니다.
 `.gitignore`가 흔한 파일 형식을 막지만, 커밋마다 직접 확인해야 합니다.
-도구의 데이터는 로컬 애플리케이션 데이터 폴더의 `tillkit` 아래에 저장됩니다.
+도구의 데이터는 BACKUP 화면에서 고른 폴더에 저장됩니다.
+폴더를 고르지 않으면 실행 파일 옆의 `tillkit-data` 폴더를 씁니다.
+고른 폴더의 경로는 실행 파일 옆의 `tillkit-folder.json`에 적어 둡니다.
 백업은 `pairs`와 `kernel-sets`에, 기록 계획은 `plans`에, 내려받은 Magisk는 `magisk`에 있습니다.
+USB로 직접 연결할 때 쓰는 ADB 키는 이 폴더에 두지 않습니다. Windows에서는 `%LOCALAPPDATA%\ltbox\adb\adbkey`에 있습니다.
 
 ## 빌드
 
@@ -139,6 +142,8 @@ cargo build --release --locked -p tillkit
 ```
 
 실행 파일은 `target/release/tillkit`(Windows에서는 `tillkit.exe`)입니다. 지금까지는 Windows에서만 빌드하고 실행했습니다.
+
+실행 파일을 `target/release`에서 바로 실행하면 기본 데이터 폴더가 `target/release/tillkit-data`가 됩니다. `cargo clean`은 빌드 결과와 함께 이 폴더도 지우므로 백업이 함께 없어집니다. 백업하기 전에 실행 파일을 다른 폴더로 복사하거나 BACKUP 화면에서 데이터 폴더를 골라 주세요.
 
 ## 라이선스와 고지
 

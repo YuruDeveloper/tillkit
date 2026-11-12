@@ -2,13 +2,21 @@ use crate::app::App;
 use crate::data_paths::DataPaths;
 use crate::palette::{DUSK, PAPER, Palette};
 use crate::screen::Screen;
+use std::path::{Path, PathBuf};
 
 pub const DATA_DIRECTORY_VARIABLE: &str = "TILLKIT_DATA_DIR";
 pub const SCREEN_VARIABLE: &str = "TILLKIT_SCREEN";
 pub const THEME_VARIABLE: &str = "TILLKIT_THEME";
 
-pub fn paths() -> DataPaths {
-    std::env::var_os(DATA_DIRECTORY_VARIABLE).map_or_else(DataPaths::for_user, DataPaths::new)
+pub fn given_paths() -> Option<DataPaths> {
+    std::env::var_os(DATA_DIRECTORY_VARIABLE).map(DataPaths::new)
+}
+
+pub fn program_folder() -> PathBuf {
+    std::env::current_exe()
+        .ok()
+        .and_then(|program| program.parent().map(Path::to_path_buf))
+        .unwrap_or_else(|| PathBuf::from("."))
 }
 
 pub fn screen() -> Screen {
@@ -46,7 +54,6 @@ pub fn preview(app: &mut App) {
     use front2::kernel::KernelPlanFacts;
     use front2::magisk::MagiskPackage;
     use front2::{ApplyOutcome, ApplyState, DeviceState, WritePlan};
-    use std::path::PathBuf;
 
     fn outcome(review: &PlanReview, state: ApplyState, matches: bool) -> ApplyOutcome {
         ApplyOutcome {

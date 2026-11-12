@@ -14,7 +14,6 @@ ltbox-device = { path = "../ltbox-device" }
 iced = { workspace = true }
 rfd = { workspace = true }
 tokio = { workspace = true }
-dirs = { workspace = true }
 dark-light = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }

@@ -25,6 +25,9 @@ backup*/
 output*/
 pairs/
 plans/
+kernel-sets/
+tillkit-data/
+tillkit-folder.json
 
 .claude/
 AGENTS.md
