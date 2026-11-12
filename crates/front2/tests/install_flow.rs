@@ -165,6 +165,52 @@ fn the_whole_flow_writes_every_step_and_restarts_only_with_the_restart_approval(
 }
 
 #[test]
+fn a_new_executor_continues_with_the_progress_record_of_the_one_before() {
+    let mut fixture = InstallFixture::standard();
+    let plan = fixture.stored_plan();
+    let (write, data_wipe, restart) = approvals(plan.plan_sha256());
+
+    let mut first = InstallExecutor::new(&plan, &mut fixture.storage);
+    first.run_preflight().expect("preflight");
+    let checked = first.progress().clone();
+    let reads_of_the_preflight = fixture.calls.borrow().len();
+
+    let mut second = InstallExecutor::with_progress(&plan, &mut fixture.storage, checked)
+        .expect("the record is of this plan");
+    rejection(second.run_preflight(), "already ran");
+    assert_eq!(fixture.calls.borrow().len(), reads_of_the_preflight);
+    second.run_write_steps(&write).expect("write steps");
+    let written = second.progress().clone();
+
+    let mut third = InstallExecutor::with_progress(&plan, &mut fixture.storage, written)
+        .expect("the record is of this plan");
+    third
+        .run_data_wipe_step(&write, &data_wipe)
+        .expect("data wipe request");
+    third.request_restart(&restart).expect("restart");
+    assert!(third.progress().restart_sent);
+    assert_eq!(count(&fixture.calls, MockCall::is_reset), 1);
+}
+
+#[test]
+fn a_progress_record_of_another_plan_is_refused() {
+    let mut fixture = InstallFixture::standard();
+    let plan = fixture.stored_plan();
+    let mut other = InstallExecutor::new(&plan, &mut fixture.storage)
+        .progress()
+        .clone();
+    other.plan_sha256 = OTHER_PLAN_SHA256.to_string();
+
+    let refused = InstallExecutor::with_progress(&plan, &mut fixture.storage, other);
+    assert!(
+        refused
+            .err()
+            .is_some_and(|err| err.to_string().contains("a different plan"))
+    );
+    assert!(fixture.calls.borrow().is_empty());
+}
+
+#[test]
 fn the_misc_step_changes_only_the_first_sector() {
     let mut fixture = InstallFixture::standard();
     let plan = fixture.stored_plan();

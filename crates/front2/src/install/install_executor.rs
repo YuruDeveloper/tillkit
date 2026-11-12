@@ -27,6 +27,23 @@ impl<'run> InstallExecutor<'run> {
         }
     }
 
+    pub fn with_progress(
+        plan: &'run StoredInstallPlan,
+        storage: &'run mut dyn SectorStorage,
+        progress: InstallProgress,
+    ) -> Result<Self> {
+        if progress.plan_sha256 != plan.plan_sha256() {
+            return Err(Front2Error::Plan(
+                "the progress record belongs to a different plan".into(),
+            ));
+        }
+        Ok(Self {
+            plan,
+            storage,
+            progress,
+        })
+    }
+
     pub fn progress(&self) -> &InstallProgress {
         &self.progress
     }
