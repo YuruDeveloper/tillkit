@@ -2,21 +2,33 @@
 
 mod adb_shell;
 mod app;
+mod app_install;
 mod app_reboot;
 mod app_restore;
 mod app_root;
 mod app_write;
 mod clock;
 mod confirmation;
+mod counted_storage;
 mod data_paths;
 mod diagnosis;
+mod edl_link;
+mod edl_storage;
 mod folder_choice;
 mod fonts;
+mod full_backup_store;
 mod grain;
 mod gsi_review;
 mod gsi_worker;
 mod image_refusal;
+mod install_device;
+mod install_flow;
+mod install_message;
+#[cfg(debug_assertions)]
+mod install_preview;
 mod install_review;
+mod install_stage;
+mod install_worker;
 mod kernel_worker;
 mod launch;
 mod message;
@@ -45,6 +57,20 @@ mod write_message;
 mod write_origin;
 mod write_step;
 
+#[cfg(test)]
+#[expect(
+    dead_code,
+    reason = "the tests of TillKit use a part of this fixture of front2"
+)]
+#[path = "../../front2/tests/full_backup_support/mod.rs"]
+mod full_backup_support;
+#[cfg(test)]
+#[path = "../../front2/tests/gpt_support/mod.rs"]
+mod gpt_support;
+#[cfg(test)]
+#[path = "../../front2/tests/install_support/mod.rs"]
+mod install_support;
+
 use app::App;
 use front2::magisk::{dispatch_magiskboot_helper, register_magiskboot_host};
 use iced::Size;
@@ -62,6 +88,7 @@ fn main() -> iced::Result {
     iced::application(App::new, App::update, App::view)
         .title("TillKit")
         .theme(App::theme)
+        .subscription(App::subscription)
         .settings(iced::Settings {
             default_font: fonts::BODY,
             ..iced::Settings::default()

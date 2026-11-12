@@ -167,6 +167,7 @@ pub fn preview(app: &mut App) {
         let chosen = std::env::var("TILLKIT_PREVIEW_WRITE").unwrap_or_default();
         pose(app, review, &chosen);
     }
+    crate::install_preview::apply(app);
     if let Ok(error) = std::env::var("TILLKIT_PREVIEW_PREPARE_ERROR") {
         app.write.failure = Some((WriteStep::Prepare, error));
     }

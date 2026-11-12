@@ -1,5 +1,6 @@
 use crate::app::App;
 use crate::confirmation::Confirmation;
+use crate::install_device;
 use crate::message::Message;
 use crate::reboot::{DeviceConnection, RebootTarget, reboot_device};
 use crate::reboot_message::RebootMessage;
@@ -23,7 +24,7 @@ impl App {
     }
 
     pub fn reboot_is_held(&self) -> bool {
-        self.write.write_is_uncertain()
+        self.write.write_is_uncertain() || self.install.holds_the_device()
     }
 
     pub fn can_reboot_to(&self, target: RebootTarget) -> bool {
@@ -90,8 +91,13 @@ impl App {
         self.reboot.failure = None;
         self.reboot.sent = None;
         let loader = self.reboot.loader.clone();
+        let slot = self.device.clone();
+        self.install.disconnect();
         run_blocking(
-            move || reboot_device(connection, target, loader.as_deref()).map(|()| target),
+            move || {
+                install_device::release(&slot)?;
+                reboot_device(connection, target, loader.as_deref()).map(|()| target)
+            },
             |result| Message::Reboot(RebootMessage::Sent(result)),
         )
     }

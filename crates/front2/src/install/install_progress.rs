@@ -1,6 +1,9 @@
 use crate::error::{Front2Error, Result};
 use crate::install::boot_lun_record::BootLunRecord;
+use crate::install::install_plan::InstallPlan;
+use crate::install::install_step::InstallStep;
 use crate::install::preflight_record::PreflightRecord;
+use crate::install::step_check::StepCheck;
 use crate::install::step_record::StepRecord;
 use crate::install::step_state::StepState;
 use crate::install::write_step::WriteStep;
@@ -73,6 +76,34 @@ impl InstallProgress {
             ));
         }
         Ok(())
+    }
+
+    pub(crate) fn take_steps_before_the_resume_point(
+        &mut self,
+        plan: &InstallPlan,
+        record: &PreflightRecord,
+    ) {
+        let Some(resume) = &record.resume else {
+            return;
+        };
+        for check in record
+            .steps
+            .iter()
+            .filter(|check| check.index < resume.next_index)
+        {
+            self.take_checked_step(plan, check);
+        }
+    }
+
+    fn take_checked_step(&mut self, plan: &InstallPlan, check: &StepCheck) {
+        self.start_step(check.index, &check.name);
+        let boot_lun = plan.steps.get(check.index).and_then(InstallStep::boot_lun);
+        let Some(lun) = boot_lun else {
+            self.verify_step(Some(check.sha256.clone()));
+            return;
+        };
+        self.boot_lun = Some(BootLunRecord::observed(lun, plan.boot_wlun, &check.sha256));
+        self.verify_step(None);
     }
 
     pub(crate) fn start_step(&mut self, index: usize, name: &str) {

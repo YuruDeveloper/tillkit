@@ -27,6 +27,23 @@ impl<'run> InstallExecutor<'run> {
         }
     }
 
+    pub fn with_progress(
+        plan: &'run StoredInstallPlan,
+        storage: &'run mut dyn SectorStorage,
+        progress: InstallProgress,
+    ) -> Result<Self> {
+        if progress.plan_sha256 != plan.plan_sha256() {
+            return Err(Front2Error::Plan(
+                "the progress record belongs to a different plan".into(),
+            ));
+        }
+        Ok(Self {
+            plan,
+            storage,
+            progress,
+        })
+    }
+
     pub fn progress(&self) -> &InstallProgress {
         &self.progress
     }
@@ -39,12 +56,21 @@ impl<'run> InstallExecutor<'run> {
             ));
         }
         let (record, outcome) = run_preflight(self.plan, &mut *self.storage);
+        if outcome.is_ok() {
+            self.progress
+                .take_steps_before_the_resume_point(self.plan.plan(), &record);
+        }
         self.progress.preflight = Some(record);
         outcome.map_err(|err| self.progress.halt(err))
     }
 
-    pub fn run_write_steps(&mut self, write: &WriteApproval) -> Result<()> {
+    pub fn run_write_steps(
+        &mut self,
+        write: &WriteApproval,
+        data_wipe: &DataWipeApproval,
+    ) -> Result<()> {
         self.require_writes_open(write)?;
+        data_wipe.require(self.plan.plan_sha256())?;
         if !self.next_step_needs_only_write_approval() {
             return Err(Front2Error::Plan(
                 "no step that needs only the write approval is left".into(),

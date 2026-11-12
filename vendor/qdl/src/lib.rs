@@ -228,20 +228,21 @@ pub fn firehose_read<T: QdlChan>(
     channel: &mut T,
     response_parser: fn(&mut T, &IndexMap<String, String>) -> Result<FirehoseStatus, anyhow::Error>,
 ) -> Result<FirehoseStatus, anyhow::Error> {
-    firehose_read_response(channel, response_parser, false)
+    firehose_read_response(channel, response_parser, false, None)
 }
 
 /// Drain the loader's startup greeting before sending configure. Some loaders
 /// end complete greeting logs with a timeout instead of an explicit ACK.
 /// Never use this relaxed termination rule for a command response.
 pub fn firehose_read_greeting<T: QdlChan>(channel: &mut T) -> anyhow::Result<FirehoseStatus> {
-    firehose_read_response(channel, firehose_parser_ack_nak, true)
+    firehose_read_response(channel, firehose_parser_ack_nak, true, None)
 }
 
 fn firehose_read_response<T: QdlChan>(
     channel: &mut T,
     response_parser: fn(&mut T, &IndexMap<String, String>) -> Result<FirehoseStatus, anyhow::Error>,
     greeting: bool,
+    mut log_lines: Option<&mut Vec<String>>,
 ) -> Result<FirehoseStatus, anyhow::Error> {
     let mut received_log = false;
     let mut pending: Vec<u8> = Vec::new();
@@ -337,6 +338,12 @@ fn firehose_read_response<T: QdlChan>(
                         && val.1.starts_with("INFO: End of supported functions")
                     {
                         return Ok(FirehoseStatus::Ack);
+                    }
+                    if let Some(lines) = log_lines.as_deref_mut() {
+                        if let Some(value) = e.attributes.get("value") {
+                            lines.push(value.clone());
+                        }
+                        continue;
                     }
                     if channel.fh_config().skip_firehose_log {
                         continue;
@@ -506,6 +513,25 @@ pub fn firehose_get_storage_info<T: QdlChan>(
     firehose_write(channel, &mut xml)?;
 
     firehose_read::<T>(channel, firehose_parser_ack_nak).and(Ok(()))
+}
+
+pub fn firehose_get_storage_info_log<T: QdlChan>(
+    channel: &mut T,
+    physical_partition: u8,
+) -> anyhow::Result<Vec<String>> {
+    let mut xml = firehose_xml_setup(
+        "getstorageinfo",
+        &[("physical_partition_number", &physical_partition.to_string())],
+    )?;
+
+    firehose_write(channel, &mut xml)?;
+
+    let mut lines = Vec::new();
+    let status = firehose_read_response(channel, firehose_parser_ack_nak, false, Some(&mut lines))?;
+    if status != FirehoseStatus::Ack {
+        bail!("getstorageinfo for physical partition {physical_partition} was NAKed");
+    }
+    Ok(lines)
 }
 
 /// Alter Device (TODO: or Host) storage

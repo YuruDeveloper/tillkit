@@ -1,4 +1,6 @@
 use crate::install::digest_check::DigestCheck;
+use crate::install::resume_point::ResumePoint;
+use crate::install::step_check::StepCheck;
 use crate::install::storage_info::StorageInfo;
 use serde::{Deserialize, Serialize};
 
@@ -10,8 +12,8 @@ pub struct PreflightRecord {
     pub restore_files: Vec<DigestCheck>,
     pub storage: Vec<StorageInfo>,
     pub gpt_copies: Vec<DigestCheck>,
-    pub boot_wlun: Option<DigestCheck>,
-    pub current_targets: Vec<DigestCheck>,
+    pub steps: Vec<StepCheck>,
+    pub resume: Option<ResumePoint>,
     pub failure: Option<String>,
 }
 
@@ -24,8 +26,8 @@ impl PreflightRecord {
             restore_files: Vec::new(),
             storage: Vec::new(),
             gpt_copies: Vec::new(),
-            boot_wlun: None,
-            current_targets: Vec::new(),
+            steps: Vec::new(),
+            resume: None,
             failure: None,
         }
     }

@@ -2,8 +2,6 @@ use crate::app::App;
 use crate::clock::now_unix;
 use crate::confirmation::Confirmation;
 use crate::data_paths::DataPaths;
-use crate::gsi_worker;
-use crate::install_review::InstallReview;
 use crate::kernel_worker;
 use crate::message::Message;
 use crate::plan_review::PlanReview;
@@ -12,7 +10,7 @@ use crate::write_flow::WriteFlow;
 use crate::write_kind::WriteKind;
 use crate::write_message::WriteMessage;
 use crate::write_step::WriteStep;
-use front2::{ApplyOutcome, DeviceProfile, SupportOverride};
+use front2::{ApplyOutcome, SupportOverride};
 use iced::Task;
 use std::path::PathBuf;
 
@@ -23,7 +21,6 @@ impl App {
         match message {
             WriteMessage::ImagePicked(image) => self.write_image_picked(image),
             WriteMessage::Prepared(result) => self.write_prepared(result),
-            WriteMessage::InstallPlanned(result) => self.install_planned(result),
             WriteMessage::Rebooted(result) => self.rebooted(result),
             WriteMessage::AskReboot => self.ask_reboot(),
             WriteMessage::StartOver => self.start_over(),
@@ -35,12 +32,8 @@ impl App {
         Task::none()
     }
 
-    pub fn full_backup_for_gsi(&self) -> Option<PathBuf> {
-        self.full_backup.clone().filter(|_| self.full_backup_found)
-    }
-
     pub fn write_needs_a_backup(&self) -> bool {
-        let writes = matches!(self.write.kind, Some(Ok(kind)) if kind.writes_to_device());
+        let writes = matches!(self.write.kind, Some(Ok(kind)) if kind.writes_with_root());
         writes && self.saved_backups().is_empty()
     }
 
@@ -48,13 +41,9 @@ impl App {
         let Some((kind, _)) = self.write.chosen_image() else {
             return false;
         };
-        let has_source = if kind.writes_to_device() {
-            !self.write_needs_a_backup()
-        } else {
-            self.full_backup_for_gsi().is_some()
-        };
-        let device_allows = !kind.writes_to_device() || !self.support_stops_writes();
-        !self.is_busy() && self.write.can_start() && has_source && device_allows
+        let ready =
+            kind.writes_with_root() && !self.write_needs_a_backup() && !self.support_stops_writes();
+        !self.is_busy() && self.write.can_start() && ready
     }
 
     pub fn drop_unapproved_plan(&mut self) {
@@ -64,7 +53,7 @@ impl App {
     }
 
     pub fn can_choose_write_image(&self) -> bool {
-        !self.is_busy() && !self.write.has_result()
+        !self.is_busy() && !self.write.has_result() && !self.install.keeps_the_plan()
     }
 
     fn pick_write_image(&mut self) -> Task<Message> {
@@ -81,6 +70,7 @@ impl App {
             return;
         };
         self.write = WriteFlow::for_image(image);
+        self.install.forget_the_plan();
     }
 
     fn start_over(&mut self) {
@@ -101,17 +91,8 @@ impl App {
         let Some((kind, image)) = image else {
             return Task::none();
         };
-        let full_backup = self.full_backup_for_gsi();
         let accepted = self.support_override();
-        let profile = self.device_profile();
-        let task = prepare_task(
-            kind,
-            image,
-            self.paths.clone(),
-            full_backup,
-            accepted,
-            profile,
-        );
+        let task = prepare_task(kind, image, self.paths.clone(), accepted);
         self.write.running = task.as_ref().map(|_| WriteStep::Prepare);
         task.unwrap_or_else(Task::none)
     }
@@ -127,14 +108,6 @@ impl App {
     pub fn review_ready(&mut self, review: PlanReview) {
         self.write.review = Some(review);
         self.confirmation = Some(Confirmation::Write);
-    }
-
-    fn install_planned(&mut self, result: Outcome<Box<InstallReview>>) {
-        self.write.running = None;
-        match result {
-            Ok(install) => self.write.install = Some(*install),
-            Err(error) => self.write.failure = Some((WriteStep::Prepare, error)),
-        }
     }
 
     pub fn stage_plan(&mut self) -> Task<Message> {
@@ -226,9 +199,7 @@ fn prepare_task(
     kind: WriteKind,
     image: PathBuf,
     paths: DataPaths,
-    full_backup: Option<PathBuf>,
     accepted: SupportOverride,
-    profile: &'static DeviceProfile,
 ) -> Option<Task<Message>> {
     if kind == WriteKind::RootImage {
         let work = move || worker::prepare_root_write(&paths, &image, accepted);
@@ -238,17 +209,11 @@ fn prepare_task(
         let work = move || kernel_worker::prepare_write(&paths, &image, accepted);
         return Some(run_blocking(work, prepared));
     }
-    let backup = full_backup?;
-    let work = move || gsi_worker::prepare(&paths, &backup, &image, profile);
-    Some(run_blocking(work, install_planned))
+    None
 }
 
 fn prepared(result: Outcome<PlanReview>) -> Message {
     Message::Write(WriteMessage::Prepared(result.map(Box::new)))
-}
-
-fn install_planned(result: Outcome<InstallReview>) -> Message {
-    Message::Write(WriteMessage::InstallPlanned(result.map(Box::new)))
 }
 
 async fn pick_image_file() -> Option<PathBuf> {
@@ -288,7 +253,10 @@ mod tests {
         assert!(app.write_needs_a_backup() && !app.can_start_write());
         add_backup(&mut app);
         assert!(!app.write_needs_a_backup() && app.can_start_write());
-        assert!(app.full_backup.is_none(), "no full backup folder is asked");
+        assert!(
+            app.install.backup.is_none(),
+            "no full backup folder is asked"
+        );
     }
 
     #[test]
@@ -312,34 +280,28 @@ mod tests {
     }
 
     #[test]
-    fn a_gsi_image_asks_for_no_backup_and_starts_only_a_plan_with_a_full_backup() {
+    fn a_gsi_image_asks_for_no_backup_and_does_not_start_the_write_of_a_pair() {
         let mut head = vec![0; 2048];
         head[..4].copy_from_slice(&[0x3a, 0xff, 0x26, 0xed]);
-        let (directory, mut app) = app_with_image(&head);
+        let (_directory, mut app) = app_with_image(&head);
         assert_eq!(app.write.kind, Some(Ok(WriteKind::Gsi)));
         assert!(!app.write_needs_a_backup() && !app.can_start_write());
         add_backup(&mut app);
-        assert!(!app.can_start_write(), "a saved backup is no full backup");
-        let full_backup = directory.path().join("full");
-        std::fs::create_dir(&full_backup).expect("folder");
-        let _ = app.update(Message::FullBackupPicked(Some(full_backup.clone())));
-        assert!(!app.can_start_write(), "no manifest");
-        std::fs::write(full_backup.join("sha256-manifest.json"), b"{}").expect("manifest");
-        let _ = app.update(Message::FullBackupPicked(Some(full_backup)));
-        assert!(app.can_start_write());
+        assert!(
+            !app.can_start_write(),
+            "a GSI image is not written as a pair"
+        );
+        let _ = app.update(Message::Write(WriteMessage::Start));
+        assert!(app.write.running.is_none() && !app.is_busy());
     }
 
     #[test]
     fn letter_1275_a_start_stops_when_the_file_changed_to_another_kind() {
         let mut head = vec![0; 2048];
         head[..4].copy_from_slice(&[0x3a, 0xff, 0x26, 0xed]);
-        let (directory, mut app) = app_with_image(&head);
+        let (_directory, mut app) = app_with_image(&head);
         add_backup(&mut app);
-        let full_backup = directory.path().join("full");
-        std::fs::create_dir(&full_backup).expect("folder");
-        std::fs::write(full_backup.join("sha256-manifest.json"), b"{}").expect("manifest");
-        let _ = app.update(Message::FullBackupPicked(Some(full_backup)));
-        assert!(app.can_start_write());
+        assert_eq!(app.write.kind, Some(Ok(WriteKind::Gsi)));
         let image = app.write.image.clone().expect("image");
         std::fs::write(&image, boot_head(0)).expect("image");
         let _ = app.update(Message::Write(WriteMessage::Start));

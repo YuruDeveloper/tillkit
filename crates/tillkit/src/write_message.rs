@@ -1,4 +1,3 @@
-use crate::install_review::InstallReview;
 use crate::plan_review::PlanReview;
 use front2::ApplyOutcome;
 use std::path::PathBuf;
@@ -9,7 +8,6 @@ pub enum WriteMessage {
     ImagePicked(Option<PathBuf>),
     Start,
     Prepared(Result<Box<PlanReview>, String>),
-    InstallPlanned(Result<Box<InstallReview>, String>),
     Staged(Result<(), String>),
     Written(Result<ApplyOutcome, String>),
     AskReboot,

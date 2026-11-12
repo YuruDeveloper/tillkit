@@ -1,9 +1,10 @@
 # TillKit
 
 TillKit is a tool for the Toss Front 2 terminal.
-It makes a backup of the boot partitions, writes images and adds the Magisk root patch.
-The device must have a GSI on slot B, installed from stock firmware 1.609.5.
-The device must also have root access.
+It installs a GSI, makes a backup of the boot partitions, writes images and adds the Magisk root patch.
+The GSI installation is for a device with stock firmware 1.609.5 that you connect in EDL mode.
+The other functions are for a device that has root access and a GSI on slot B.
+That GSI must be installed from stock firmware 1.609.5.
 
 TillKit is a changed version of [LTBox](https://github.com/miner7222/LTBox) by miner7222.
 The Lenovo functions of LTBox are not in this repository.
@@ -16,9 +17,10 @@ The Lenovo functions of LTBox are not in this repository.
 > A change to firmware can make your device unbootable or erase your data. This tool comes without warranty. You use it at your risk.
 
 - No person did a test of the write functions of TillKit on a device.
-- A write changes two partitions, one after the other. If the device stops between the two writes, it can become unbootable.
-- The only recovery from that condition is an EDL restore from a full backup. TillKit cannot make a full backup and cannot do that restore.
-- Make a full backup of the device with a different tool before you write.
+- A write changes some partitions, one after the other. If the device or the connection stops during the writes, the device can become unbootable.
+- The only recovery from that condition is an EDL restore from a full backup. TillKit makes a full backup as a step of the GSI installation, but it cannot do that restore.
+- The GSI installation erases the user data of the device.
+- Keep a copy of the full backup in a different location. A different tool is necessary for the restore.
 
 ## What you need
 
@@ -46,6 +48,13 @@ It adds Magisk to a device on which only `adb root` is available.
 ### One ADB program
 
 If a different ADB program on the computer uses the device, stop that program first.
+
+### EDL mode and the loader file
+
+The GSI installation does not use root access. These two items are necessary:
+
+1. The device must be in EDL mode and connected to the computer. If the device has an ADB connection, the `ADVANCED` screen can start it again in EDL mode.
+2. The Firehose loader file of this device is necessary. TillKit does not include this file.
 
 ## Supported device
 
@@ -97,9 +106,25 @@ The tool reads the header of the file and finds the type of the image.
 | --- | --- |
 | A boot image without a kernel | A root patch from a different tool, for example an `init_boot` image from the Magisk app. TillKit signs it and writes `init_boot` and `vbmeta`. |
 | A boot image with a kernel | A kernel image. TillKit signs it and writes `boot` and `vbmeta`. TillKit cannot use a compressed kernel image. |
-| A system image | A GSI. TillKit does not write a GSI to the device. If you have a full backup of the device, the screen can make an installation plan. This step is optional. |
+| A system image | A GSI. TillKit installs it on a device that you connect in EDL mode. Read "GSI installation" below. |
 
 The tool finds the backup for a write in the folder of the `BACKUP` screen. You do not select the backup on the `WRITE` screen.
+
+### GSI installation
+
+When you select a system image on the `WRITE` screen, these steps open in sequence.
+
+1. Connection: Select the Firehose loader file. The tool connects to the device in EDL mode.
+2. Full backup: The tool reads all of the device into `full-backups` in the data folder. If the data folder has a full backup, the tool uses the latest one. You can also select a full backup in a different folder.
+3. Plan: The tool makes a plan file for the write. If the data folder has plans for the same image, the tool uses the latest of those plans and the full backup of that plan. Thus an installation that stopped continues with its first plan. If the tool cannot read that full backup, it stops and tells you. If you selected the folder of the full backup, the tool uses only a plan for that full backup.
+4. Check: The tool reads the device and compares it with the plan. The check finds a first installation or an installation that stopped. The tool does not write to the device before step 5.
+5. Write: After your approval, the tool writes the images and the partition tables, and it changes the boot LUN. Then it reads all that it wrote and compares the hashes.
+6. User data: The tool erases the user data immediately after the write. The approval of step 5 is also the approval for this step.
+7. Restart: The tool gets a different approval for the restart.
+
+- If the write does not complete, the device can become unbootable. Keep the device in EDL mode and do the check again. If the check finds the step that stopped, the tool continues from that step. TillKit cannot write the stock firmware again.
+- TillKit cannot compare the rollback values that the device keeps with the values of the images.
+- TillKit cannot tell if the device started from the GSI after the restart.
 
 ### Safety steps of a write
 
@@ -132,6 +157,9 @@ The checks for these items used a simulated device and a local shell only.
 
 Write functions:
 
+- All steps of the GSI installation: the EDL connection, the full backup, the check, the write, the removal of the user data and the restart.
+- A GSI installation that stopped and that the tool continues from the step that stopped.
+- The start of the device from a GSI that TillKit wrote.
 - Backup, write and `RESTORE` on a device.
 - A write through `su`.
 - A write to a device after you accept incorrect items.
@@ -147,8 +175,7 @@ Other functions:
 ## Not in this tool
 
 - A write to a device that has no root access, and root access for such a device.
-- The GSI installation. TillKit makes only the plan.
-- Full backup and full restore of the device.
+- The restore of a full backup to the device. Thus TillKit cannot write the stock firmware again after a GSI installation.
 - Recovery of a device that does not start after a write.
 - Automatic removal of `/data/local/tmp/front2-write-*` on the device.
 - A time limit for device commands. If the device gives no result during a write, the tool continues to wait and the write state is not known. The tool does not try again and does not start the device again.

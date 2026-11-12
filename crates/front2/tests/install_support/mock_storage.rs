@@ -17,6 +17,7 @@ pub struct MockStorage {
     ignored_write: Option<(u8, u64)>,
     corrupted_write: Option<(u8, u64)>,
     failing_read_after_write: Option<(u8, u64)>,
+    failing_read: Option<(u8, u64)>,
     short_read_after_write: Option<(u8, u64)>,
     ignores_boot_lun_command: bool,
     fails_reset: bool,
@@ -34,6 +35,7 @@ impl MockStorage {
             ignored_write: None,
             corrupted_write: None,
             failing_read_after_write: None,
+            failing_read: None,
             short_read_after_write: None,
             ignores_boot_lun_command: false,
             fails_reset: false,
@@ -77,6 +79,10 @@ impl MockStorage {
         self.failing_read_after_write = Some((lun, sector));
     }
 
+    pub fn fail_reads_that_cover(&mut self, lun: u8, sector: u64) {
+        self.failing_read = Some((lun, sector));
+    }
+
     pub fn shorten_reads_after_a_write_to(&mut self, lun: u8, sector: u64) {
         self.short_read_after_write = Some((lun, sector));
     }
@@ -115,6 +121,7 @@ impl MockStorage {
 
     fn read_fails(&self, lun: u8, start_sector: u64, sectors: u64) -> bool {
         self.covers_written(self.failing_read_after_write, lun, start_sector, sectors)
+            || is_covered(self.failing_read, lun, start_sector, sectors)
     }
 
     fn read_is_short(&self, lun: u8, start_sector: u64, sectors: u64) -> bool {

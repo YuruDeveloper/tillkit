@@ -1,5 +1,4 @@
 use crate::image_refusal::ImageRefusal;
-use crate::install_review::InstallReview;
 use crate::plan_review::PlanReview;
 use crate::step_status::StepStatus;
 use crate::write_kind::WriteKind;
@@ -21,7 +20,6 @@ pub struct WriteFlow {
     pub staged: bool,
     pub outcome: Option<ApplyOutcome>,
     pub rebooted: bool,
-    pub install: Option<InstallReview>,
     pub running: Option<WriteStep>,
     pub failure: Option<(WriteStep, String)>,
 }
@@ -74,19 +72,13 @@ impl WriteFlow {
         self.running.is_none() && self.has_result() && !self.write_is_uncertain()
     }
 
-    pub fn full_backup_changed(&mut self) {
-        if self.kind == Some(Ok(WriteKind::Gsi)) && self.running.is_none() {
-            self.start_over();
-        }
-    }
-
     pub fn chosen_image(&self) -> Option<(WriteKind, PathBuf)> {
         let kind = self.kind?.ok()?;
         Some((kind, self.image.clone()?))
     }
 
     pub fn has_result(&self) -> bool {
-        self.review.is_some() || self.install.is_some()
+        self.review.is_some()
     }
 
     pub fn can_start(&self) -> bool {
@@ -125,11 +117,7 @@ impl WriteFlow {
 
     fn is_stopped(&self) -> bool {
         let bad_write = self.outcome.is_some() && !self.write_verified();
-        self.failure.is_some() || self.install.is_some() || bad_write
-    }
-
-    fn is_closed(&self, step: WriteStep) -> bool {
-        self.kind == Some(Ok(WriteKind::Gsi)) && step != WriteStep::Prepare
+        self.failure.is_some() || bad_write
     }
 
     pub fn next_step(&self) -> Option<WriteStep> {
@@ -159,9 +147,7 @@ impl WriteFlow {
         let failed_here = matches!(&self.failure, Some((failed, _)) if *failed == step);
         let bad_write =
             step == WriteStep::Write && self.outcome.is_some() && !self.write_verified();
-        if self.is_closed(step) {
-            StepStatus::Closed
-        } else if self.running == Some(step) {
+        if self.running == Some(step) {
             StepStatus::Running
         } else if self.is_done(step) {
             StepStatus::Done
@@ -373,16 +359,6 @@ pub mod tests {
     }
 
     #[test]
-    fn a_gsi_image_stops_after_the_plan() {
-        let flow = chosen(WriteKind::Gsi);
-        assert_eq!(flow.status(WriteStep::Prepare), StepStatus::Waiting);
-        for step in [WriteStep::Stage, WriteStep::Write, WriteStep::Reboot] {
-            assert_eq!(flow.status(step), StepStatus::Closed);
-        }
-        assert_eq!(flow.focus_step(), WriteStep::Prepare);
-    }
-
-    #[test]
     fn doc_1053_a_write_without_a_known_result_cannot_start_over() {
         let mut failed = staged();
         failed.failure = Some((WriteStep::Write, "the connection closed".into()));
@@ -435,25 +411,6 @@ pub mod tests {
         assert!(!flow.can_start_over());
         assert_eq!(flow.next_step(), None);
         assert_eq!(flow.status(WriteStep::Reboot), StepStatus::Failed);
-    }
-
-    #[test]
-    fn doc_1053_a_new_full_backup_drops_the_gsi_result_only() {
-        let mut gsi = chosen(WriteKind::Gsi);
-        gsi.failure = Some((WriteStep::Prepare, "the backup has no super".into()));
-        gsi.full_backup_changed();
-        assert!(gsi.failure.is_none());
-        assert_eq!(gsi.image, Some(PathBuf::from("new.img")));
-
-        let mut planning = chosen(WriteKind::Gsi);
-        planning.running = Some(WriteStep::Prepare);
-        planning.full_backup_changed();
-        assert_eq!(planning.running, Some(WriteStep::Prepare));
-
-        let mut pair = staged();
-        pair.outcome = Some(outcome(ApplyState::Writing("WRITING_VBMETA".into()), false));
-        pair.full_backup_changed();
-        assert!(pair.outcome.is_some() && pair.review.is_some());
     }
 
     #[test]

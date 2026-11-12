@@ -12,7 +12,7 @@ const EXT4_MAGIC: [u8; 2] = [0x53, 0xef];
 const ROOT_IMAGE_FOUND: &str =
     "커널이 없는 부트 이미지입니다. 루트 패치본으로 보고 init_boot 영역에 기록합니다.";
 const KERNEL_FOUND: &str = "커널이 든 부트 이미지입니다. boot 영역에 기록합니다.";
-const GSI_FOUND: &str = "시스템 이미지(GSI)입니다. TillKit은 아직 GSI를 기기에 기록하지 않습니다. 지금 기록할 수 있는 것은 Magisk 앱으로 패치한 init_boot 이미지와 커널이 든 boot 이미지입니다.";
+const GSI_FOUND: &str = "시스템 이미지(GSI)입니다. 기기를 EDL 모드로 연결해서 설치하고, 설치하면 사용자 데이터가 지워집니다.";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum WriteKind {
@@ -26,7 +26,7 @@ impl WriteKind {
         match self {
             Self::RootImage => "루트 패치본 기록",
             Self::Kernel => "커널 기록",
-            Self::Gsi => "GSI 설치 계획",
+            Self::Gsi => "GSI 설치",
         }
     }
 
@@ -38,7 +38,7 @@ impl WriteKind {
         }
     }
 
-    pub fn writes_to_device(self) -> bool {
+    pub fn writes_with_root(self) -> bool {
         self != Self::Gsi
     }
 
@@ -110,8 +110,8 @@ pub mod tests {
         ] {
             assert_eq!(WriteKind::of_head(&head), Ok(WriteKind::Gsi));
         }
-        assert!(!WriteKind::Gsi.writes_to_device());
-        assert!(WriteKind::RootImage.writes_to_device() && WriteKind::Kernel.writes_to_device());
+        assert!(!WriteKind::Gsi.writes_with_root());
+        assert!(WriteKind::RootImage.writes_with_root() && WriteKind::Kernel.writes_with_root());
     }
 
     #[test]

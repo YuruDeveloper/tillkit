@@ -4,4 +4,6 @@ pub enum Confirmation {
     Write,
     Reboot,
     RebootTo,
+    InstallWrite,
+    InstallRestart,
 }
