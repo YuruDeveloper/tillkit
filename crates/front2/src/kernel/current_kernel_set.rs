@@ -7,6 +7,8 @@ use crate::partition_target::PartitionTarget;
 use crate::profile;
 use crate::root_access::RootAccess;
 
+pub const NO_STORED_KERNEL_SET: &str = "no stored kernel set matches the device";
+
 pub fn find_stored_current_kernel_set(
     shell: &mut dyn DeviceShell,
     state: &DeviceState,
@@ -28,7 +30,7 @@ pub fn find_stored_current_kernel_set(
         })
         .ok_or_else(|| {
             Front2Error::Store(format!(
-                "no stored kernel set matches the device: boot {boot}, vbmeta {vbmeta}"
+                "{NO_STORED_KERNEL_SET}: boot {boot}, vbmeta {vbmeta}"
             ))
         })
 }

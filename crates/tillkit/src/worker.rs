@@ -7,7 +7,8 @@ use crate::pair_session::PairSession;
 use crate::plan_review::PlanReview;
 use crate::plan_source::PlanSource;
 use front2::candidate::build_signed_candidate;
-use front2::current_pair::find_stored_current_pair;
+use front2::current_pair::{NO_STORED_PAIR, find_stored_current_pair};
+use front2::kernel::current_kernel_set::NO_STORED_KERNEL_SET;
 use front2::kernel::{KernelPlan, KernelStore, read_current_kernel_set};
 use front2::pair_backup;
 use front2::profiles;
@@ -23,7 +24,10 @@ const STATE_POLL_INTERVAL: Duration = Duration::from_secs(1);
 pub const NO_BACKUP: &str = "no backup holds the images that the device has now";
 
 pub fn is_no_backup(error: &str) -> bool {
-    error == Front2Error::Store(NO_BACKUP.into()).to_string()
+    let store = |text: &str| Front2Error::Store(text.into()).to_string();
+    error == store(NO_BACKUP)
+        || error.starts_with(&store(NO_STORED_PAIR))
+        || error.starts_with(&store(NO_STORED_KERNEL_SET))
 }
 
 pub fn run_blocking<T, F>(
@@ -212,6 +216,12 @@ pub mod tests {
     fn a_missing_backup_is_told_from_other_store_errors() {
         let missing = Front2Error::Store(NO_BACKUP.into()).to_string();
         assert!(is_no_backup(&missing));
+        let no_pair = format!("{NO_STORED_PAIR}: init_boot 11, vbmeta 22");
+        assert!(is_no_backup(&Front2Error::Store(no_pair).to_string()));
+        let no_kernel_set = format!("{NO_STORED_KERNEL_SET}: boot 11, vbmeta 22");
+        assert!(is_no_backup(&Front2Error::Store(no_kernel_set).to_string()));
+        let unsupported = Front2Error::Unsupported(NO_STORED_PAIR.into()).to_string();
+        assert!(!is_no_backup(&unsupported));
         let other = Front2Error::Store("the manifest is not valid".into()).to_string();
         assert!(!is_no_backup(&other));
         assert!(!is_no_backup(NO_BACKUP), "the bare text is no store error");

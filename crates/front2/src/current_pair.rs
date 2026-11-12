@@ -7,6 +7,8 @@ use crate::partition_target::PartitionTarget;
 use crate::profile;
 use crate::root_access::RootAccess;
 
+pub const NO_STORED_PAIR: &str = "no stored pair matches the device";
+
 pub fn find_stored_current_pair(
     shell: &mut dyn DeviceShell,
     state: &DeviceState,
@@ -28,7 +30,7 @@ pub fn find_stored_current_pair(
         })
         .ok_or_else(|| {
             Front2Error::Store(format!(
-                "no stored pair matches the device: init_boot {init_boot}, vbmeta {vbmeta}"
+                "{NO_STORED_PAIR}: init_boot {init_boot}, vbmeta {vbmeta}"
             ))
         })
 }
