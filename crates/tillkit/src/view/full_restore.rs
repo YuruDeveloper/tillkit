@@ -10,13 +10,13 @@ use crate::view::{flow, parts};
 use iced::widget::{Column, Space, column, container, row};
 use iced::{Alignment, Element, Length};
 
-const INTRODUCTION: &str = "고른 전체 백업과 다른 영역만 기기에 다시 기록해서, 기기를 그 백업과 같게 만듭니다. 위의 01 CONNECT에서 연결한 기기와 02 FULL BACKUP에서 고른 백업을 그대로 씁니다.";
+const INTRODUCTION: &str = "고른 전체 백업과 다른 영역만 기기에 다시 기록해서, 기기를 그 백업과 같게 만듭니다. 위의 01 CONNECT에서 연결한 기기와 02 FULL BACKUP에서 고른 백업을 그대로 씁니다. 설치 단계는 CLOSE FULL RESTORE를 누르면 다시 보입니다.";
 const NOT_CONNECTED: &str = "01 CONNECT에서 기기에 먼저 연결해 주세요.";
 const USER_DATA_ON: &str = "사용자 데이터(userdata)도 백업의 내용으로 되돌립니다. userdata는 다른 영역을 모두 더한 것보다 커서 시간이 오래 걸립니다.";
 const USER_DATA_OFF: &str = "사용자 데이터(userdata)는 지금 그대로 둡니다. 순정으로 부팅하면 Android가 초기화를 요구할 수 있습니다.";
 const SAME: &str = "기기가 이 전체 백업과 같습니다. 기록할 것이 없습니다.";
 const FIRST_BOOT: &str = "부팅 초기 이미지가 백업과 다릅니다. 이 영역이 일부만 기록되면 기기가 EDL 모드로도 들어오지 못할 수 있어서, TillKit은 이 영역을 기록하지 않습니다. 다른 기기의 백업이거나 펌웨어가 바뀐 기기일 수 있습니다.";
-const RESTORED: &str = "전체 백업을 기기에 기록하고 다시 읽어서 확인했습니다. Android로 다시 시작하지 않아도 됩니다. 같은 연결에서 위의 CHECK DEVICE를 눌러 설치를 새로 점검할 수 있습니다.";
+const RESTORED: &str = "전체 백업을 기기에 기록하고 다시 읽어서 확인했습니다. Android로 다시 시작하지 않아도 됩니다. CLOSE FULL RESTORE를 누르면 설치 단계로 돌아가고, 같은 연결에서 설치의 CHECK DEVICE를 새로 할 수 있습니다.";
 const RESTART_SENT: &str = "다시 시작을 요청했습니다. 기기가 부팅했는지는 TillKit이 확인하지 못하므로, 기기에서 직접 확인해 주세요.";
 const UNFINISHED: &str = "이 기기는 복원이 끝나지 않은 상태입니다. 기기를 다시 시작하거나 끄지 말고, EDL 모드로 연결한 채로 CHECK DEVICE부터 다시 진행해 주세요. 다시 비교하면 아직 백업과 다른 영역만 기록합니다.";
 

@@ -46,21 +46,27 @@ pub fn steps<'a>(app: &'a App, mut page: Column<'a, Message>) -> Column<'a, Mess
         let sentence = if open { UNFINISHED_OPEN } else { UNFINISHED };
         page = page.push(parts::caution(caption, sentence, palette));
     }
+    let restore_is_shown = app.full_restore.shown;
     let rows = InstallStage::ALL
         .into_iter()
+        .filter(|stage| !restore_is_shown || is_used_by_the_restore(*stage))
         .map(|stage| stage_row(app, stage))
         .collect();
     let mut page = page
         .push(parts::label("STEPS", palette))
         .push(parts::ruled(rows, palette));
+    if restore_is_shown {
+        return full_restore::section(app, page);
+    }
     if install.has_plan() && !app.is_busy() && !install.keeps_the_plan() {
         let start_over = Message::Install(InstallMessage::StartOver);
         page = page.push(parts::bracket("START OVER", Some(start_over), palette));
     }
-    if app.full_restore.shown {
-        page = full_restore::section(app, page);
-    }
     page
+}
+
+fn is_used_by_the_restore(stage: InstallStage) -> bool {
+    matches!(stage, InstallStage::Connect | InstallStage::Backup)
 }
 
 fn stage_row(app: &App, stage: InstallStage) -> Element<'_, Message> {
