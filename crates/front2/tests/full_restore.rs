@@ -77,8 +77,8 @@ fn a_device_that_is_the_same_as_the_backup_needs_no_write() {
 
     let storage = &mut fixture.storage.inner;
     let check = restore.compare(storage).expect("check");
-    assert!(check.is_same(), "{:?}", names(&check.different));
-    assert_eq!(check.areas, restore.areas().len());
+    assert!(check.is_same(), "{:?}", names(check.different()));
+    assert_eq!(check.areas(), restore.areas());
     restore.write(storage, &check).expect("nothing to write");
     assert!(device_calls(storage).is_empty());
 }
@@ -95,7 +95,7 @@ fn the_restore_writes_only_the_different_areas_and_selects_the_boot_lun() {
 
     let check = restore.compare(storage).expect("check");
     assert_eq!(
-        names(&check.different),
+        names(check.different()),
         [
             "ALIGN_TO_128K_1",
             "super",
@@ -105,7 +105,7 @@ fn the_restore_writes_only_the_different_areas_and_selects_the_boot_lun() {
             "gpt_main2"
         ]
     );
-    assert!(!check.boot_lun_selected);
+    assert!(!check.boot_lun_is_selected());
     assert!(device_calls(storage).is_empty());
 
     restore.write(storage, &check).expect("restore");
@@ -113,8 +113,8 @@ fn the_restore_writes_only_the_different_areas_and_selects_the_boot_lun() {
     let (commands, writes): (Vec<MockCall>, Vec<MockCall>) =
         calls.iter().partition(|call| call.is_boot_lun_command());
     assert_eq!(commands, [MockCall::SetBootLun { lun: 1 }]);
-    assert_eq!(writes.len(), check.different.len());
-    for (call, area) in writes.iter().zip(&check.different) {
+    assert_eq!(writes.len(), check.different().len());
+    for (call, area) in writes.iter().zip(check.different()) {
         assert!(
             call.writes_into(area.partition.lun, area.start_sector, area.sectors),
             "{call:?} {}",
@@ -134,7 +134,7 @@ fn letter_1365_a_changed_backup_file_stops_the_restore_before_the_first_write() 
     change_on_device(storage, &area(&restore, "ALIGN_TO_128K_1"));
     change_on_device(storage, &later);
     let check = restore.compare(storage).expect("check");
-    assert_eq!(names(&check.different), ["ALIGN_TO_128K_1", "super"]);
+    assert_eq!(names(check.different()), ["ALIGN_TO_128K_1", "super"]);
 
     let mut bytes = fs::read(&later.partition.path).expect("read the dump");
     bytes[0] ^= 1;
@@ -154,7 +154,7 @@ fn letter_1371_a_different_first_boot_image_stops_the_restore_before_the_first_w
     change_on_device(storage, &area(&restore, "super"));
     change_on_device(storage, &area(&restore, "xbl_a"));
     let check = restore.compare(storage).expect("check");
-    assert_eq!(names(&check.different), ["super", "xbl_a"]);
+    assert_eq!(names(check.different()), ["super", "xbl_a"]);
     assert_eq!(check.first_boot_images(), ["xbl_a"]);
 
     let error = restore
@@ -162,6 +162,54 @@ fn letter_1371_a_different_first_boot_image_stops_the_restore_before_the_first_w
         .expect_err("a first boot image differs");
     assert!(matches!(error, Front2Error::Unsupported(_)), "{error}");
     assert!(error.to_string().contains("xbl_a"), "{error}");
+    assert!(device_calls(storage).is_empty());
+}
+
+#[test]
+fn letter_1378_a_check_of_another_selection_of_user_data_is_rejected_before_the_first_write() {
+    let (mut fixture, backup) = backed_up(ACTIVE, 0);
+    let complete = FullBackupRestore::load(&backup, true).expect("restore");
+    let partial = FullBackupRestore::load(&backup, false).expect("restore");
+    let storage = &mut fixture.storage.inner;
+    change_on_device(storage, &area(&complete, "userdata"));
+    let check = complete.compare(storage).expect("check");
+    assert_eq!(names(check.different()), ["userdata"]);
+
+    let error = partial
+        .write(storage, &check)
+        .expect_err("the check holds userdata");
+    assert!(matches!(error, Front2Error::Unsupported(_)), "{error}");
+    assert!(device_calls(storage).is_empty());
+
+    let empty = partial.compare(storage).expect("check");
+    assert!(empty.is_same());
+    let error = complete
+        .write(storage, &empty)
+        .expect_err("the check does not hold userdata");
+    assert!(matches!(error, Front2Error::Unsupported(_)), "{error}");
+    assert!(device_calls(storage).is_empty());
+
+    complete.write(storage, &check).expect("restore");
+    assert!(complete.compare(storage).expect("second check").is_same());
+}
+
+#[test]
+fn letter_1378_a_check_of_another_backup_is_rejected_before_the_first_write() {
+    let (mut fixture, backup) = backed_up(ACTIVE, 0);
+    let (mut other_fixture, other_backup) = backed_up(ACTIVE, 0);
+    let restore = FullBackupRestore::load(&backup, true).expect("restore");
+    let other = FullBackupRestore::load(&other_backup, true).expect("restore");
+    let other_check = other
+        .compare(&mut other_fixture.storage.inner)
+        .expect("check");
+    assert!(other_check.is_same());
+
+    let storage = &mut fixture.storage.inner;
+    change_on_device(storage, &area(&restore, "super"));
+    let error = restore
+        .write(storage, &other_check)
+        .expect_err("the check is of another backup");
+    assert!(matches!(error, Front2Error::Unsupported(_)), "{error}");
     assert!(device_calls(storage).is_empty());
 }
 
@@ -181,8 +229,8 @@ fn a_backup_of_a_device_that_starts_from_lun_2_selects_lun_2() {
     assert_eq!(restore.boot_lun(), 2);
     let storage = &mut fixture.storage.inner;
     let check = restore.compare(storage).expect("check");
-    assert!(check.different.is_empty());
-    assert!(!check.boot_lun_selected);
+    assert!(check.different().is_empty());
+    assert!(!check.boot_lun_is_selected());
     restore.write(storage, &check).expect("restore");
     assert_eq!(device_calls(storage), [MockCall::SetBootLun { lun: 2 }]);
 }
@@ -204,7 +252,7 @@ fn the_restore_without_user_data_does_not_compare_userdata() {
     change_on_device(storage, &user_data);
     assert!(partial.compare(storage).expect("check").is_same());
     let check = complete.compare(storage).expect("check");
-    assert_eq!(names(&check.different), ["userdata"]);
+    assert_eq!(names(check.different()), ["userdata"]);
     assert_eq!(check.different_bytes(), user_data.partition.bytes);
 }
 
@@ -245,7 +293,7 @@ fn a_boot_lun_command_without_effect_stops_the_restore() {
     storage.start_with_boot_lun(2);
     storage.ignore_the_boot_lun_command();
     let check = restore.compare(storage).expect("check");
-    assert!(check.different.is_empty());
+    assert!(check.different().is_empty());
     assert!(!check.is_same());
     let error = restore
         .write(storage, &check)

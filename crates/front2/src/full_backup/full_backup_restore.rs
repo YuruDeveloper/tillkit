@@ -63,14 +63,19 @@ impl FullBackupRestore {
 
     pub fn compare(&self, storage: &mut dyn SectorStorage) -> Result<RestoreCheck> {
         self.require_geometry(storage)?;
-        Ok(RestoreCheck {
-            areas: self.areas.len(),
-            different: different_areas(&self.areas, storage)?,
-            boot_lun_selected: self.boot_lun_is_selected(storage)?,
-        })
+        Ok(RestoreCheck::new(
+            self.areas.clone(),
+            different_areas(&self.areas, storage)?,
+            self.boot_lun_is_selected(storage)?,
+        ))
     }
 
     pub fn write(&self, storage: &mut dyn SectorStorage, check: &RestoreCheck) -> Result<()> {
+        if check.areas() != self.areas {
+            return Err(Front2Error::Unsupported(
+                "the check is not of this backup with this selection of the user data".to_string(),
+            ));
+        }
         let first_boot_images = check.first_boot_images();
         if !first_boot_images.is_empty() {
             return Err(Front2Error::Unsupported(format!(
@@ -78,10 +83,10 @@ impl FullBackupRestore {
                 first_boot_images.join(", ")
             )));
         }
-        for area in &check.different {
+        for area in check.different() {
             area.partition.verify()?;
         }
-        for area in &check.different {
+        for area in check.different() {
             area.write_and_read_back(storage)?;
         }
         self.select_boot_lun(storage)?;
