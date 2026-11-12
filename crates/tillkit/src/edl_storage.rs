@@ -9,10 +9,6 @@ pub struct EdlStorage {
 }
 
 impl EdlStorage {
-    #[expect(
-        dead_code,
-        reason = "the GSI install worker opens it in a later change"
-    )]
     pub fn open(loader: &Path) -> Result<EdlStorage> {
         let mut log = Vec::new();
         let session = EdlSession::open(loader, &mut log).map_err(device_failure)?;

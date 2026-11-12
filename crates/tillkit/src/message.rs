@@ -1,4 +1,5 @@
 use crate::diagnosis::Diagnosis;
+use crate::install_message::InstallMessage;
 use crate::reboot_message::RebootMessage;
 use crate::root_message::RootMessage;
 use crate::screen::Screen;
@@ -25,4 +26,5 @@ pub enum Message {
     Write(WriteMessage),
     Root(RootMessage),
     Reboot(RebootMessage),
+    Install(InstallMessage),
 }

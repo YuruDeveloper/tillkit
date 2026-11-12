@@ -4,6 +4,8 @@ pub mod confirm;
 pub mod device;
 pub mod flow;
 pub mod info;
+pub mod install;
+pub mod install_confirm;
 pub mod parts;
 pub mod rabbit;
 pub mod rail;

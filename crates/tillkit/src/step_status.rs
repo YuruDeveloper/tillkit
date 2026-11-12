@@ -4,7 +4,6 @@ pub enum StepStatus {
     Running,
     Done,
     Failed,
-    Closed,
 }
 
 impl StepStatus {
@@ -14,7 +13,6 @@ impl StepStatus {
             Self::Running => "running",
             Self::Done => "done",
             Self::Failed => "failed",
-            Self::Closed => "not supported",
         }
     }
 }

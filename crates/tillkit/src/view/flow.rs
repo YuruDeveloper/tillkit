@@ -55,16 +55,33 @@ fn step_row<'a>(flow: &WriteFlow, step: WriteStep, palette: Palette) -> Element<
         parts::body(flow.origin.sentence(step), palette),
     ]
     .spacing(4);
-    let line = if flow.focus_step() == step {
+    let focused = flow.focus_step() == step;
+    stage_row(
+        step.number(),
+        text.into(),
+        focused,
+        flow.status(step),
+        palette,
+    )
+}
+
+pub fn stage_row<'a>(
+    number: &str,
+    content: Element<'a, Message>,
+    focused: bool,
+    status: StepStatus,
+    palette: Palette,
+) -> Element<'a, Message> {
+    let line = if focused {
         palette.idol
     } else {
         Color::TRANSPARENT
     };
     row![
         parts::bar(line, Length::Fixed(3.0), Length::Fill),
-        container(parts::value(step.number(), palette)).width(Length::Fixed(28.0)),
-        container(text).width(Length::Fill),
-        container(status_word(flow.status(step), palette)).width(Length::Fixed(STATUS_WIDTH)),
+        container(parts::value(number.to_string(), palette)).width(Length::Fixed(28.0)),
+        container(content).width(Length::Fill),
+        container(status_word(status, palette)).width(Length::Fixed(STATUS_WIDTH)),
     ]
     .spacing(12)
     .height(Length::Shrink)
@@ -81,7 +98,7 @@ fn status_word<'a>(status: StepStatus, palette: Palette) -> Element<'a, Message>
         .spacing(6)
         .align_y(Alignment::Center)
         .into(),
-        StepStatus::Waiting | StepStatus::Closed => parts::label(status.word(), palette),
+        StepStatus::Waiting => parts::label(status.word(), palette),
         StepStatus::Done => parts::value(status.word(), palette),
     }
 }

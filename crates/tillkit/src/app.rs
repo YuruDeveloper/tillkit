@@ -3,6 +3,9 @@ use crate::data_paths::DataPaths;
 use crate::diagnosis::Diagnosis;
 use crate::folder_choice::FolderChoice;
 use crate::grain;
+use crate::install_device::DeviceSlot;
+use crate::install_flow::InstallFlow;
+use crate::install_message::InstallMessage;
 use crate::launch;
 use crate::message::Message;
 use crate::palette::Palette;
@@ -13,15 +16,17 @@ use crate::support_words;
 use crate::view;
 use crate::worker::{self, run_blocking};
 use crate::write_flow::WriteFlow;
-use front2::gsi::backup_manifest::BACKUP_MANIFEST_FILE;
 use front2::kernel::{KernelSet, KernelStore};
 use front2::profiles::toss_front2;
 use front2::{DeviceProfile, PairKind, PairManifest, PairStore, SupportOverride};
 use iced::widget::image::Handle;
-use iced::{Element, Task, Theme};
+use iced::{Element, Subscription, Task, Theme};
 use std::path::PathBuf;
+use std::time::Duration;
 
 type Outcome<T> = Result<T, String>;
+
+const PROGRESS_INTERVAL: Duration = Duration::from_millis(500);
 
 pub struct App {
     pub palette: Palette,
@@ -40,11 +45,11 @@ pub struct App {
     pub confirmation: Option<Confirmation>,
     pub backup_error: Option<String>,
     pub store_error: Option<String>,
-    pub full_backup: Option<PathBuf>,
-    pub full_backup_found: bool,
     pub pairs: Vec<PairManifest>,
     pub kernel_sets: Vec<KernelSet>,
     pub write: WriteFlow,
+    pub install: InstallFlow,
+    pub device: DeviceSlot,
     pub magisk_apk: Option<PathBuf>,
     pub reboot: RebootFlow,
 }
@@ -95,11 +100,11 @@ impl App {
             confirmation: None,
             backup_error: None,
             store_error: None,
-            full_backup: None,
-            full_backup_found: false,
             pairs: Vec::new(),
             kernel_sets: Vec::new(),
             write: WriteFlow::default(),
+            install: InstallFlow::default(),
+            device: DeviceSlot::default(),
             magisk_apk: None,
             reboot: RebootFlow::default(),
         };
@@ -116,7 +121,14 @@ impl App {
     }
 
     pub fn is_busy(&self) -> bool {
-        self.activity.is_some() || self.write.running.is_some()
+        self.activity.is_some() || self.write.running.is_some() || self.install.running.is_some()
+    }
+
+    pub fn subscription(&self) -> Subscription<Message> {
+        if self.install.running.is_none() {
+            return Subscription::none();
+        }
+        iced::time::every(PROGRESS_INTERVAL).map(|_| Message::Install(InstallMessage::Tick))
     }
 
     pub fn update(&mut self, message: Message) -> Task<Message> {
@@ -139,6 +151,7 @@ impl App {
             Message::Write(message) => return self.update_write(message),
             Message::Root(message) => return self.update_root(message),
             Message::Reboot(message) => return self.update_reboot(message),
+            Message::Install(message) => return self.update_install(message),
         }
         Task::none()
     }
@@ -221,6 +234,8 @@ impl App {
             Some(Confirmation::Write) => self.stage_plan(),
             Some(Confirmation::Reboot) => self.reboot(),
             Some(Confirmation::RebootTo) => self.reboot_to(),
+            Some(Confirmation::InstallWrite) => self.install_write(),
+            Some(Confirmation::InstallRestart) => self.install_restart(),
             None => Task::none(),
         }
     }
@@ -250,6 +265,7 @@ impl App {
         self.screen = screen;
         if matches!(screen, Screen::Backup | Screen::Write) && !self.is_busy() {
             self.reload_backups();
+            self.find_full_backup();
         }
     }
 
@@ -282,7 +298,7 @@ impl App {
     }
 
     pub fn can_choose_data_folder(&self) -> bool {
-        !self.is_busy() && !self.write.has_result()
+        !self.is_busy() && !self.write.has_result() && !self.install.has_plan()
     }
 
     fn pick_data_folder(&mut self) -> Task<Message> {
@@ -311,15 +327,6 @@ impl App {
             return Task::none();
         }
         Task::perform(pick_full_backup_folder(), Message::FullBackupPicked)
-    }
-
-    fn full_backup_picked(&mut self, folder: Option<PathBuf>) {
-        let (Some(folder), false) = (folder, self.is_busy()) else {
-            return;
-        };
-        self.full_backup_found = folder.join(BACKUP_MANIFEST_FILE).is_file();
-        self.full_backup = Some(folder);
-        self.write.full_backup_changed();
     }
 }
 

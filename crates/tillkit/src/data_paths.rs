@@ -36,6 +36,10 @@ impl DataPaths {
         self.root.join("install-plans")
     }
 
+    pub fn full_backups(&self) -> PathBuf {
+        self.root.join("full-backups")
+    }
+
     pub fn gsi_candidates(&self) -> PathBuf {
         self.root.join("gsi")
     }
