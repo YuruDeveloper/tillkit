@@ -1378,7 +1378,7 @@ impl EdlSession {
         let lines = qdl::firehose_get_storage_info_log(&mut self.dev, lun).map_err(|error| {
             EdlError::Session(format!("Storage info of LUN {lun} failed: {error}"))
         })?;
-        UfsStorageInfo::parse(&lines)
+        UfsStorageInfo::parse(&lines, lun)
     }
 
     /// Erase a sector range. Used by the Flash Partitions wizard when

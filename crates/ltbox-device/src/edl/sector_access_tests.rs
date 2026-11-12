@@ -325,7 +325,11 @@ fn refused_boot_lun_selection_is_an_error() {
 fn storage_info_parses_the_log_lines_of_the_response() {
     let (mut session, commands, _) = session_with(
         &[],
-        &["UFS Logical Block Size: 0xc", "UFS LU Total Blocks: 0x800"],
+        &[
+            "UFS Current LUN Number: = 0x1",
+            "UFS Logical Block Size: 0xc",
+            "UFS LU Total Blocks: 0x800",
+        ],
     );
 
     let info = session.storage_info(1).expect("storage info");
@@ -344,7 +348,11 @@ fn storage_info_parses_the_log_lines_of_the_response() {
 fn storage_info_with_an_unknown_block_size_is_an_error() {
     let (mut session, _, _) = session_with(
         &[],
-        &["UFS Logical Block Size: 0x9", "UFS LU Total Blocks: 0x800"],
+        &[
+            "UFS Current LUN Number: = 0x1",
+            "UFS Logical Block Size: 0x9",
+            "UFS LU Total Blocks: 0x800",
+        ],
     );
 
     assert!(matches!(
@@ -361,4 +369,22 @@ fn refused_storage_info_is_an_error() {
     );
 
     assert!(session_error(session.storage_info(9)).contains("LUN 9"));
+}
+
+#[test]
+fn storage_info_rejects_the_log_of_another_lun() {
+    let (mut session, commands, _) = session_with(
+        &[],
+        &[
+            "UFS Current LUN Number: = 0x0",
+            "UFS Logical Block Size: 0xc",
+            "UFS LU Total Blocks: 0x66d000",
+        ],
+    );
+
+    assert!(matches!(
+        session.storage_info(1),
+        Err(EdlError::StorageInfo(message)) if message.contains("LUN 1 was requested")
+    ));
+    assert_eq!(recorded(&commands), ["getstorageinfo 1"]);
 }
