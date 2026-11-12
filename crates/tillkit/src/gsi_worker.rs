@@ -4,7 +4,7 @@ use crate::full_backup_store;
 use crate::gsi_review::GsiReview;
 use crate::install_review::InstallReview;
 use front2::digest::sha256_file;
-use front2::gsi::{GsiCandidate, GsiCandidateRequest, install_inputs};
+use front2::gsi::{GsiCandidate, GsiCandidateRequest, install_inputs, require_slot_a_active};
 use front2::install::{InstallPlan, PLAN_FILE};
 use front2::{DeviceProfile, Front2Error, Result};
 use serde::Serialize;
@@ -14,6 +14,7 @@ use std::path::{Path, PathBuf};
 const CANDIDATE_PREFIX: &str = "gsi-";
 const PLAN_PREFIX: &str = "install-";
 const BACKUP_NOT_READ: &str = "이 이미지로 만든 계획이 쓰던 전체 백업을 읽지 못했습니다. 그 폴더를 읽을 수 있게 한 뒤에 MAKE PLAN을 다시 누르거나, USE EXISTING BACKUP으로 쓸 전체 백업을 직접 골라 주세요.";
+const BACKUP_NOT_STOCK: &str = "이 전체 백업으로는 설치 계획을 만들 수 없습니다. 설치는 부팅 슬롯을 A에서 B로 바꾸는데, 이 백업을 만든 기기는 슬롯 A로 부팅하는 상태가 아니었습니다. 이미 GSI를 설치한 기기에서 만든 백업이면 이렇게 됩니다. 순정 상태에서 만들어 둔 전체 백업이 있으면 USE EXISTING BACKUP으로 그 폴더를 골라 주세요.";
 
 pub fn prepare(
     paths: &DataPaths,
@@ -25,9 +26,19 @@ pub fn prepare(
     if let Some(stored) = stored(paths, backup, backup_is_found, gsi_image)? {
         return Ok(stored);
     }
+    told_as_not_stock(require_slot_a_active(backup))?;
     let review = build_candidate(paths, backup, gsi_image, profile)?;
     let planned = plan_install(paths, &review, backup, profile);
     removed_on_failure(&review.directory, planned)
+}
+
+fn told_as_not_stock(result: Result<()>) -> Result<()> {
+    match result {
+        Err(Front2Error::Unsupported(reason)) => {
+            Err(Front2Error::Plan(format!("{BACKUP_NOT_STOCK} ({reason})")))
+        }
+        other => other,
+    }
 }
 
 fn removed_on_failure<T>(candidate_directory: &Path, result: Result<T>) -> Result<T> {
@@ -212,10 +223,23 @@ mod tests {
             )
             .is_err()
         );
-        let left: Vec<_> = std::fs::read_dir(paths.gsi_candidates())
-            .expect("the store exists")
-            .collect();
-        assert!(left.is_empty());
+        let left = std::fs::read_dir(paths.gsi_candidates()).map_or(0, Iterator::count);
+        assert_eq!(left, 0);
+    }
+
+    #[test]
+    fn a_backup_that_does_not_start_from_slot_a_is_told_in_plain_words() {
+        let reason = "LUN 0: vbmeta_system_a is not active".to_string();
+        let told = told_as_not_stock(Err(Front2Error::Unsupported(reason.clone())))
+            .expect_err("the backup is not used");
+        assert!(matches!(told, Front2Error::Plan(_)), "{told}");
+        assert!(told.to_string().contains(BACKUP_NOT_STOCK));
+        assert!(told.to_string().contains(&reason));
+
+        let other = told_as_not_stock(Err(Front2Error::Verification("changed".into())))
+            .expect_err("other failures stay as they are");
+        assert!(matches!(other, Front2Error::Verification(_)), "{other}");
+        assert!(told_as_not_stock(Ok(())).is_ok());
     }
 
     #[test]
