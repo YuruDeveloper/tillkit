@@ -60,8 +60,13 @@ impl<'run> InstallExecutor<'run> {
         outcome.map_err(|err| self.progress.halt(err))
     }
 
-    pub fn run_write_steps(&mut self, write: &WriteApproval) -> Result<()> {
+    pub fn run_write_steps(
+        &mut self,
+        write: &WriteApproval,
+        data_wipe: &DataWipeApproval,
+    ) -> Result<()> {
         self.require_writes_open(write)?;
+        data_wipe.require(self.plan.plan_sha256())?;
         if !self.next_step_needs_only_write_approval() {
             return Err(Front2Error::Plan(
                 "no step that needs only the write approval is left".into(),

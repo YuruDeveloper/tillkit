@@ -91,7 +91,7 @@ fn assert_refuses_everything(
     let (write, data_wipe, restart) = approvals(plan_sha256);
     let before = calls.borrow().clone();
     rejection(executor.run_preflight(), STOPPED);
-    rejection(executor.run_write_steps(&write), STOPPED);
+    rejection(executor.run_write_steps(&write, &data_wipe), STOPPED);
     rejection(executor.run_data_wipe_step(&write, &data_wipe), STOPPED);
     rejection(executor.request_restart(&restart), STOPPED);
     assert_eq!(*calls.borrow(), before);
@@ -113,7 +113,9 @@ fn the_whole_flow_writes_every_step_and_restarts_only_with_the_restart_approval(
     assert_eq!(preflight.restore_files.len(), WRITE_STEP_COUNT + 1);
     assert!(preflight.restore_files.iter().all(DigestCheck::matches));
 
-    executor.run_write_steps(&write).expect("write steps");
+    executor
+        .run_write_steps(&write, &data_wipe)
+        .expect("write steps");
     assert_eq!(
         executor.progress().verified_steps(),
         STEPS_BEFORE_THE_DATA_WIPE
@@ -179,7 +181,9 @@ fn a_new_executor_continues_with_the_progress_record_of_the_one_before() {
         .expect("the record is of this plan");
     rejection(second.run_preflight(), "already ran");
     assert_eq!(fixture.calls.borrow().len(), reads_of_the_preflight);
-    second.run_write_steps(&write).expect("write steps");
+    second
+        .run_write_steps(&write, &data_wipe)
+        .expect("write steps");
     let written = second.progress().clone();
 
     let mut third = InstallExecutor::with_progress(&plan, &mut fixture.storage, written)
@@ -219,7 +223,9 @@ fn the_misc_step_changes_only_the_first_sector() {
     let original = pattern("misc-original", PARTITION_SECTORS as usize * SECTOR);
     let mut executor = InstallExecutor::new(&plan, &mut fixture.storage);
     executor.run_preflight().expect("preflight");
-    executor.run_write_steps(&write).expect("write steps");
+    executor
+        .run_write_steps(&write, &data_wipe)
+        .expect("write steps");
     executor
         .run_data_wipe_step(&write, &data_wipe)
         .expect("data wipe request");
@@ -540,7 +546,7 @@ fn writes_are_refused_without_a_passed_preflight() {
     let (write, data_wipe, restart) = approvals(plan.plan_sha256());
     let mut executor = InstallExecutor::new(&plan, &mut fixture.storage);
     let fragment = "no passed preflight";
-    rejection(executor.run_write_steps(&write), fragment);
+    rejection(executor.run_write_steps(&write, &data_wipe), fragment);
     rejection(executor.run_data_wipe_step(&write, &data_wipe), fragment);
     rejection(executor.request_restart(&restart), fragment);
     assert!(fixture.calls.borrow().is_empty());
@@ -614,7 +620,7 @@ fn preflight_stops_on_a_candidate_file_that_changed_after_the_plan() {
 fn letter_1157_a_candidate_changed_after_the_preflight_is_refused_before_its_write() {
     let mut fixture = InstallFixture::standard();
     let plan = fixture.stored_plan();
-    let (write, _, _) = approvals(plan.plan_sha256());
+    let (write, data_wipe, _) = approvals(plan.plan_sha256());
     let unchanged = step_named(&plan, "boot_b");
     let changed = step_named(&plan, "dtbo_b");
     let StepSource::CandidateFile { file } = &changed.source else {
@@ -628,7 +634,7 @@ fn letter_1157_a_candidate_changed_after_the_preflight_is_refused_before_its_wri
     fs::write(&path, &data).expect("changed candidate file");
 
     let err = rejection(
-        executor.run_write_steps(&write),
+        executor.run_write_steps(&write, &data_wipe),
         "dtbo_b: the source has SHA-256",
     );
     assert!(matches!(err, Front2Error::Verification(_)));
@@ -686,7 +692,7 @@ fn letter_1157_preflight_stops_on_a_userdata_backup_file_with_another_length() {
 fn a_write_that_is_acknowledged_but_ignored_stops_the_install() {
     let mut fixture = InstallFixture::standard();
     let plan = fixture.stored_plan();
-    let (write, _, _) = approvals(plan.plan_sha256());
+    let (write, data_wipe, _) = approvals(plan.plan_sha256());
     let failing = step_named(&plan, "recovery_b");
     let next = step_named(&plan, "vendor_boot_b");
     fixture
@@ -694,7 +700,10 @@ fn a_write_that_is_acknowledged_but_ignored_stops_the_install() {
         .ignore_writes_that_cover(failing.lun, failing.start_sector);
     let mut executor = InstallExecutor::new(&plan, &mut fixture.storage);
     executor.run_preflight().expect("preflight");
-    let err = rejection(executor.run_write_steps(&write), "recovery_b: the readback");
+    let err = rejection(
+        executor.run_write_steps(&write, &data_wipe),
+        "recovery_b: the readback",
+    );
     assert!(matches!(err, Front2Error::Verification(_)));
     let progress = executor.progress().clone();
     assert_eq!(progress.verified_steps(), 3);
@@ -713,7 +722,7 @@ fn a_write_that_is_acknowledged_but_ignored_stops_the_install() {
 fn a_write_with_one_wrong_byte_stops_the_install() {
     let mut fixture = InstallFixture::with_super_sectors(LARGE_SUPER_SECTORS);
     let plan = fixture.stored_plan();
-    let (write, _, _) = approvals(plan.plan_sha256());
+    let (write, data_wipe, _) = approvals(plan.plan_sha256());
     let failing = step_named(&plan, "super");
     let next = step_named(&plan, "metadata");
     fixture
@@ -721,7 +730,10 @@ fn a_write_with_one_wrong_byte_stops_the_install() {
         .corrupt_writes_that_cover(failing.lun, failing.start_sector + CHUNK_SECTORS + 2);
     let mut executor = InstallExecutor::new(&plan, &mut fixture.storage);
     executor.run_preflight().expect("preflight");
-    rejection(executor.run_write_steps(&write), "super: the readback");
+    rejection(
+        executor.run_write_steps(&write, &data_wipe),
+        "super: the readback",
+    );
     assert_eq!(executor.progress().verified_steps(), 7);
     assert_refuses_everything(&mut executor, plan.plan_sha256(), &fixture.calls);
     assert_eq!(writes_into(&fixture.calls, &failing), 2);
@@ -740,7 +752,7 @@ fn a_write_with_one_wrong_byte_stops_the_install() {
 fn a_short_readback_stops_the_install() {
     let mut fixture = InstallFixture::standard();
     let plan = fixture.stored_plan();
-    let (write, _, _) = approvals(plan.plan_sha256());
+    let (write, data_wipe, _) = approvals(plan.plan_sha256());
     let failing = step_named(&plan, "dtbo_b");
     let next = step_named(&plan, "init_boot_b");
     fixture
@@ -749,7 +761,7 @@ fn a_short_readback_stops_the_install() {
     let mut executor = InstallExecutor::new(&plan, &mut fixture.storage);
     executor.run_preflight().expect("preflight");
     let err = rejection(
-        executor.run_write_steps(&write),
+        executor.run_write_steps(&write, &data_wipe),
         "the read of 16 sectors at sector",
     );
     assert!(matches!(err, Front2Error::Verification(_)));
@@ -762,7 +774,7 @@ fn a_short_readback_stops_the_install() {
 fn a_read_error_during_the_readback_stops_the_install() {
     let mut fixture = InstallFixture::standard();
     let plan = fixture.stored_plan();
-    let (write, _, _) = approvals(plan.plan_sha256());
+    let (write, data_wipe, _) = approvals(plan.plan_sha256());
     let failing = step_named(&plan, "vbmeta_system_b");
     let next = step_named(&plan, "vbmeta_b");
     fixture
@@ -770,7 +782,10 @@ fn a_read_error_during_the_readback_stops_the_install() {
         .fail_reads_after_a_write_to(failing.lun, failing.start_sector);
     let mut executor = InstallExecutor::new(&plan, &mut fixture.storage);
     executor.run_preflight().expect("preflight");
-    let err = rejection(executor.run_write_steps(&write), "mock: read error");
+    let err = rejection(
+        executor.run_write_steps(&write, &data_wipe),
+        "mock: read error",
+    );
     assert!(matches!(err, Front2Error::Shell(_)));
     let progress = executor.progress().clone();
     assert_eq!(progress.verified_steps(), 5);
@@ -784,13 +799,13 @@ fn a_read_error_during_the_readback_stops_the_install() {
 fn a_boot_wlun_that_still_gives_lun_1_after_the_command_stops_the_install() {
     let mut fixture = InstallFixture::standard();
     let plan = fixture.stored_plan();
-    let (write, _, _) = approvals(plan.plan_sha256());
+    let (write, data_wipe, _) = approvals(plan.plan_sha256());
     let misc = step_named(&plan, "misc");
     fixture.storage.ignore_the_boot_lun_command();
     let mut executor = InstallExecutor::new(&plan, &mut fixture.storage);
     executor.run_preflight().expect("preflight");
     let err = rejection(
-        executor.run_write_steps(&write),
+        executor.run_write_steps(&write, &data_wipe),
         "after the boot LUN command",
     );
     assert!(matches!(err, Front2Error::Verification(_)));
@@ -807,6 +822,25 @@ fn a_boot_wlun_that_still_gives_lun_1_after_the_command_stops_the_install() {
 }
 
 #[test]
+fn doc_1066_no_write_starts_without_the_data_wipe_approval() {
+    let mut fixture = InstallFixture::standard();
+    let plan = fixture.stored_plan();
+    let (write, data_wipe, _) = approvals(plan.plan_sha256());
+    let (_, other_data_wipe, _) = approvals(OTHER_PLAN_SHA256);
+    let mut executor = InstallExecutor::new(&plan, &mut fixture.storage);
+    executor.run_preflight().expect("preflight");
+    rejection(
+        executor.run_write_steps(&write, &other_data_wipe),
+        "the user data wipe approval is for plan",
+    );
+    assert_eq!(count(&fixture.calls, MockCall::changes_the_device), 0);
+    assert_eq!(executor.progress().halted, None);
+    executor
+        .run_write_steps(&write, &data_wipe)
+        .expect("write steps");
+}
+
+#[test]
 fn the_misc_step_stays_closed_without_the_data_wipe_approval() {
     let mut fixture = InstallFixture::standard();
     let plan = fixture.stored_plan();
@@ -815,9 +849,11 @@ fn the_misc_step_stays_closed_without_the_data_wipe_approval() {
     let misc = step_named(&plan, "misc");
     let mut executor = InstallExecutor::new(&plan, &mut fixture.storage);
     executor.run_preflight().expect("preflight");
-    executor.run_write_steps(&write).expect("write steps");
+    executor
+        .run_write_steps(&write, &data_wipe)
+        .expect("write steps");
     rejection(
-        executor.run_write_steps(&write),
+        executor.run_write_steps(&write, &data_wipe),
         "no step that needs only the write approval is left",
     );
     rejection(
@@ -845,7 +881,9 @@ fn the_restart_stays_closed_without_a_restart_approval_for_this_plan() {
     let (_, _, other_restart) = approvals(OTHER_PLAN_SHA256);
     let mut executor = InstallExecutor::new(&plan, &mut fixture.storage);
     executor.run_preflight().expect("preflight");
-    executor.run_write_steps(&write).expect("write steps");
+    executor
+        .run_write_steps(&write, &data_wipe)
+        .expect("write steps");
     executor
         .run_data_wipe_step(&write, &data_wipe)
         .expect("data wipe request");
@@ -858,7 +896,7 @@ fn the_restart_stays_closed_without_a_restart_approval_for_this_plan() {
     executor.request_restart(&restart).expect("restart");
     assert_eq!(count(&fixture.calls, MockCall::is_reset), 1);
     rejection(executor.request_restart(&restart), STOPPED);
-    rejection(executor.run_write_steps(&write), STOPPED);
+    rejection(executor.run_write_steps(&write, &data_wipe), STOPPED);
     assert_eq!(count(&fixture.calls, MockCall::is_reset), 1);
 }
 
@@ -871,9 +909,11 @@ fn approvals_for_another_plan_are_refused() {
     let mut executor = InstallExecutor::new(&plan, &mut fixture.storage);
     executor.run_preflight().expect("preflight");
     let fragment = "the write approval is for plan";
-    rejection(executor.run_write_steps(&other_write), fragment);
+    rejection(executor.run_write_steps(&other_write, &data_wipe), fragment);
     assert_eq!(count(&fixture.calls, MockCall::changes_the_device), 0);
-    executor.run_write_steps(&write).expect("write steps");
+    executor
+        .run_write_steps(&write, &data_wipe)
+        .expect("write steps");
     let before = count(&fixture.calls, MockCall::is_write);
     rejection(
         executor.run_data_wipe_step(&other_write, &data_wipe),
@@ -894,7 +934,9 @@ fn a_restart_after_a_failed_step_is_refused() {
         .ignore_writes_that_cover(misc.lun, misc.start_sector);
     let mut executor = InstallExecutor::new(&plan, &mut fixture.storage);
     executor.run_preflight().expect("preflight");
-    executor.run_write_steps(&write).expect("write steps");
+    executor
+        .run_write_steps(&write, &data_wipe)
+        .expect("write steps");
     rejection(
         executor.run_data_wipe_step(&write, &data_wipe),
         "misc: the readback",
@@ -911,7 +953,9 @@ fn the_executor_sends_no_restart_on_its_own_or_when_it_is_dropped() {
     let (write, data_wipe, _) = approvals(plan.plan_sha256());
     let mut executor = InstallExecutor::new(&plan, &mut fixture.storage);
     executor.run_preflight().expect("preflight");
-    executor.run_write_steps(&write).expect("write steps");
+    executor
+        .run_write_steps(&write, &data_wipe)
+        .expect("write steps");
     executor
         .run_data_wipe_step(&write, &data_wipe)
         .expect("data wipe request");
@@ -922,14 +966,17 @@ fn the_executor_sends_no_restart_on_its_own_or_when_it_is_dropped() {
 
     let mut fixture = InstallFixture::standard();
     let plan = fixture.stored_plan();
-    let (write, _, _) = approvals(plan.plan_sha256());
+    let (write, data_wipe, _) = approvals(plan.plan_sha256());
     let failing = step_named(&plan, "boot_b");
     fixture
         .storage
         .ignore_writes_that_cover(failing.lun, failing.start_sector);
     let mut executor = InstallExecutor::new(&plan, &mut fixture.storage);
     executor.run_preflight().expect("preflight");
-    rejection(executor.run_write_steps(&write), "boot_b: the readback");
+    rejection(
+        executor.run_write_steps(&write, &data_wipe),
+        "boot_b: the readback",
+    );
     let before = fixture.calls.borrow().clone();
     drop(executor);
     assert_eq!(*fixture.calls.borrow(), before);
@@ -945,7 +992,9 @@ fn a_failed_restart_command_is_recorded_and_not_sent_again() {
     fixture.storage.fail_the_reset_command();
     let mut executor = InstallExecutor::new(&plan, &mut fixture.storage);
     executor.run_preflight().expect("preflight");
-    executor.run_write_steps(&write).expect("write steps");
+    executor
+        .run_write_steps(&write, &data_wipe)
+        .expect("write steps");
     executor
         .run_data_wipe_step(&write, &data_wipe)
         .expect("data wipe request");
