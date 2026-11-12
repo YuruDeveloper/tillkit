@@ -1,0 +1,24 @@
+UFS fInitialized: 0x1
+UFS Current LUN Number: = 0x1
+UFS Total Active LU: 0x6
+UFS wManufacturerID: 0xa25
+UFS Boot Partition Enabled: 0x1
+UFS Raw Device Capacity: = 0x3ba0000
+UFS Min Block Size: 0x8
+UFS Erase Block Size: 0x2000
+UFS Allocation Unit Size: 0x1
+UFS RPMB ReadWrite Size: = 0x18
+UFS Number of Allocation Uint for This LU: 0x6
+UFS Logical Block Size: 0xc
+UFS Provisioning Type: 0x2
+UFS LU Write Protect: 0x1
+UFS Boot LUN ID: = 0x1
+UFS Memory Type: 0x3
+UFS LU Total Blocks: 0x800
+UFS Supported Memory Types: 0x807f
+UFS LUN Enable Bitmask: 0x3f
+UFS Logical Block Count: 0x800
+UFS bConfigDescrLock: 0x0
+UFS iManufacturerName String Index: 0x1
+UFS iProductName String Index: 0x2
+UFS iOemID String Index: 0x3

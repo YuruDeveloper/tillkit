@@ -20,8 +20,10 @@ mod partition_flash;
 mod rawprogram;
 #[cfg(test)]
 mod test_support;
+mod ufs_storage_info;
 pub use firmware_xml::collect_firmware_xmls_for_flash;
 pub use partition_flash::{PartitionFlash, PartitionFlashError, PartitionOperation};
+pub use ufs_storage_info::UfsStorageInfo;
 
 use crate::driver::{QcomDriverMode, qcom_driver_mode};
 use ltbox_core::i18n::tr;
@@ -253,6 +255,8 @@ pub enum EdlError {
     PartitionNotFound(String),
     #[error("Partition {0} resolves to multiple LUNs (ambiguous; cannot target one)")]
     AmbiguousPartitionLun(String),
+    #[error("Storage info: {0}")]
+    StorageInfo(String),
     #[error("IO error: {0}")]
     Io(#[from] std::io::Error),
 }
