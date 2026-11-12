@@ -8,14 +8,15 @@ use crate::step_status::StepStatus;
 use crate::view::{flow, install_resume, parts};
 use iced::widget::{Column, Row, Space, column, container, row};
 use iced::{Alignment, Element, Length};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 pub const SPEC: &str = "EDL · FULL BACKUP FIRST · ERASES USER DATA";
 pub const INTRODUCTION: &str = "GSI 이미지를 기기에 설치합니다. 기기를 EDL 모드로 연결하고, 기기 전체를 PC에 백업한 뒤에 기록합니다. 설치하면 기기의 사용자 데이터가 지워집니다. 기기에 기록하기 전에 한 번 더 확인을 받습니다.";
 const HOW_TO_CONNECT: &str = "기기가 Android로 켜져 있으면 ADVANCED 화면에서 EDL 모드로 다시 시작할 수 있습니다. 로더 파일은 이 기기의 Firehose 로더 파일입니다.";
 const NOT_CHOSEN: &str = "고르지 않음";
 const NOT_FOUND: &str = "아직 없음";
-const NO_FULL_BACKUP: &str = "고른 폴더는 설치에 쓸 수 있는 전체 백업이 아닙니다. 다른 폴더를 고르거나, 전체 백업을 새로 만들어 주세요.";
+const USE_EXISTING_BACKUP: &str = "USE EXISTING BACKUP";
+const NO_FULL_BACKUP: &str = "고른 폴더는 전체 백업이 아닙니다. USE EXISTING BACKUP은 이미 만들어 둔 전체 백업을 고르는 단추입니다. 새로 만들 때는 저장할 폴더를 고르지 않고 MAKE FULL BACKUP을 누릅니다.";
 const SINGLE_READ: &str = "크기 때문에 한 번만 읽어서, 다시 읽어 대조하지 못한 영역";
 const CHECKED: &str = "기록할 영역의 내용이 이 계획과 맞습니다.";
 const READY: &str = "기록을 시작할 수 있습니다.";
@@ -122,9 +123,13 @@ fn backup_details(app: &App) -> Vec<Element<'_, Message>> {
         "FOLDER",
         install.backup.as_ref(),
         NOT_FOUND,
-        parts::bracket("CHOOSE FOLDER", choose, palette),
+        parts::bracket(USE_EXISTING_BACKUP, choose, palette),
         palette,
     )];
+    if install.backup.is_none() {
+        let store = app.paths.full_backups();
+        details.push(parts::note(new_backup_place(&store), palette));
+    }
     if let Some(reason) = &install.refused_backup {
         details.push(parts::caution("NOT A FULL BACKUP", NO_FULL_BACKUP, palette));
         details.push(parts::value(reason.clone(), palette));
@@ -134,6 +139,13 @@ fn backup_details(app: &App) -> Vec<Element<'_, Message>> {
         details.push(parts::note(format!("{SINGLE_READ}: {names}"), palette));
     }
     details
+}
+
+pub fn new_backup_place(store: &Path) -> String {
+    format!(
+        "새 전체 백업은 TillKit이 {} 아래에 저장합니다. 이미 만들어 둔 전체 백업을 쓰려면 {USE_EXISTING_BACKUP}으로 그 폴더를 고릅니다.",
+        store.display()
+    )
 }
 
 fn check_details(app: &App) -> Vec<Element<'_, Message>> {
@@ -292,5 +304,14 @@ mod tests {
         assert_eq!(filled_parts(101, 100), METER_PARTS);
         assert_eq!(filled_parts(5, 0), 0, "no known total");
         assert_eq!(gibibytes(1_610_612_736), "1.50 GiB");
+    }
+
+    #[test]
+    fn the_note_of_a_new_backup_tells_its_folder_and_the_button_for_an_old_one() {
+        let store = Path::new("data").join("full-backups");
+        let note = new_backup_place(&store);
+        assert!(note.contains(&store.display().to_string()));
+        assert!(note.contains(USE_EXISTING_BACKUP));
+        assert!(NO_FULL_BACKUP.contains(USE_EXISTING_BACKUP));
     }
 }

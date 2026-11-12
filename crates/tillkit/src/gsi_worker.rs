@@ -4,15 +4,17 @@ use crate::full_backup_store;
 use crate::gsi_review::GsiReview;
 use crate::install_review::InstallReview;
 use front2::digest::sha256_file;
-use front2::gsi::{GsiCandidate, GsiCandidateRequest, install_inputs};
+use front2::gsi::{GsiCandidate, GsiCandidateRequest, install_inputs, require_slot_a_active};
 use front2::install::{InstallPlan, PLAN_FILE};
 use front2::{DeviceProfile, Front2Error, Result};
+use serde::Serialize;
 use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
 
 const CANDIDATE_PREFIX: &str = "gsi-";
 const PLAN_PREFIX: &str = "install-";
-const BACKUP_NOT_READ: &str = "이 이미지로 만든 계획이 쓰던 전체 백업을 읽지 못했습니다. 그 폴더를 읽을 수 있게 한 뒤에 MAKE PLAN을 다시 누르거나, CHOOSE FOLDER로 쓸 전체 백업을 직접 골라 주세요.";
+const BACKUP_NOT_READ: &str = "이 이미지로 만든 계획이 쓰던 전체 백업을 읽지 못했습니다. 그 폴더를 읽을 수 있게 한 뒤에 MAKE PLAN을 다시 누르거나, USE EXISTING BACKUP으로 쓸 전체 백업을 직접 골라 주세요.";
+const BACKUP_SLOTS_UNSUPPORTED: &str = "이 전체 백업으로는 설치 계획을 만들 수 없습니다. 설치는 부팅 슬롯을 A에서 B로 바꾸는데, 이 백업의 파티션 표는 그 전환을 할 수 있는 상태(슬롯 A만 활성)와 맞지 않습니다. 예를 들어 이미 GSI를 설치한 기기에서 만든 백업이 그렇습니다. 순정 상태에서 만들어 둔 전체 백업이 있으면 USE EXISTING BACKUP으로 그 폴더를 골라 주세요.";
 
 pub fn prepare(
     paths: &DataPaths,
@@ -24,8 +26,26 @@ pub fn prepare(
     if let Some(stored) = stored(paths, backup, backup_is_found, gsi_image)? {
         return Ok(stored);
     }
+    told_as_unsupported_slots(require_slot_a_active(backup))?;
     let review = build_candidate(paths, backup, gsi_image, profile)?;
-    plan_install(paths, &review, backup, profile)
+    let planned = plan_install(paths, &review, backup, profile);
+    removed_on_failure(&review.directory, planned)
+}
+
+fn told_as_unsupported_slots(result: Result<()>) -> Result<()> {
+    match result {
+        Err(Front2Error::Unsupported(reason)) => Err(Front2Error::Plan(format!(
+            "{BACKUP_SLOTS_UNSUPPORTED} ({reason})"
+        ))),
+        other => other,
+    }
+}
+
+fn removed_on_failure<T>(candidate_directory: &Path, result: Result<T>) -> Result<T> {
+    if result.is_err() {
+        let _ = std::fs::remove_dir_all(candidate_directory);
+    }
+    result
 }
 
 fn stored(
@@ -124,13 +144,25 @@ fn build_candidate(
         rollback_evidence: &[],
     };
     let candidate = GsiCandidate::build(&request)?;
+    let review = reviewed_candidate(directory.clone(), &candidate);
+    removed_on_failure(&directory, review)
+}
+
+fn reviewed_candidate(directory: PathBuf, built: &GsiCandidate) -> Result<GsiReview> {
     let review = load(directory)?;
-    if review.candidate != candidate {
+    if !is_same_record(&review.candidate, built) {
         return Err(Front2Error::Verification(
             "the stored GSI candidate record differs from the built one".into(),
         ));
     }
     Ok(review)
+}
+
+fn is_same_record<T: Serialize>(stored: &T, built: &T) -> bool {
+    match (serde_json::to_value(stored), serde_json::to_value(built)) {
+        (Ok(stored), Ok(built)) => stored == built,
+        _ => false,
+    }
 }
 
 fn plan_install(
@@ -191,10 +223,78 @@ mod tests {
             )
             .is_err()
         );
-        let left: Vec<_> = std::fs::read_dir(paths.gsi_candidates())
-            .expect("the store exists")
-            .collect();
-        assert!(left.is_empty());
+        let left = std::fs::read_dir(paths.gsi_candidates()).map_or(0, Iterator::count);
+        assert_eq!(left, 0);
+    }
+
+    #[test]
+    fn a_backup_with_unsupported_slots_is_told_in_plain_words() {
+        let reason = "LUN 0: vbmeta_system_a is not active".to_string();
+        let told = told_as_unsupported_slots(Err(Front2Error::Unsupported(reason.clone())))
+            .expect_err("the backup is not used");
+        assert!(matches!(told, Front2Error::Plan(_)), "{told}");
+        assert!(told.to_string().contains(BACKUP_SLOTS_UNSUPPORTED));
+        assert!(told.to_string().contains(&reason));
+
+        let other = told_as_unsupported_slots(Err(Front2Error::Verification("changed".into())))
+            .expect_err("other failures stay as they are");
+        assert!(matches!(other, Front2Error::Verification(_)), "{other}");
+        assert!(told_as_unsupported_slots(Ok(())).is_ok());
+    }
+
+    #[test]
+    fn letter_1354_two_active_slots_are_not_told_as_an_inactive_slot_a() {
+        let reason = "LUN 4: boot_b is already active".to_string();
+        let told = told_as_unsupported_slots(Err(Front2Error::Unsupported(reason.clone())))
+            .expect_err("the backup is not used");
+        let text = told.to_string();
+        assert!(text.contains(&reason), "{text}");
+        assert!(text.contains("슬롯 A만 활성"), "{text}");
+        assert!(!text.contains("슬롯 A로 부팅하는 상태가 아니"), "{text}");
+    }
+
+    #[test]
+    fn a_failure_after_the_build_removes_the_candidate_folder() {
+        let directory = tempfile::tempdir().expect("tempdir");
+        let candidate = directory.path().join("gsi-7");
+        std::fs::create_dir(&candidate).expect("candidate folder");
+        std::fs::write(candidate.join("super.img"), b"image").expect("image");
+
+        let kept = removed_on_failure(&candidate, Ok(7));
+        assert_eq!(kept.expect("the result is not changed"), 7);
+        assert!(candidate.join("super.img").is_file());
+
+        let failure: Result<u8> = Err(Front2Error::Plan("no plan".into()));
+        let stopped = removed_on_failure(&candidate, failure);
+        assert!(
+            stopped
+                .expect_err("the failure is not changed")
+                .to_string()
+                .contains("no plan")
+        );
+        assert!(!candidate.exists());
+    }
+
+    #[test]
+    fn a_stored_record_is_the_same_without_the_path_that_is_not_stored() {
+        use front2::gsi::BackupPartition;
+
+        let built = BackupPartition {
+            name: "super".into(),
+            lun: 0,
+            path: PathBuf::from("full-backups").join("lun0").join("super.img"),
+            bytes: 4096,
+            sha256: "00".repeat(32),
+        };
+        let text = serde_json::to_string(&built).expect("store the record");
+        let stored: BackupPartition = serde_json::from_str(&text).expect("load the record");
+        assert_ne!(stored, built, "the path is not in the stored record");
+        assert!(is_same_record(&stored, &built));
+        let changed = BackupPartition {
+            bytes: 8192,
+            ..built.clone()
+        };
+        assert!(!is_same_record(&stored, &changed));
     }
 
     #[test]
