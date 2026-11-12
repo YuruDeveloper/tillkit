@@ -72,11 +72,19 @@ fn facts<'a>(
         stated("부팅 위치", parts::value(boot_lun, palette), palette),
         stated(
             "계획 SHA-256",
-            parts::value(review.sha256.clone(), palette),
+            parts::value(halved(&review.sha256), palette),
             palette,
         ),
     ];
     parts::ruled(rows, palette)
+}
+
+fn halved(sha256: &str) -> String {
+    let (first, second) = sha256.split_at(sha256.len() / 2);
+    format!(
+        "{first}
+{second}"
+    )
 }
 
 fn unknowns<'a>(

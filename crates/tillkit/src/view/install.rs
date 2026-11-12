@@ -6,7 +6,7 @@ use crate::palette::Palette;
 use crate::reboot_message::RebootMessage;
 use crate::step_status::StepStatus;
 use crate::view::{flow, parts};
-use iced::widget::{Column, Row, column, container, row};
+use iced::widget::{Column, Row, Space, column, container, row};
 use iced::{Alignment, Element, Length};
 use std::path::PathBuf;
 
@@ -23,9 +23,12 @@ const METER_PARTS: u16 = 1000;
 const METER_LEAST: u16 = 4;
 const GIBIBYTE: f64 = 1_073_741_824.0;
 
-pub fn steps<'a>(app: &'a App, page: Column<'a, Message>) -> Column<'a, Message> {
+pub fn steps<'a>(app: &'a App, mut page: Column<'a, Message>) -> Column<'a, Message> {
     let palette = app.palette;
     let install = &app.install;
+    if install.is_finished() {
+        page = page.push(flow::settled("RESTART REQUESTED", RESTART_SENT, palette));
+    }
     let rows = InstallStage::ALL
         .into_iter()
         .map(|stage| stage_row(app, stage))
@@ -33,15 +36,6 @@ pub fn steps<'a>(app: &'a App, page: Column<'a, Message>) -> Column<'a, Message>
     let mut page = page
         .push(parts::label("STEPS", palette))
         .push(parts::ruled(rows, palette));
-    if let Some(action) = action(app) {
-        page = page.push(action);
-    }
-    if let Some((stage, error)) = &install.failure {
-        page = page.push(failure(app, *stage, error));
-    }
-    if install.is_finished() {
-        page = page.push(flow::settled("RESTART REQUESTED", RESTART_SENT, palette));
-    }
     if install.has_plan() && !app.is_busy() {
         let start_over = Message::Install(InstallMessage::StartOver);
         page = page.push(parts::bracket("START OVER", Some(start_over), palette));
@@ -53,11 +47,10 @@ fn stage_row(app: &App, stage: InstallStage) -> Element<'_, Message> {
     let palette = app.palette;
     let install = &app.install;
     let status = install.status(stage);
-    let mut content = column![
-        parts::strong(stage.caption(), palette),
-        parts::body(stage.sentence(), palette),
-    ]
-    .spacing(4);
+    let mut content = column![parts::strong(stage.caption(), palette)].spacing(4);
+    if status != StepStatus::Done {
+        content = content.push(parts::body(stage.sentence(), palette));
+    }
     for detail in details(app, stage, status) {
         content = content.push(detail);
     }
@@ -68,15 +61,26 @@ fn stage_row(app: &App, stage: InstallStage) -> Element<'_, Message> {
 fn details(app: &App, stage: InstallStage, status: StepStatus) -> Vec<Element<'_, Message>> {
     let palette = app.palette;
     let install = &app.install;
+    let checked = status == StepStatus::Done && !install.needs_a_new_check();
     let mut details = match stage {
         InstallStage::Connect => connect_details(app, status),
         InstallStage::Backup => backup_details(app),
         InstallStage::Plan => plan_details(app),
-        InstallStage::Check if status == StepStatus::Done => vec![parts::note(CHECKED, palette)],
+        InstallStage::Check if checked => vec![parts::note(CHECKED, palette)],
         _ => Vec::new(),
     };
     if status == StepStatus::Running && install.transferred_bytes() > 0 {
         details.push(transfer(app));
+    }
+    let failed = install
+        .failure
+        .as_ref()
+        .filter(|(failed, _)| *failed == stage);
+    if let Some((_, error)) = failed {
+        details.push(failure(app, stage, error));
+    }
+    if install.next_stage() == Some(stage) {
+        details.push(action(app, stage));
     }
     details
 }
@@ -111,12 +115,8 @@ fn backup_details(app: &App) -> Vec<Element<'_, Message>> {
         palette,
     )];
     if let Some(reason) = &install.refused_backup {
-        details.push(parts::fault(
-            "NOT A FULL BACKUP",
-            NO_FULL_BACKUP,
-            reason,
-            palette,
-        ));
+        details.push(parts::caution("NOT A FULL BACKUP", NO_FULL_BACKUP, palette));
+        details.push(parts::value(reason.clone(), palette));
     }
     if !install.single_read.is_empty() {
         let names = install.single_read.join(" · ");
@@ -198,8 +198,7 @@ pub fn gibibytes(bytes: u64) -> String {
     format!("{:.2} GiB", bytes as f64 / GIBIBYTE)
 }
 
-fn action<'a>(app: &App) -> Option<Element<'a, Message>> {
-    let stage = app.install.next_stage()?;
+fn action<'a>(app: &App, stage: InstallStage) -> Element<'a, Message> {
     let loader_is_ready = stage != InstallStage::Connect || app.reboot.loader.is_some();
     let ready = app.can_run_install(stage) && loader_is_ready;
     let message = match stage {
@@ -211,7 +210,11 @@ fn action<'a>(app: &App) -> Option<Element<'a, Message>> {
         InstallStage::Restart => InstallMessage::AskRestart,
     };
     let message = ready.then_some(Message::Install(message));
-    Some(parts::go(stage.action(), message, app.palette))
+    column![
+        Space::new().height(4),
+        parts::go(stage.action(), message, app.palette)
+    ]
+    .into()
 }
 
 fn failure<'a>(app: &App, stage: InstallStage, error: &str) -> Element<'a, Message> {
