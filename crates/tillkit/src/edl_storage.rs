@@ -2,22 +2,25 @@ use front2::install::{SectorStorage, StorageInfo};
 use front2::{Front2Error, Result};
 use ltbox_device::edl::{EdlSession, UfsStorageInfo};
 use std::fmt::Display;
+use std::path::Path;
 
-pub struct EdlSectorStorage {
+pub struct EdlStorage {
     session: EdlSession,
 }
 
-#[expect(
-    dead_code,
-    reason = "the GSI install worker constructs it in a later change"
-)]
-impl EdlSectorStorage {
-    pub fn new(session: EdlSession) -> Self {
-        Self { session }
+impl EdlStorage {
+    #[expect(
+        dead_code,
+        reason = "the GSI install worker opens it in a later change"
+    )]
+    pub fn open(loader: &Path) -> Result<EdlStorage> {
+        let mut log = Vec::new();
+        let session = EdlSession::open(loader, &mut log).map_err(device_failure)?;
+        Ok(EdlStorage { session })
     }
 }
 
-impl SectorStorage for EdlSectorStorage {
+impl SectorStorage for EdlStorage {
     fn storage_info(&mut self, lun: u8) -> Result<StorageInfo> {
         let info = self.session.storage_info(lun).map_err(device_failure)?;
         Ok(storage_info_of(lun, info))
@@ -72,6 +75,13 @@ fn device_failure(error: impl Display) -> Front2Error {
 mod tests {
     use super::*;
     use ltbox_device::edl::EdlError;
+
+    fn held_across_threads<T: Send>() {}
+
+    #[test]
+    fn the_storage_can_move_to_the_install_worker_thread() {
+        held_across_threads::<EdlStorage>();
+    }
 
     #[test]
     fn storage_info_keeps_the_lun_and_the_reported_blocks() {
