@@ -121,7 +121,7 @@ impl App {
 
     pub fn update(&mut self, message: Message) -> Task<Message> {
         match message {
-            Message::Navigate(screen) => self.screen = screen,
+            Message::Navigate(screen) => self.navigate(screen),
             Message::ToggleTheme => self.set_palette(self.palette.toggled()),
             Message::BackedUp(result) => self.backed_up(result),
             Message::DeviceRead(result) => self.device_read(result),
@@ -244,6 +244,13 @@ impl App {
             .filter(|set| set.kind == PairKind::DeviceReadback)
             .map(|set| set.created_unix);
         SavedBackup::newest_first(root_images, kernel_images)
+    }
+
+    fn navigate(&mut self, screen: Screen) {
+        self.screen = screen;
+        if screen == Screen::Backup && !self.is_busy() {
+            self.reload_backups();
+        }
     }
 
     fn reload_backups(&mut self) {
@@ -472,6 +479,26 @@ mod tests {
         let _ = app.update(Message::BackedUp(Ok(())));
         assert!(!app.chosen_folder_absent);
         assert!(!App::beside_program(home).chosen_folder_absent);
+    }
+
+    #[test]
+    fn letter_1269_the_backup_screen_reads_the_folder_again_when_it_opens() {
+        let directory = tempfile::tempdir().expect("tempdir");
+        let home = directory.path().to_path_buf();
+        let chosen = directory.path().join("chosen");
+        FolderChoice::new(&chosen).write(&home).expect("choice");
+        let mut app = App::beside_program(home);
+        assert!(app.chosen_folder_absent && app.store_error.is_none());
+        folder_with_a_broken_store(directory.path(), "chosen");
+        let _ = app.update(Message::Navigate(Screen::Device));
+        assert!(app.chosen_folder_absent && app.store_error.is_none());
+        app.activity = Some("BACKING UP");
+        let _ = app.update(Message::Navigate(Screen::Backup));
+        assert_eq!(app.screen, Screen::Backup);
+        assert!(app.chosen_folder_absent && app.store_error.is_none());
+        app.activity = None;
+        let _ = app.update(Message::Navigate(Screen::Backup));
+        assert!(!app.chosen_folder_absent && app.store_error.is_some());
     }
 
     #[test]

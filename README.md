@@ -158,7 +158,8 @@ The tool keeps its data in the folder that you select on the `BACKUP` screen.
 If you select no folder, the tool uses the `tillkit-data` folder that is adjacent to the program file.
 The tool writes the path of the selected folder into `tillkit-folder.json`, which is also adjacent to the program file.
 Backups are in `pairs` and `kernel-sets`, write plans are in `plans`, and the Magisk download is in `magisk`.
-The ADB key for a USB connection is not in that folder.
+The tool keeps one ADB key for a USB connection without an ADB server.
+That key is not in the data folder.
 On Windows, the key is in `%LOCALAPPDATA%\ltbox\adb\adbkey`.
 
 ## Build from source
