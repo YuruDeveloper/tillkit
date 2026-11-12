@@ -9,7 +9,8 @@ use crate::reboot_words;
 use crate::support_words;
 use crate::view::{install_confirm, parts, rail, support_rows};
 use crate::write_origin::WriteOrigin;
-use iced::widget::{Column, Space, column, container, opaque, row, text};
+use iced::widget::scrollable::{Direction, Scrollbar};
+use iced::widget::{Column, Space, column, container, opaque, row, scrollable, text};
 use iced::{Color, Element, Length, Padding};
 
 const DIALOG_WIDTH: f32 = 620.0;
@@ -42,12 +43,17 @@ pub fn layer(app: &App, confirmation: Confirmation) -> Element<'_, Message> {
         a: SCRIM_ALPHA,
         ..palette.paper
     };
+    let dialog = scrollable(dialog)
+        .direction(Direction::Vertical(
+            Scrollbar::new().width(4).scroller_width(4),
+        ))
+        .style(move |theme, status| parts::scroll_style(theme, status, palette));
     let placed = container(container(dialog).max_width(DIALOG_WIDTH))
         .padding(Padding {
             top: 96.0,
             left: rail::RAIL_WIDTH + 33.5,
             right: 32.0,
-            bottom: 32.0,
+            bottom: 16.0,
         })
         .width(Length::Fill)
         .height(Length::Fill)
