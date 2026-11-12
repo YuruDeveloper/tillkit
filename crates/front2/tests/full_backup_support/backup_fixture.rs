@@ -19,6 +19,13 @@ impl BackupFixture {
     pub fn with_super_sectors(sectors: u64) -> Self {
         let fixture = InstallFixture::with_super_sectors(sectors);
         let mut storage = ReadOnlyStorage::new(fixture.storage);
+        let first_alignment = SyntheticGpt::empty()
+            .with_entry("cdt", 0)
+            .with_entry("ALIGN_TO_128K_1", 0);
+        storage.inner.load(3, 0, &first_alignment.main());
+        storage
+            .inner
+            .load(3, LAST_LBA - 4, &first_alignment.backup());
         let table = Self::extra_table();
         storage.inner.load(5, 0, &table.main());
         storage.inner.load(5, LAST_LBA - 4, &table.backup());
@@ -40,5 +47,6 @@ impl BackupFixture {
             .with_entry("init_boot_a", 0)
             .with_entry("recovery_a", 0)
             .with_entry("vendor_boot_a", 0)
+            .with_entry("ALIGN_TO_128K_2", 0)
     }
 }

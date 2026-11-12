@@ -1,7 +1,6 @@
 use crate::error::{Front2Error, Result};
 use crate::gpt::{PartitionLocation, SECTOR_BYTES};
 use crate::gsi::BackupEntry;
-use crate::partition_target::is_safe_label;
 
 #[derive(Debug, Clone)]
 pub(super) struct BackupExtent {
@@ -40,14 +39,16 @@ impl BackupExtent {
 }
 
 fn require_file_name(name: &str) -> Result<()> {
-    let reserved = matches!(name, "con" | "prn" | "aux" | "nul")
-        || reserved_number(name, "com")
-        || reserved_number(name, "lpt");
-    if !is_safe_label(name)
-        || reserved
-        || name.starts_with("gpt_main")
-        || name.starts_with("gpt_backup")
-    {
+    let folded = name.to_ascii_lowercase();
+    let plain = !name.is_empty()
+        && name.len() <= 36
+        && name
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || byte == b'_');
+    let reserved = matches!(folded.as_str(), "con" | "prn" | "aux" | "nul")
+        || reserved_number(&folded, "com")
+        || reserved_number(&folded, "lpt");
+    if !plain || reserved || folded.starts_with("gpt_main") || folded.starts_with("gpt_backup") {
         return Err(Front2Error::Image(format!(
             "backup partition name {name:?} is not supported"
         )));

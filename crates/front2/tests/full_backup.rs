@@ -34,6 +34,8 @@ fn letter_1292_full_backup_is_read_only_and_builds_install_inputs() {
     assert_eq!(fixture.storage.read_bytes, plan.read_bytes());
     assert_eq!(result.backup_bytes, plan.backup_bytes());
     validate_full_backup(&output).expect("complete backup");
+    assert!(output.join("partitions/lun3/ALIGN_TO_128K_1.bin").is_file());
+    assert!(output.join("partitions/lun5/ALIGN_TO_128K_2.bin").is_file());
     let manifest = BackupManifest::load(&output).expect("manifest");
     let entries: Vec<BackupEntry> =
         serde_json::from_slice(&fs::read(output.join(MANIFEST)).unwrap()).unwrap();
@@ -246,7 +248,47 @@ fn doc_1066_completion_check_refuses_empty_partial_missing_and_duplicate_entries
 fn letter_1292_missing_required_partitions_and_reserved_file_names_are_refused() {
     assert_bad_extra_table(BackupFixture::extra_table().without("dtbo_a"));
     assert_bad_extra_table(BackupFixture::extra_table().with_entry("nul", 0));
+    assert_bad_extra_table(BackupFixture::extra_table().with_entry("NUL", 0));
     assert_bad_extra_table(BackupFixture::extra_table().with_entry("gpt_main5", 0));
+}
+
+#[test]
+fn doc_1069_uppercase_partition_names_are_preserved_and_validated() {
+    let mut fixture = BackupFixture::new();
+    let output = fixture.output();
+    FullBackupPlan::read(&mut fixture.storage)
+        .unwrap()
+        .write(&mut fixture.storage, &output)
+        .unwrap();
+    validate_full_backup(&output).unwrap();
+    let manifest_path = output.join(MANIFEST);
+    let mut entries: Vec<BackupEntry> =
+        serde_json::from_slice(&fs::read(&manifest_path).unwrap()).unwrap();
+    for entry in &mut entries {
+        entry.sha256.make_ascii_uppercase();
+    }
+    fs::write(manifest_path, serde_json::to_vec(&entries).unwrap()).unwrap();
+    validate_full_backup(&output).expect("hexadecimal letter case does not change a digest");
+    let path = output.join("partitions/lun3/ALIGN_TO_128K_1.bin");
+    assert_eq!(fs::metadata(&path).unwrap().len(), 16 * SECTOR as u64);
+    fs::write(path, b"short").unwrap();
+    assert!(validate_full_backup(&output).is_err());
+}
+
+#[test]
+fn doc_1069_letter_case_collisions_are_refused_before_files_are_created() {
+    let mut fixture = BackupFixture::new();
+    let table = BackupFixture::extra_table().with_entry("FSG", 0);
+    fixture.storage.inner.load(5, 0, &table.main());
+    fixture.storage.inner.load(5, LAST_LBA - 4, &table.backup());
+    let error = FullBackupPlan::read(&mut fixture.storage)
+        .unwrap_err()
+        .to_string();
+    assert!(
+        error.contains("names differ only in letter case"),
+        "{error}"
+    );
+    assert!(!fixture.output().exists());
 }
 
 fn assert_bad_extra_table(table: SyntheticGpt) {
