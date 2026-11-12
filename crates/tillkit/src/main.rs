@@ -10,6 +10,7 @@ mod clock;
 mod confirmation;
 mod data_paths;
 mod diagnosis;
+mod edl_sector_storage;
 mod folder_choice;
 mod fonts;
 mod grain;
