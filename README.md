@@ -18,9 +18,9 @@ The Lenovo functions of LTBox are not in this repository.
 
 - No person did a test of the write functions of TillKit on a device.
 - A write changes some partitions, one after the other. If the device or the connection stops during the writes, the device can become unbootable.
-- The only recovery from that condition is an EDL restore from a full backup. TillKit makes a full backup as a step of the GSI installation, but it cannot do that restore.
+- The usual recovery from that condition is an EDL restore from a full backup. TillKit makes a full backup as a step of the GSI installation. The `WRITE` screen can write that full backup to the device again. Read "Full restore" below.
 - The GSI installation erases the user data of the device.
-- Keep a copy of the full backup in a different location. A different tool is necessary for the restore.
+- Keep a copy of the full backup in a different location. If the full backup on the computer is damaged, a restore is not possible.
 
 ## What you need
 
@@ -122,9 +122,25 @@ When you select a system image on the `WRITE` screen, these steps open in sequen
 6. User data: The tool erases the user data immediately after the write. The approval of step 5 is also the approval for this step.
 7. Restart: The tool gets a different approval for the restart.
 
-- If the write does not complete, the device can become unbootable. Keep the device in EDL mode and do the check again. If the check finds the step that stopped, the tool continues from that step. TillKit cannot write the stock firmware again.
+- If the write does not complete, the device can become unbootable. Keep the device in EDL mode and do the check again. If the check finds the step that stopped, the tool continues from that step. To write the full backup to the device again, use the full restore.
+- If the check finds a partition table that the plan does not write and that is different from the full backup, the check stops. The tool tells you to write the full backup to the device first.
 - TillKit cannot compare the rollback values that the device keeps with the values of the images.
 - TillKit cannot tell if the device started from the GSI after the restart.
+
+### Full restore
+
+The full restore writes a full backup to the device again. When the GSI installation has a full backup in step 2, `RESTORE TO DEVICE` opens the full restore. The full restore uses the connection of step 1 and the full backup of step 2.
+
+1. Check: The tool reads the device and compares each area with the hash in the full backup. It shows the number and the names of the different areas, the quantity of data to write and the boot LUN. The user data is part of the restore by default. If you set it to off, the tool does not compare or write `userdata`.
+2. Restore: After your approval, the tool writes only the different areas. It reads each area again and compares the hashes. Then it selects the boot LUN.
+3. Restart: The restart is not necessary. You can do the check of the GSI installation again on the same connection.
+
+- If the device is the same as the full backup, the tool tells you and does not write.
+- If a partition on LUN 1 or LUN 2 is different, the tool does not write. These partitions hold the first boot images.
+- The tool finds the boot LUN from the active flag of `xbl` in the partition tables of the full backup. The tool cannot make sure that the device started from that LUN when you made the full backup.
+- TillKit cannot make sure that the full backup is from this device. The restore also writes the calibration data of the full backup. This data is different on each device.
+- If you set the user data to off, Android can tell you to erase the user data at the next start.
+- If the restore stops, keep the device in EDL mode and do the check again. The tool writes only the areas that are different.
 
 ### Safety steps of a write
 
@@ -159,6 +175,7 @@ Write functions:
 
 - All steps of the GSI installation: the EDL connection, the full backup, the check, the write, the removal of the user data and the restart.
 - A GSI installation that stopped and that the tool continues from the step that stopped.
+- The full restore: the check, the write, the boot LUN and the restart.
 - The start of the device from a GSI that TillKit wrote.
 - Backup, write and `RESTORE` on a device.
 - A write through `su`.
@@ -175,7 +192,6 @@ Other functions:
 ## Not in this tool
 
 - A write to a device that has no root access, and root access for such a device.
-- The restore of a full backup to the device. Thus TillKit cannot write the stock firmware again after a GSI installation.
 - Recovery of a device that does not start after a write.
 - Automatic removal of `/data/local/tmp/front2-write-*` on the device.
 - A time limit for device commands. If the device gives no result during a write, the tool continues to wait and the write state is not known. The tool does not try again and does not start the device again.
