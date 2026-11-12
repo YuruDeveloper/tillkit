@@ -10,6 +10,7 @@ pub mod device_shell;
 pub mod device_state;
 pub mod digest;
 pub mod error;
+pub mod full_backup;
 pub mod gpt;
 pub mod gsi;
 pub mod image_record;
