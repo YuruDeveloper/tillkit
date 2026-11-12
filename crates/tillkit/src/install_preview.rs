@@ -116,6 +116,7 @@ fn verified((index, step): (usize, &InstallStep)) -> StepRecord {
 }
 
 fn finish(app: &mut App, pose: &str) {
+    app.install.device_changed = pose.starts_with(RESUMED);
     match pose {
         "connect-failed" => app
             .install

@@ -174,9 +174,8 @@ impl App {
     }
 
     fn stage_ended(&mut self, stage: InstallStage, result: Outcome<Box<InstallProgress>>) {
-        self.install.running = None;
         match result {
-            Ok(progress) => self.install.progress = Some(*progress),
+            Ok(progress) => self.install.stage_done(stage, *progress),
             Err(error) => self.install.stage_failed(stage, error),
         }
     }

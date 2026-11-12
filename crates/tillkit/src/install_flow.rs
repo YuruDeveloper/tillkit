@@ -59,6 +59,17 @@ impl InstallFlow {
         self.device_changed |= matches!(stage, InstallStage::Write | InstallStage::Wipe);
     }
 
+    pub fn stage_done(&mut self, stage: InstallStage, progress: InstallProgress) {
+        self.running = None;
+        self.progress = Some(progress);
+        let continued = self.resume().is_some_and(|resume| !resume.first_install);
+        if self.is_done(InstallStage::Wipe) {
+            self.device_changed = false;
+        } else if stage == InstallStage::Check && self.is_checked() {
+            self.device_changed = continued;
+        }
+    }
+
     pub fn stage_failed(&mut self, stage: InstallStage, error: String) {
         self.running = None;
         self.failure = Some((stage, error));
@@ -424,6 +435,42 @@ pub mod tests {
         let (write, wipe) = flow.write_approvals(2).expect("the wipe is next");
         flow.progress = Some(install_worker::wipe(&mut link, &write, &wipe).expect("wipe"));
         assert_eq!(flow.next_stage(), Some(InstallStage::Restart));
+    }
+
+    #[test]
+    fn letter_1335_the_plan_is_kept_only_while_a_write_is_not_complete() {
+        let (fixture, mut flow) = planned();
+        let directory = fixture.plan_directory();
+        let (_directory, mut link) = link_of(fixture);
+        let first = install_worker::check(&mut link, &directory).expect("check");
+        flow.stage_done(InstallStage::Check, first);
+        assert!(
+            !flow.keeps_the_plan(),
+            "the device is the same as the backup"
+        );
+        assert!(flow.approve());
+        let (write, wipe) = flow.write_approvals(1).expect("the write is next");
+        install_worker::write(&mut link, &write, &wipe).expect("write");
+
+        flow.forget_the_check();
+        flow.device_changed = false;
+        let second = install_worker::check(&mut link, &directory).expect("second check");
+        flow.stage_done(InstallStage::Check, second);
+        assert!(flow.keeps_the_plan() && flow.write_is_unfinished());
+
+        assert!(flow.approve());
+        let (write, wipe) = flow.write_approvals(2).expect("the wipe is next");
+        flow.begin(InstallStage::Wipe);
+        let wiped = install_worker::wipe(&mut link, &write, &wipe).expect("wipe");
+        flow.stage_done(InstallStage::Wipe, wiped);
+        assert!(!flow.keeps_the_plan() && flow.holds_the_device());
+
+        let restart = flow.restart_approval(3).expect("the restart is next");
+        flow.begin(InstallStage::Restart);
+        let restarted = install_worker::restart(&mut link, &restart).expect("restart");
+        flow.stage_done(InstallStage::Restart, restarted);
+        flow.forget_the_plan();
+        assert!(!flow.keeps_the_plan() && !flow.holds_the_device());
     }
 
     #[test]
