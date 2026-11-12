@@ -90,8 +90,12 @@ impl App {
     }
 
     fn start_write(&mut self) -> Task<Message> {
+        let shown = self.write.kind;
         if !self.is_busy() && self.write.can_start() {
             self.write.start_over();
+        }
+        if self.write.kind != shown {
+            return Task::none();
         }
         let image = self.write.chosen_image().filter(|_| self.can_start_write());
         let Some((kind, image)) = image else {
@@ -323,6 +327,35 @@ mod tests {
         std::fs::write(full_backup.join("sha256-manifest.json"), b"{}").expect("manifest");
         let _ = app.update(Message::FullBackupPicked(Some(full_backup)));
         assert!(app.can_start_write());
+    }
+
+    #[test]
+    fn letter_1275_a_start_stops_when_the_file_changed_to_another_kind() {
+        let mut head = vec![0; 2048];
+        head[..4].copy_from_slice(&[0x3a, 0xff, 0x26, 0xed]);
+        let (directory, mut app) = app_with_image(&head);
+        add_backup(&mut app);
+        let full_backup = directory.path().join("full");
+        std::fs::create_dir(&full_backup).expect("folder");
+        std::fs::write(full_backup.join("sha256-manifest.json"), b"{}").expect("manifest");
+        let _ = app.update(Message::FullBackupPicked(Some(full_backup)));
+        assert!(app.can_start_write());
+        let image = app.write.image.clone().expect("image");
+        std::fs::write(&image, boot_head(0)).expect("image");
+        let _ = app.update(Message::Write(WriteMessage::Start));
+        assert_eq!(app.write.kind, Some(Ok(WriteKind::RootImage)));
+        assert!(app.write.running.is_none(), "the first push only shows");
+        let _ = app.update(Message::Write(WriteMessage::Start));
+        assert_eq!(app.write.running, Some(WriteStep::Prepare));
+    }
+
+    #[test]
+    fn a_start_with_the_same_kind_of_file_begins_the_preparation() {
+        let (_directory, mut app) = app_with_image(&boot_head(0));
+        add_backup(&mut app);
+        let _ = app.update(Message::Write(WriteMessage::Start));
+        assert_eq!(app.write.kind, Some(Ok(WriteKind::RootImage)));
+        assert_eq!(app.write.running, Some(WriteStep::Prepare));
     }
 
     #[test]
