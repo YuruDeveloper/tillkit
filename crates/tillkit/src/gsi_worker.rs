@@ -7,6 +7,7 @@ use front2::digest::sha256_file;
 use front2::gsi::{GsiCandidate, GsiCandidateRequest, install_inputs};
 use front2::install::{InstallPlan, PLAN_FILE};
 use front2::{DeviceProfile, Front2Error, Result};
+use serde::Serialize;
 use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
 
@@ -125,12 +126,19 @@ fn build_candidate(
     };
     let candidate = GsiCandidate::build(&request)?;
     let review = load(directory)?;
-    if review.candidate != candidate {
+    if !is_same_record(&review.candidate, &candidate) {
         return Err(Front2Error::Verification(
             "the stored GSI candidate record differs from the built one".into(),
         ));
     }
     Ok(review)
+}
+
+fn is_same_record<T: Serialize>(stored: &T, built: &T) -> bool {
+    match (serde_json::to_value(stored), serde_json::to_value(built)) {
+        (Ok(stored), Ok(built)) => stored == built,
+        _ => false,
+    }
 }
 
 fn plan_install(
@@ -195,6 +203,28 @@ mod tests {
             .expect("the store exists")
             .collect();
         assert!(left.is_empty());
+    }
+
+    #[test]
+    fn a_stored_record_is_the_same_without_the_path_that_is_not_stored() {
+        use front2::gsi::BackupPartition;
+
+        let built = BackupPartition {
+            name: "super".into(),
+            lun: 0,
+            path: PathBuf::from("full-backups").join("lun0").join("super.img"),
+            bytes: 4096,
+            sha256: "00".repeat(32),
+        };
+        let text = serde_json::to_string(&built).expect("store the record");
+        let stored: BackupPartition = serde_json::from_str(&text).expect("load the record");
+        assert_ne!(stored, built, "the path is not in the stored record");
+        assert!(is_same_record(&stored, &built));
+        let changed = BackupPartition {
+            bytes: 8192,
+            ..built.clone()
+        };
+        assert!(!is_same_record(&stored, &changed));
     }
 
     #[test]
