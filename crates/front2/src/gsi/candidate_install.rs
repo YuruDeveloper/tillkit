@@ -30,6 +30,16 @@ pub fn install_inputs(
     )
 }
 
+pub fn require_slot_a_active(backup_directory: &Path) -> Result<()> {
+    let manifest = BackupManifest::load(&std::path::absolute(backup_directory)?)?;
+    for lun in ACTIVATION_LUNS {
+        let (_, main) = gpt_backup(&manifest, lun, GptCopyKind::Main)?;
+        let (_, backup) = gpt_backup(&manifest, lun, GptCopyKind::Backup)?;
+        SlotActivation::prepare(lun, &main, &backup)?;
+    }
+    Ok(())
+}
+
 pub fn install_inputs_from_images(
     images: &[CandidateImage],
     original_super_sha256: &str,

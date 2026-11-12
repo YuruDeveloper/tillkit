@@ -22,7 +22,7 @@ pub use backup_entry::BackupEntry;
 pub use backup_manifest::BackupManifest;
 pub use backup_partition::BackupPartition;
 pub use candidate_image::CandidateImage;
-pub use candidate_install::{install_inputs, install_inputs_from_images};
+pub use candidate_install::{install_inputs, install_inputs_from_images, require_slot_a_active};
 pub use gsi_candidate::GsiCandidate;
 pub use gsi_candidate_request::GsiCandidateRequest;
 pub use logical_view::extract_logical_view;

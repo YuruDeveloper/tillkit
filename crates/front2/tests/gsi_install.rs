@@ -3,9 +3,12 @@ mod gpt_support;
 mod install_support;
 
 use front2::digest::{sha256_bytes, sha256_file};
-use front2::gsi::{CandidateImage, GsiCandidate, install_inputs, install_inputs_from_images};
+use front2::gsi::{
+    CandidateImage, GsiCandidate, install_inputs, install_inputs_from_images, require_slot_a_active,
+};
 use front2::install::{InstallInputs, InstallPlan, InstallStep};
 use front2::{Front2Error, Result};
+use gpt_support::SyntheticGpt;
 use install_support::InstallFixture;
 use serde_json::{Value, json};
 use std::fs;
@@ -164,6 +167,24 @@ fn a_backup_without_one_verified_dump_of_each_gpt_copy_is_rejected() {
     fs::remove_file(userdata).expect("remove the userdata dump");
     let inputs = inputs_of(&other).expect("the manifest still records userdata");
     assert!(InstallPlan::build(&inputs).is_err());
+}
+
+#[test]
+fn a_backup_of_a_device_that_does_not_start_from_slot_a_is_rejected_before_the_build() {
+    let fixture = prepared_fixture();
+    let backup = &fixture.inputs.backup_directory;
+    require_slot_a_active(backup).expect("the standard backup starts from slot A");
+
+    let changed = SyntheticGpt::standard().with_flags("vbmeta_a", 0x107b << 48);
+    fs::write(backup.join("gpt/gpt_main4.bin"), changed.main()).expect("main copy");
+    fs::write(backup.join("gpt/gpt_backup4.bin"), changed.backup()).expect("backup copy");
+    write_manifest(backup, &manifest_entries(backup));
+    let error = require_slot_a_active(backup).expect_err("slot A is not active");
+    assert!(matches!(error, Front2Error::Unsupported(_)), "{error}");
+    assert!(
+        error.to_string().contains("vbmeta_a is not active"),
+        "{error}"
+    );
 }
 
 fn environment_path(name: &str) -> Option<PathBuf> {
