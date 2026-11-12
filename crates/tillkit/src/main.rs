@@ -24,6 +24,8 @@ mod image_refusal;
 mod install_device;
 mod install_flow;
 mod install_message;
+#[cfg(debug_assertions)]
+mod install_preview;
 mod install_review;
 mod install_stage;
 mod install_worker;
