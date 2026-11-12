@@ -584,7 +584,7 @@ fn preflight_stops_when_a_target_does_not_hold_the_backup_content() {
     let mut executor = InstallExecutor::new(&plan, &mut fixture.storage);
     rejection(
         executor.run_preflight(),
-        "preflight: the current content of vbmeta_b",
+        "preflight: the step vbmeta_b is of unknown content, but the step boot_b before it is not done yet",
     );
     assert_refuses_everything(&mut executor, plan.plan_sha256(), &fixture.calls);
     assert_eq!(count(&fixture.calls, MockCall::changes_the_device), 0);
@@ -598,7 +598,7 @@ fn preflight_stops_when_the_boot_wlun_does_not_give_the_gpt_of_lun_1() {
     let mut executor = InstallExecutor::new(&plan, &mut fixture.storage);
     rejection(
         executor.run_preflight(),
-        "preflight: the GPT that is read through boot WLUN 176",
+        "preflight: the step set_boot_lun is done, but the step boot_b before it is not done yet",
     );
     assert_refuses_everything(&mut executor, plan.plan_sha256(), &fixture.calls);
     assert_eq!(count(&fixture.calls, MockCall::changes_the_device), 0);

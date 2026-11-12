@@ -23,4 +23,16 @@ impl BootLunRecord {
             passed: false,
         }
     }
+
+    pub fn observed(requested_lun: u8, boot_wlun: u8, readback_sha256: &str) -> Self {
+        Self {
+            requested_lun,
+            boot_wlun,
+            command_accepted: false,
+            readback_sha256: Some(readback_sha256.to_string()),
+            matches_new_lun_gpt: true,
+            matches_original_lun_gpt: false,
+            passed: true,
+        }
+    }
 }

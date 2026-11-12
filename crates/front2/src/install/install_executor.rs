@@ -56,6 +56,10 @@ impl<'run> InstallExecutor<'run> {
             ));
         }
         let (record, outcome) = run_preflight(self.plan, &mut *self.storage);
+        if outcome.is_ok() {
+            self.progress
+                .take_steps_before_the_resume_point(self.plan.plan(), &record);
+        }
         self.progress.preflight = Some(record);
         outcome.map_err(|err| self.progress.halt(err))
     }
