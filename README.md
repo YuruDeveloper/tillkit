@@ -158,6 +158,8 @@ The tool keeps its data in the folder that you select on the `BACKUP` screen.
 If you select no folder, the tool uses the `tillkit-data` folder that is adjacent to the program file.
 The tool writes the path of the selected folder into `tillkit-folder.json`, which is also adjacent to the program file.
 Backups are in `pairs` and `kernel-sets`, write plans are in `plans`, and the Magisk download is in `magisk`.
+The ADB key for a USB connection is not in that folder.
+On Windows, the key is in `%LOCALAPPDATA%\ltbox\adb\adbkey`.
 
 ## Build from source
 
@@ -170,6 +172,10 @@ cargo build --release --locked -p tillkit
 
 The executable is `target/release/tillkit` (`tillkit.exe` on Windows).
 The only builds until now are Windows builds.
+
+If you start the executable from `target/release`, the default data folder is `target/release/tillkit-data`.
+`cargo clean` removes that folder together with the build, and your backups go with it.
+Before you make a backup, copy the executable to a different folder or select a data folder on the `BACKUP` screen.
 
 | Crate | Responsibility |
 | --- | --- |

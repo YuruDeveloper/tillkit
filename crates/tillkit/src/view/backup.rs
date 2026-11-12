@@ -23,6 +23,7 @@ const CHOICE_FOR_THIS_RUN: &str =
     "TILLKIT_DATA_DIR로 정한 폴더로 시작했기 때문에, 여기에서 고른 폴더는 이번 실행에만 씁니다.";
 const CHOICE_NOT_READ: &str = "전에 고른 폴더를 적어 둔 파일을 읽지 못해서 실행 파일 옆의 기본 폴더를 쓰고 있습니다. 백업이 보이지 않으면 폴더를 다시 골라 주세요.";
 const CHOICE_NOT_KEPT: &str = "지금은 고른 폴더를 쓰지만, 고른 폴더를 적어 두지 못해서 다음에 실행할 때는 다시 골라야 합니다.";
+const CHOSEN_FOLDER_ABSENT: &str = "전에 고른 폴더가 지금은 이 경로에 없어서, 그 폴더에 저장한 백업이 아래 목록에 나오지 않습니다. 드라이브가 연결되어 있는지 확인하거나 폴더를 다시 골라 주세요. 이대로 백업하면 이 경로에 폴더를 새로 만들어서 저장합니다.";
 const TIME_WIDTH: f32 = 210.0;
 
 pub fn view(app: &App) -> Element<'_, Message> {
@@ -93,6 +94,13 @@ fn data_folder(app: &App) -> Element<'_, Message> {
         parts::note(format!("{DATA_FOLDER} {kept}"), palette)
     ]
     .spacing(8);
+    if app.chosen_folder_absent {
+        content = content.push(parts::caution(
+            "FOLDER NOT FOUND",
+            CHOSEN_FOLDER_ABSENT,
+            palette,
+        ));
+    }
     if let Some(error) = &app.choice_unread {
         content = content.push(parts::fault(
             "FOLDER CHOICE NOT READ",

@@ -31,6 +31,7 @@ pub struct App {
     pub choice_home: Option<PathBuf>,
     pub choice_error: Option<String>,
     pub choice_unread: Option<String>,
+    pub chosen_folder_absent: bool,
     pub activity: Option<&'static str>,
     pub diagnosis: Option<Diagnosis>,
     pub device_error: Option<String>,
@@ -63,11 +64,13 @@ impl App {
             Ok(choice) => (choice, None),
             Err(error) => (None, Some(error)),
         };
+        let chosen = choice.is_some();
         let paths = choice.map_or_else(
             || DataPaths::beside_program(&program_folder),
             |choice| DataPaths::new(choice.data_folder),
         );
         let mut app = Self::with_paths(paths);
+        app.chosen_folder_absent = chosen && !app.paths.root().is_dir();
         app.choice_home = Some(program_folder);
         app.choice_unread = unread;
         app
@@ -83,6 +86,7 @@ impl App {
             choice_home: None,
             choice_error: None,
             choice_unread: None,
+            chosen_folder_absent: false,
             activity: None,
             diagnosis: None,
             device_error: None,
@@ -251,6 +255,7 @@ impl App {
         self.store_error = pairs_error.or(kernel_error);
         self.pairs = pairs.unwrap_or_default();
         self.kernel_sets = kernel_sets.unwrap_or_default();
+        self.chosen_folder_absent = self.chosen_folder_absent && !self.paths.root().is_dir();
     }
 
     fn back_up(&mut self) -> Task<Message> {
@@ -288,6 +293,7 @@ impl App {
         let written = self.choice_home.as_ref().map(|home| choice.write(home));
         self.choice_error = written.and_then(Result::err);
         self.choice_unread = None;
+        self.chosen_folder_absent = false;
         self.paths = DataPaths::new(folder);
         self.backup_error = None;
         self.reload_backups();
@@ -449,6 +455,37 @@ mod tests {
                 .root(),
             chosen
         );
+    }
+
+    #[test]
+    fn doc_1062_a_remembered_folder_that_is_absent_is_told_until_it_is_there() {
+        let directory = tempfile::tempdir().expect("tempdir");
+        let home = directory.path().to_path_buf();
+        assert!(!App::beside_program(home.clone()).chosen_folder_absent);
+        let chosen = directory.path().join("chosen");
+        FolderChoice::new(&chosen).write(&home).expect("choice");
+        let mut app = App::beside_program(home.clone());
+        assert_eq!(app.paths.root(), chosen);
+        assert!(app.chosen_folder_absent);
+        assert!(app.store_error.is_none() && app.saved_backups().is_empty());
+        std::fs::create_dir_all(&chosen).expect("folder");
+        let _ = app.update(Message::BackedUp(Ok(())));
+        assert!(!app.chosen_folder_absent);
+        assert!(!App::beside_program(home).chosen_folder_absent);
+    }
+
+    #[test]
+    fn doc_1062_a_newly_chosen_folder_is_not_told_as_absent() {
+        let directory = tempfile::tempdir().expect("tempdir");
+        let home = directory.path().to_path_buf();
+        FolderChoice::new(directory.path().join("absent"))
+            .write(&home)
+            .expect("choice");
+        let mut app = App::beside_program(home);
+        assert!(app.chosen_folder_absent);
+        let other = directory.path().join("other");
+        let _ = app.update(Message::DataFolderPicked(Some(other)));
+        assert!(!app.chosen_folder_absent);
     }
 
     #[test]

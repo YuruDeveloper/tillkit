@@ -133,6 +133,7 @@ TillKit의 화면으로 실제 기기에서 실행해 본 기능은 아직 없�
 폴더를 고르지 않으면 실행 파일 옆의 `tillkit-data` 폴더를 씁니다.
 고른 폴더의 경로는 실행 파일 옆의 `tillkit-folder.json`에 적어 둡니다.
 백업은 `pairs`와 `kernel-sets`에, 기록 계획은 `plans`에, 내려받은 Magisk는 `magisk`에 있습니다.
+USB로 직접 연결할 때 쓰는 ADB 키는 이 폴더에 두지 않습니다. Windows에서는 `%LOCALAPPDATA%\ltbox\adb\adbkey`에 있습니다.
 
 ## 빌드
 
@@ -141,6 +142,8 @@ cargo build --release --locked -p tillkit
 ```
 
 실행 파일은 `target/release/tillkit`(Windows에서는 `tillkit.exe`)입니다. 지금까지는 Windows에서만 빌드하고 실행했습니다.
+
+실행 파일을 `target/release`에서 바로 실행하면 기본 데이터 폴더가 `target/release/tillkit-data`가 됩니다. `cargo clean`은 빌드 결과와 함께 이 폴더도 지우므로 백업이 함께 없어집니다. 백업하기 전에 실행 파일을 다른 폴더로 복사하거나 BACKUP 화면에서 데이터 폴더를 골라 주세요.
 
 ## 라이선스와 고지
 
