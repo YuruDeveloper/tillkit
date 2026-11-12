@@ -1,4 +1,6 @@
+use crate::digest::is_sha256_hex;
 use crate::error::{Front2Error, Result};
+use crate::full_backup::backup_extent::BackupExtent;
 use crate::full_backup::backup_gpt::BackupGpt;
 use crate::full_backup::full_backup_plan::{LUN_COUNT, partition_extents};
 use crate::gpt::{GptCopy, GptCopyKind};
@@ -22,18 +24,40 @@ pub fn validate_full_backup(directory: &Path) -> Result<()> {
         ));
     }
     for extent in partitions {
-        let partition = manifest.partition(&extent.name)?;
-        let metadata = fs::metadata(&partition.path)?;
-        if partition.lun != extent.location.lun
-            || partition.bytes != extent.bytes
-            || !metadata.is_file()
-            || metadata.len() != extent.bytes
-        {
-            return Err(Front2Error::Verification(format!(
-                "backup file does not match the GPT for {}",
-                extent.name
-            )));
-        }
+        validate_partition(directory, &entries, &extent)?;
+    }
+    Ok(())
+}
+
+fn validate_partition(
+    directory: &Path,
+    entries: &[BackupEntry],
+    extent: &BackupExtent,
+) -> Result<()> {
+    let mut matching = entries
+        .iter()
+        .filter(|entry| entry.partition_lun(&extent.name).is_some());
+    let (Some(entry), None) = (matching.next(), matching.next()) else {
+        return Err(Front2Error::Image(format!(
+            "backup must hold one entry for {}",
+            extent.name
+        )));
+    };
+    let path = directory.join(BackupEntry::relative_path(
+        &extent.name,
+        extent.location.lun,
+    ));
+    let metadata = fs::metadata(path)?;
+    if entry.partition_lun(&extent.name) != Some(extent.location.lun)
+        || entry.bytes != extent.bytes
+        || !is_sha256_hex(&entry.sha256.to_ascii_lowercase())
+        || !metadata.is_file()
+        || metadata.len() != extent.bytes
+    {
+        return Err(Front2Error::Verification(format!(
+            "backup file does not match the GPT for {}",
+            extent.name
+        )));
     }
     Ok(())
 }

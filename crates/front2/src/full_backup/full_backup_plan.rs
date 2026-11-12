@@ -6,6 +6,7 @@ use crate::full_backup::full_backup_result::FullBackupResult;
 use crate::gpt::{GptCopyKind, PartitionMap, SECTOR_BYTES};
 use crate::install::{SectorStorage, StorageInfo};
 use crate::profiles::toss_front2;
+use std::collections::HashSet;
 use std::fs;
 use std::path::Path;
 
@@ -139,10 +140,26 @@ pub(super) fn partition_extents(copies: &[BackupGpt]) -> Result<Vec<BackupExtent
         .collect();
     let map = PartitionMap::from_main_copies(&main)?;
     require_install_partitions(&map)?;
-    map.partitions()
+    let partitions = map
+        .partitions()
         .iter()
         .map(|(name, location)| BackupExtent::new(name, *location))
-        .collect()
+        .collect::<Result<Vec<_>>>()?;
+    require_unique_paths(&partitions)?;
+    Ok(partitions)
+}
+
+fn require_unique_paths(partitions: &[BackupExtent]) -> Result<()> {
+    let mut paths = HashSet::new();
+    for extent in partitions {
+        if !paths.insert((extent.location.lun, extent.name.to_ascii_lowercase())) {
+            return Err(Front2Error::Image(format!(
+                "backup names differ only in letter case on LUN {}: {}",
+                extent.location.lun, extent.name
+            )));
+        }
+    }
+    Ok(())
 }
 
 fn require_install_partitions(map: &PartitionMap) -> Result<()> {
