@@ -56,6 +56,9 @@ impl FullRestoreFlow {
 
     pub fn checked(&mut self, review: FullRestoreReview) {
         self.running = None;
+        if review.same {
+            self.device_changed = false;
+        }
         self.review = Some(review);
     }
 

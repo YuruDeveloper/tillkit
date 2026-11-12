@@ -270,6 +270,29 @@ mod tests {
     }
 
     #[test]
+    fn letter_1397_a_check_without_a_difference_ends_the_hold_of_a_stopped_restore() {
+        let (_directory, _kept, mut app) = app_with_both_checks();
+        let _ = app.update(restore(FullRestoreMessage::AskRestore));
+        let _ = app.update(Message::Confirm);
+        let stopped = FullRestoreMessage::Restored(Err("no answer to the last read".into()));
+        let _ = app.update(restore(stopped));
+        assert!(app.reboot_is_held() && !app.full_restore.can_close());
+
+        let mut different = review(&["super"]);
+        different.backup = app.install.backup.clone().expect("backup");
+        let _ = app.update(restore(FullRestoreMessage::Check));
+        let again = FullRestoreMessage::Checked(Ok(Box::new(different)));
+        let _ = app.update(restore(again));
+        assert!(app.reboot_is_held(), "the device is not the same yet");
+
+        let mut same = review(&[]);
+        same.backup = app.install.backup.clone().expect("backup");
+        let _ = app.update(restore(FullRestoreMessage::Checked(Ok(Box::new(same)))));
+        assert!(!app.reboot_is_held() && app.full_restore.can_close());
+        assert_eq!(app.full_restore.next_stage(), None);
+    }
+
+    #[test]
     fn letter_1371_a_reconnect_drops_the_restore_check() {
         let (_directory, _kept, mut app) = app_with_both_checks();
         let _ = app.update(Message::Install(InstallMessage::Reconnect));
