@@ -248,7 +248,7 @@ impl App {
 
     fn navigate(&mut self, screen: Screen) {
         self.screen = screen;
-        if screen == Screen::Backup && !self.is_busy() {
+        if matches!(screen, Screen::Backup | Screen::Write) && !self.is_busy() {
             self.reload_backups();
         }
     }
@@ -498,6 +498,20 @@ mod tests {
         assert!(app.chosen_folder_absent && app.store_error.is_none());
         app.activity = None;
         let _ = app.update(Message::Navigate(Screen::Backup));
+        assert!(!app.chosen_folder_absent && app.store_error.is_some());
+    }
+
+    #[test]
+    fn doc_1063_the_write_screen_reads_the_folder_again_when_it_opens() {
+        let directory = tempfile::tempdir().expect("tempdir");
+        let home = directory.path().to_path_buf();
+        let chosen = directory.path().join("chosen");
+        FolderChoice::new(&chosen).write(&home).expect("choice");
+        let mut app = App::beside_program(home);
+        folder_with_a_broken_store(directory.path(), "chosen");
+        let _ = app.update(Message::Navigate(Screen::Root));
+        assert!(app.store_error.is_none(), "another screen reads no folder");
+        let _ = app.update(Message::Navigate(Screen::Write));
         assert!(!app.chosen_folder_absent && app.store_error.is_some());
     }
 
