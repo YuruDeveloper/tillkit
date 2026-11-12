@@ -115,8 +115,8 @@ The tool finds the backup for a write in the folder of the `BACKUP` screen. You 
 When you select a system image on the `WRITE` screen, these steps open in sequence.
 
 1. Connection: Select the Firehose loader file. The tool connects to the device in EDL mode.
-2. Full backup: The tool reads all of the device into `full-backups` in the data folder. If the data folder has an install plan, the tool uses the full backup of the latest plan. If not, the tool uses the latest full backup of the data folder. You can also select a full backup in a different folder.
-3. Plan: The tool makes a plan file for the write. If the data folder has a plan for the same full backup and the same image, the tool uses that plan.
+2. Full backup: The tool reads all of the device into `full-backups` in the data folder. If the data folder has a full backup, the tool uses the latest one. You can also select a full backup in a different folder.
+3. Plan: The tool makes a plan file for the write. If the data folder has plans for the same image, the tool uses the latest of those plans and the full backup of that plan. Thus an installation that stopped continues with its first plan. If the tool cannot read that full backup, it stops and tells you. If you selected the folder of the full backup, the tool uses only a plan for that full backup.
 4. Check: The tool reads the device and compares it with the plan. The check finds a first installation or an installation that stopped. The tool does not write to the device before step 5.
 5. Write: After your approval, the tool writes the images and the partition tables, and it changes the boot LUN. Then it reads all that it wrote and compares the hashes.
 6. User data: The tool erases the user data immediately after the write. The approval of step 5 is also the approval for this step.

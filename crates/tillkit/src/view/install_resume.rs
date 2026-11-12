@@ -1,6 +1,6 @@
 use front2::install::{InstallPlan, InstallStep, ResumePoint};
 
-const FIRST_INSTALL: &str = "기록할 영역의 내용이 전체 백업과 같습니다. 첫 단계부터 기록합니다.";
+const FIRST_INSTALL: &str = "기록할 영역의 내용이 전체 백업과 같습니다.";
 const ONLY_RESTART: &str =
     "기록할 영역의 내용이 이미 모두 이 계획과 같습니다. 다시 시작하는 일만 남았습니다.";
 const BOOT_LUN: &str = "부팅 위치 바꾸기";

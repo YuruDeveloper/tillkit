@@ -12,6 +12,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 pub struct InstallFlow {
     pub connected: bool,
     pub backup: Option<PathBuf>,
+    pub backup_is_found: bool,
     pub refused_backup: Option<String>,
     pub review: Option<InstallReview>,
     pub progress: Option<InstallProgress>,
@@ -91,12 +92,23 @@ impl InstallFlow {
         self.forget_the_check();
     }
 
+    pub fn use_found_backup(&mut self, folder: Option<PathBuf>) {
+        self.backup_is_found = folder.is_some();
+        self.backup = folder;
+    }
+
+    pub fn use_plan(&mut self, review: InstallReview) {
+        self.backup = Some(review.plan.backup_directory.clone());
+        self.review = Some(review);
+    }
+
     pub fn use_backup(&mut self, folder: PathBuf) {
         self.use_new_backup(folder, Vec::new());
     }
 
     pub fn use_new_backup(&mut self, folder: PathBuf, single_read: Vec<String>) {
         self.backup = Some(folder);
+        self.backup_is_found = false;
         self.single_read = single_read;
         self.refused_backup = None;
         self.forget_the_plan();
@@ -308,9 +320,24 @@ pub mod tests {
         flow.refused_backup = Some("no manifest".into());
         flow.use_backup(PathBuf::from("other"));
         assert_eq!(flow.backup, Some(PathBuf::from("other")));
+        assert!(!flow.backup_is_found);
         assert!(flow.review.is_none() && flow.progress.is_none());
         assert!(flow.approved_sha256.is_none() && flow.refused_backup.is_none());
         assert_eq!(flow.next_stage(), Some(InstallStage::Plan));
+    }
+
+    #[test]
+    fn letter_1348_a_plan_gives_its_own_backup_to_the_flow() {
+        let (fixture, planned) = planned();
+        let review = planned.review.expect("review");
+        let mut flow = InstallFlow::default();
+        flow.use_found_backup(None);
+        assert!(!flow.backup_is_found && flow.backup.is_none());
+        flow.use_found_backup(Some(PathBuf::from("newest")));
+        assert!(flow.backup_is_found);
+        flow.use_plan(review);
+        assert_eq!(flow.backup, Some(fixture.inputs.backup_directory.clone()));
+        assert!(flow.backup_is_found && flow.review.is_some());
     }
 
     #[test]

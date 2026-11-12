@@ -55,8 +55,8 @@ impl App {
 
     pub fn find_full_backup(&mut self) {
         if self.install.backup.is_none() && !self.is_busy() {
-            let planned = gsi_worker::planned_backup(&self.paths);
-            self.install.backup = full_backup_store::found(&self.paths, planned);
+            let newest = full_backup_store::newest(&self.paths);
+            self.install.use_found_backup(newest);
         }
     }
 
@@ -134,9 +134,10 @@ impl App {
         };
         self.install.begin(InstallStage::Plan);
         let paths = self.paths.clone();
+        let found = self.install.backup_is_found;
         let profile = self.device_profile();
         run_blocking(
-            move || gsi_worker::prepare(&paths, &backup, &image, profile),
+            move || gsi_worker::prepare(&paths, &backup, found, &image, profile),
             planned,
         )
     }
@@ -144,7 +145,7 @@ impl App {
     fn install_planned(&mut self, result: Outcome<Box<InstallReview>>) {
         self.install.running = None;
         match result {
-            Ok(review) => self.install.review = Some(*review),
+            Ok(review) => self.install.use_plan(*review),
             Err(error) => self.install.stage_failed(InstallStage::Plan, error),
         }
     }

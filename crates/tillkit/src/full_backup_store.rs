@@ -17,18 +17,8 @@ pub fn new_folder(paths: &DataPaths, created_unix: u64) -> PathBuf {
         .join(format!("{FOLDER_PREFIX}{created_unix}"))
 }
 
-pub fn found(paths: &DataPaths, planned: Option<PathBuf>) -> Option<PathBuf> {
-    found_where(paths, planned, |folder| refusal(folder).is_none())
-}
-
-fn found_where(
-    paths: &DataPaths,
-    planned: Option<PathBuf>,
-    is_complete: impl Fn(&Path) -> bool,
-) -> Option<PathBuf> {
-    planned
-        .filter(|folder| is_complete(folder))
-        .or_else(|| newest_where(paths, &is_complete))
+pub fn newest(paths: &DataPaths) -> Option<PathBuf> {
+    newest_where(paths, |folder| refusal(folder).is_none())
 }
 
 fn newest_where(paths: &DataPaths, is_complete: impl Fn(&Path) -> bool) -> Option<PathBuf> {
@@ -71,27 +61,7 @@ mod tests {
         folder(&paths, "backup-2000", false);
         folder(&paths, "other-3000", true);
         assert_eq!(newest_where(&paths, marked), Some(newest_complete));
-        assert_eq!(found(&paths, None), None, "a mark is no full backup");
+        assert_eq!(newest(&paths), None, "a mark is no full backup");
         assert_eq!(new_folder(&paths, 7), paths.full_backups().join("backup-7"));
-    }
-
-    #[test]
-    fn letter_1345_the_backup_of_the_newest_plan_is_found_before_a_newer_backup() {
-        let directory = tempfile::tempdir().expect("tempdir");
-        let paths = DataPaths::new(directory.path());
-        let marked = |folder: &Path| folder.join(MARK).is_file();
-        let planned = folder(&paths, "backup-900", true);
-        let newest = folder(&paths, "backup-1000", true);
-        let stopped = folder(&paths, "backup-800", false);
-        assert_eq!(
-            found_where(&paths, Some(planned.clone()), marked),
-            Some(planned)
-        );
-        assert_eq!(
-            found_where(&paths, Some(stopped), marked),
-            Some(newest.clone()),
-            "the backup of the plan is not complete"
-        );
-        assert_eq!(found_where(&paths, None, marked), Some(newest));
     }
 }

@@ -1,5 +1,6 @@
 use crate::clock::now_unix;
 use crate::data_paths::DataPaths;
+use crate::full_backup_store;
 use crate::gsi_review::GsiReview;
 use crate::install_review::InstallReview;
 use front2::digest::sha256_file;
@@ -11,36 +12,59 @@ use std::path::{Path, PathBuf};
 
 const CANDIDATE_PREFIX: &str = "gsi-";
 const PLAN_PREFIX: &str = "install-";
+const BACKUP_NOT_READ: &str = "이 이미지로 만든 계획이 쓰던 전체 백업을 읽지 못했습니다. 그 폴더를 읽을 수 있게 한 뒤에 MAKE PLAN을 다시 누르거나, CHOOSE FOLDER로 쓸 전체 백업을 직접 골라 주세요.";
 
 pub fn prepare(
     paths: &DataPaths,
     backup: &Path,
+    backup_is_found: bool,
     gsi_image: &Path,
     profile: &DeviceProfile,
 ) -> Result<InstallReview> {
-    if let Some(stored) = stored(paths, backup, gsi_image) {
+    if let Some(stored) = stored(paths, backup, backup_is_found, gsi_image)? {
         return Ok(stored);
     }
     let review = build_candidate(paths, backup, gsi_image, profile)?;
     plan_install(paths, &review, backup, profile)
 }
 
-fn stored(paths: &DataPaths, backup: &Path, gsi_image: &Path) -> Option<InstallReview> {
-    let (gsi_bytes, gsi_sha256) = sha256_file(gsi_image).ok()?;
-    stored_where(paths, |plan| {
-        let candidate = GsiCandidate::load(&plan.candidate_directory).ok();
-        plan.backup_directory == backup
-            && candidate.is_some_and(|(candidate, _)| {
-                candidate.gsi_bytes == gsi_bytes && candidate.gsi_sha256 == gsi_sha256
-            })
-    })
+fn stored(
+    paths: &DataPaths,
+    backup: &Path,
+    backup_is_found: bool,
+    gsi_image: &Path,
+) -> Result<Option<InstallReview>> {
+    let Ok((gsi_bytes, gsi_sha256)) = sha256_file(gsi_image) else {
+        return Ok(None);
+    };
+    let has_image = |plan: &InstallPlan| {
+        GsiCandidate::load(&plan.candidate_directory).is_ok_and(|(candidate, _)| {
+            candidate.gsi_bytes == gsi_bytes && candidate.gsi_sha256 == gsi_sha256
+        })
+    };
+    if backup_is_found {
+        return stored_for_image(paths, has_image, full_backup_store::refusal);
+    }
+    Ok(stored_where(paths, |plan| {
+        plan.backup_directory == backup && has_image(plan)
+    }))
 }
 
-pub fn planned_backup(paths: &DataPaths) -> Option<PathBuf> {
-    newest_plan_folders(paths)
-        .iter()
-        .find_map(|directory| plan_record(directory))
-        .map(|plan| plan.backup_directory)
+fn stored_for_image(
+    paths: &DataPaths,
+    has_image: impl Fn(&InstallPlan) -> bool,
+    refusal: impl Fn(&Path) -> Option<String>,
+) -> Result<Option<InstallReview>> {
+    let Some(stored) = stored_where(paths, has_image) else {
+        return Ok(None);
+    };
+    let Some(reason) = refusal(&stored.plan.backup_directory) else {
+        return Ok(Some(stored));
+    };
+    let backup = stored.plan.backup_directory.display();
+    Err(Front2Error::Plan(format!(
+        "{BACKUP_NOT_READ} ({backup}: {reason})"
+    )))
 }
 
 fn stored_where(paths: &DataPaths, fits: impl Fn(&InstallPlan) -> bool) -> Option<InstallReview> {
@@ -161,6 +185,7 @@ mod tests {
             prepare(
                 &paths,
                 &backup,
+                false,
                 &image,
                 &front2::profiles::toss_front2::PROFILE
             )
@@ -190,12 +215,42 @@ mod tests {
         assert_eq!(found.directory, plans.join("install-9"));
         assert_eq!(found.plan.steps, plan.steps);
         let backup = fixture.inputs.backup_directory.clone();
-        assert_eq!(planned_backup(&paths), Some(backup.clone()));
         assert!(stored_where(&paths, |plan| plan.backup_directory == backup).is_some());
         assert!(stored_where(&paths, |_| false).is_none());
 
         std::fs::write(plans.join("install-9").join(PLAN_FILE), b"{}").expect("change the plan");
         let found = stored_where(&paths, |_| true).expect("the plan before it");
         assert_eq!(found.directory, plans.join("install-5"));
+    }
+
+    #[test]
+    fn letter_1348_a_found_backup_gives_the_newest_plan_of_the_image_and_its_backup() {
+        use crate::install_support::InstallFixture;
+
+        let fixture = InstallFixture::standard();
+        let paths = DataPaths::new(fixture.directory.path().join("data"));
+        let plans = paths.install_plans();
+        let first = InstallPlan::build(&fixture.inputs).expect("plan");
+        let mut later = first.clone();
+        later.backup_directory = fixture.directory.path().join("later-backup");
+        later.candidate_directory = fixture.directory.path().join("later-candidate");
+        first.save(&plans.join("install-5")).expect("save the plan");
+        later
+            .save(&plans.join("install-9"))
+            .expect("save the later plan");
+        let has_image = |plan: &InstallPlan| plan.candidate_directory == first.candidate_directory;
+        let unreadable = |_: &Path| Some("no manifest".to_string());
+
+        let found = stored_for_image(&paths, has_image, |_| None)
+            .expect("the backup is complete")
+            .expect("a stored plan");
+        assert_eq!(found.directory, plans.join("install-5"));
+        assert_eq!(found.plan.backup_directory, first.backup_directory);
+
+        let stopped = stored_for_image(&paths, has_image, unreadable)
+            .expect_err("the backup of the plan is not read");
+        assert!(stopped.to_string().contains("no manifest"));
+        let none = stored_for_image(&paths, |_| false, unreadable);
+        assert!(none.expect("no plan of the image").is_none());
     }
 }
