@@ -52,6 +52,7 @@ impl InstallFlow {
 
     pub fn begin(&mut self, stage: InstallStage) {
         self.failure = None;
+        self.refused_backup = None;
         self.transferred.store(0, Ordering::Relaxed);
         let expected = self.write_bytes().filter(|_| stage == InstallStage::Write);
         self.expected
@@ -324,6 +325,18 @@ pub mod tests {
         assert!(flow.review.is_none() && flow.progress.is_none());
         assert!(flow.approved_sha256.is_none() && flow.refused_backup.is_none());
         assert_eq!(flow.next_stage(), Some(InstallStage::Plan));
+    }
+
+    #[test]
+    fn a_stage_that_starts_drops_the_refusal_of_a_selected_folder() {
+        let mut flow = InstallFlow {
+            connected: true,
+            refused_backup: Some("no manifest".into()),
+            ..InstallFlow::default()
+        };
+        flow.begin(InstallStage::Backup);
+        assert!(flow.refused_backup.is_none());
+        assert_eq!(flow.running, Some(InstallStage::Backup));
     }
 
     #[test]
