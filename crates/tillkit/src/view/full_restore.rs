@@ -2,6 +2,7 @@ use crate::app::App;
 use crate::full_restore_message::FullRestoreMessage;
 use crate::full_restore_review::FullRestoreReview;
 use crate::full_restore_stage::FullRestoreStage;
+use crate::install_message::InstallMessage;
 use crate::message::Message;
 use crate::palette::Palette;
 use crate::step_status::StepStatus;
@@ -21,7 +22,8 @@ const RESTORED: &str = "전체 백업을 기기에 기록하고 다시 읽어서
 const RESTORED_WITHOUT_USER_DATA: &str = "사용자 데이터(userdata)를 뺀 영역을 전체 백업의 내용으로 기록하고 다시 읽어서 확인했습니다. userdata는 비교하지 않았고 기록하지도 않았습니다.";
 const AFTER_THE_RESTORE: &str = "Android로 다시 시작하지 않아도 됩니다. CLOSE FULL RESTORE를 누르면 설치 단계로 돌아가고, 같은 연결에서 설치의 CHECK DEVICE를 새로 할 수 있습니다.";
 const RESTART_SENT: &str = "다시 시작을 요청했습니다. 기기가 부팅했는지는 TillKit이 확인하지 못하므로, 기기에서 직접 확인해 주세요.";
-const UNFINISHED: &str = "이 기기는 복원이 끝나지 않은 상태입니다. 기기를 다시 시작하거나 끄지 말고, EDL 모드로 연결한 채로 CHECK DEVICE부터 다시 진행해 주세요. 다시 비교하면 아직 백업과 다른 영역만 기록합니다.";
+const UNFINISHED: &str = "이 기기는 복원이 끝나지 않은 상태입니다. 기기를 다시 시작하거나 끄지 말고, EDL 모드로 연결한 채로 CHECK DEVICE부터 다시 진행해 주세요. 다시 비교하면 아직 백업과 다른 영역만 기록합니다. 연결이 끊겼으면 RECONNECT로 먼저 다시 연결합니다.";
+const RECONNECT_NOTE: &str = "기기와의 연결이 끊겼으면 다시 연결한 뒤에 CHECK DEVICE를 합니다.";
 
 pub fn section<'a>(app: &'a App, page: Column<'a, Message>) -> Column<'a, Message> {
     let palette = app.palette;
@@ -95,11 +97,25 @@ fn details(app: &App, stage: FullRestoreStage, status: StepStatus) -> Vec<Elemen
             error,
             palette,
         ));
+        details.push(reconnect(app));
     }
     if restore.next_stage() == Some(stage) {
         details.push(action(app, stage));
     }
     details
+}
+
+fn reconnect<'a>(app: &App) -> Element<'a, Message> {
+    let palette = app.palette;
+    let open = !app.is_busy();
+    let message = open.then_some(Message::Install(InstallMessage::Reconnect));
+    row![
+        container(parts::note(RECONNECT_NOTE, palette)).width(Length::Fill),
+        parts::bracket("RECONNECT", message, palette),
+    ]
+    .spacing(12)
+    .align_y(Alignment::Center)
+    .into()
 }
 
 fn choice_details(app: &App) -> Vec<Element<'_, Message>> {

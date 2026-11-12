@@ -293,6 +293,29 @@ mod tests {
     }
 
     #[test]
+    fn letter_1402_a_stopped_restore_can_connect_again_and_keeps_the_hold() {
+        let (_directory, _kept, mut app) = app_with_both_checks();
+        let _ = app.update(restore(FullRestoreMessage::AskRestore));
+        let _ = app.update(Message::Confirm);
+        let stopped = FullRestoreMessage::Restored(Err("the cable came out".into()));
+        let _ = app.update(restore(stopped));
+        assert!(app.can_run_full_restore(FullRestoreStage::Check));
+
+        let _ = app.update(Message::Install(InstallMessage::Reconnect));
+        assert!(!app.install.connected && app.reboot_is_held());
+        assert_eq!(app.install.next_stage(), Some(InstallStage::Connect));
+        assert!(!app.can_run_full_restore(FullRestoreStage::Check));
+        assert!(app.full_restore.shown && !app.full_restore.can_close());
+
+        let _ = app.update(Message::Install(InstallMessage::Connected(Ok(()))));
+        assert!(
+            app.reboot_is_held(),
+            "a new connection does not end the hold"
+        );
+        assert!(app.can_run_full_restore(FullRestoreStage::Check));
+    }
+
+    #[test]
     fn letter_1371_a_reconnect_drops_the_restore_check() {
         let (_directory, _kept, mut app) = app_with_both_checks();
         let _ = app.update(Message::Install(InstallMessage::Reconnect));
