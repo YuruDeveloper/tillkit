@@ -6,7 +6,7 @@ const BACKUP_PREPARE: &str = "백업과 기기의 지금 상태를 견주어서,
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum WriteOrigin {
     #[default]
-    Folder,
+    Image,
     Magisk,
     Backup,
 }
@@ -14,7 +14,7 @@ pub enum WriteOrigin {
 impl WriteOrigin {
     pub fn screen_name(self) -> &'static str {
         match self {
-            Self::Folder => "WRITE",
+            Self::Image => "WRITE",
             Self::Magisk => "ROOT",
             Self::Backup => "BACKUP",
         }

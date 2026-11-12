@@ -83,20 +83,23 @@ You cannot continue with these devices:
 | --- | --- |
 | DEVICE | Reads the properties of the device and tells you if you can use the tool with it. This screen does not write. |
 | BACKUP | Reads `init_boot`, `boot` and `vbmeta` of the device into a folder on the computer. You select that folder on this screen. `RESTORE` in the list writes the images of that backup to the device again. |
-| WRITE | You select a folder with an image and push `WRITE`. The tool does the steps in sequence, from the plan to the check. |
+| WRITE | You select one image file and push `WRITE`. The tool does the steps in sequence, from the plan to the check. |
 | ROOT | Downloads Magisk, adds the Magisk patch to the `init_boot` of the device and writes it. |
 | ADVANCED | Starts the device again in system, recovery, bootloader (fastboot) or EDL mode. |
 | INFO | Shows the items that the tool does not do, and the notices. |
 
-### Folder for the WRITE screen
+### Image for the WRITE screen
 
-Put only one of these files in the folder.
+Select one image file. The name of the file is not important.
+The tool reads the header of the file and finds the type of the image.
 
-| File | Function |
+| Image | Function |
 | --- | --- |
-| `init_boot.img` | A root patch from a different tool. TillKit signs it and writes `init_boot` and `vbmeta`. |
-| `boot.img` | A kernel image. TillKit signs it and writes `boot` and `vbmeta`. TillKit cannot use a compressed kernel image. |
-| `system.img` | A GSI. TillKit makes an installation plan only and does not write to the device. For this file, the screen shows a line for the folder of the full backup. Select that folder before you push `WRITE`. |
+| A boot image without a kernel | A root patch from a different tool, for example an `init_boot` image from the Magisk app. TillKit signs it and writes `init_boot` and `vbmeta`. |
+| A boot image with a kernel | A kernel image. TillKit signs it and writes `boot` and `vbmeta`. TillKit cannot use a compressed kernel image. |
+| A system image | A GSI. TillKit does not write a GSI to the device. If you have a full backup of the device, the screen can make an installation plan. This step is optional. |
+
+The tool finds the backup for a write in the folder of the `BACKUP` screen. You do not select the backup on the `WRITE` screen.
 
 ### Safety steps of a write
 
@@ -114,7 +117,7 @@ If the device does not start with a kernel that you wrote, TillKit cannot write 
 - `ROOT` downloads the latest Magisk release from `github.com/topjohnwu/Magisk`. TillKit does not include Magisk.
 - TillKit does not add the patch to an `init_boot` that has Magisk.
 - TillKit does not install the Magisk app on the device. Install the app after the restart.
-- TillKit does not make other types of root patch. You can write an `init_boot.img` from a different tool on the `WRITE` screen.
+- TillKit does not make other types of root patch. You can write an `init_boot` image from a different tool on the `WRITE` screen.
 
 ### ADVANCED
 

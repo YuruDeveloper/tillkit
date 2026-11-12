@@ -103,7 +103,7 @@ fn write(app: &App) -> Element<'_, Message> {
 }
 
 fn source(app: &App) -> Option<[(&'static str, String); 2]> {
-    if let Some((kind, image)) = app.write.image() {
+    if let Some((kind, image)) = app.write.chosen_image() {
         let image = image.display().to_string();
         return Some([("하는 일", kind.work().into()), ("고른 이미지", image)]);
     }

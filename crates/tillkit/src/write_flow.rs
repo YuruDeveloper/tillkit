@@ -1,4 +1,4 @@
-use crate::folder_refusal::FolderRefusal;
+use crate::image_refusal::ImageRefusal;
 use crate::install_review::InstallReview;
 use crate::plan_review::PlanReview;
 use crate::step_status::StepStatus;
@@ -14,8 +14,8 @@ pub struct WriteFlow {
     pub origin: WriteOrigin,
     pub package: Option<MagiskPackage>,
     pub restored_backup: Option<u64>,
-    pub folder: Option<PathBuf>,
-    pub kind: Option<Result<WriteKind, FolderRefusal>>,
+    pub image: Option<PathBuf>,
+    pub kind: Option<Result<WriteKind, ImageRefusal>>,
     pub review: Option<PlanReview>,
     pub approved_sha256: Option<String>,
     pub staged: bool,
@@ -27,10 +27,10 @@ pub struct WriteFlow {
 }
 
 impl WriteFlow {
-    pub fn for_folder(folder: PathBuf) -> Self {
+    pub fn for_image(image: PathBuf) -> Self {
         Self {
-            kind: Some(WriteKind::in_folder(&folder)),
-            folder: Some(folder),
+            kind: Some(WriteKind::of_file(&image)),
+            image: Some(image),
             ..Self::default()
         }
     }
@@ -55,7 +55,7 @@ impl WriteFlow {
     }
 
     pub fn start_over(&mut self) {
-        *self = self.folder.take().map(Self::for_folder).unwrap_or_default();
+        *self = self.image.take().map(Self::for_image).unwrap_or_default();
     }
 
     pub fn reboot_failed(&self) -> bool {
@@ -80,10 +80,9 @@ impl WriteFlow {
         }
     }
 
-    pub fn image(&self) -> Option<(WriteKind, PathBuf)> {
+    pub fn chosen_image(&self) -> Option<(WriteKind, PathBuf)> {
         let kind = self.kind?.ok()?;
-        let folder = self.folder.as_ref()?;
-        Some((kind, folder.join(kind.file_name())))
+        Some((kind, self.image.clone()?))
     }
 
     pub fn has_result(&self) -> bool {
@@ -91,7 +90,7 @@ impl WriteFlow {
     }
 
     pub fn can_start(&self) -> bool {
-        self.running.is_none() && !self.has_result() && self.image().is_some()
+        self.running.is_none() && !self.has_result() && self.chosen_image().is_some()
     }
 
     pub fn is_unapproved(&self) -> bool {
@@ -250,7 +249,7 @@ pub mod tests {
 
     fn chosen(kind: WriteKind) -> WriteFlow {
         WriteFlow {
-            folder: Some(PathBuf::from("images")),
+            image: Some(PathBuf::from("new.img")),
             kind: Some(Ok(kind)),
             ..WriteFlow::default()
         }
@@ -273,14 +272,14 @@ pub mod tests {
     fn a_start_needs_one_image_and_no_earlier_result() {
         assert!(!WriteFlow::default().can_start());
         let mut refused = chosen(WriteKind::Kernel);
-        refused.kind = Some(Err(FolderRefusal::SeveralImages));
+        refused.kind = Some(Err(ImageRefusal::NotKnown));
         assert!(!refused.can_start());
 
         let mut flow = chosen(WriteKind::Kernel);
         assert!(flow.can_start());
         assert_eq!(
-            flow.image(),
-            Some((WriteKind::Kernel, PathBuf::from("images").join("boot.img")))
+            flow.chosen_image(),
+            Some((WriteKind::Kernel, PathBuf::from("new.img")))
         );
         flow.failure = Some((WriteStep::Prepare, "no device".into()));
         assert!(flow.can_start(), "a failed preparation can start again");
@@ -374,7 +373,7 @@ pub mod tests {
     }
 
     #[test]
-    fn a_gsi_folder_stops_after_the_plan() {
+    fn a_gsi_image_stops_after_the_plan() {
         let flow = chosen(WriteKind::Gsi);
         assert_eq!(flow.status(WriteStep::Prepare), StepStatus::Waiting);
         for step in [WriteStep::Stage, WriteStep::Write, WriteStep::Reboot] {
@@ -444,7 +443,7 @@ pub mod tests {
         gsi.failure = Some((WriteStep::Prepare, "the backup has no super".into()));
         gsi.full_backup_changed();
         assert!(gsi.failure.is_none());
-        assert_eq!(gsi.folder, Some(PathBuf::from("images")));
+        assert_eq!(gsi.image, Some(PathBuf::from("new.img")));
 
         let mut planning = chosen(WriteKind::Gsi);
         planning.running = Some(WriteStep::Prepare);
@@ -458,36 +457,48 @@ pub mod tests {
     }
 
     #[test]
-    fn a_root_flow_goes_back_to_an_empty_folder_flow_at_a_new_start() {
+    fn a_root_flow_goes_back_to_an_empty_image_flow_at_a_new_start() {
         let mut flow = WriteFlow::for_magisk();
-        assert!(!flow.is_open() && !flow.can_start(), "no image folder");
+        assert!(!flow.is_open() && !flow.can_start(), "no image");
         flow.running = Some(WriteStep::Prepare);
         assert!(flow.is_open());
         flow.running = None;
         flow.review = Some(review());
         assert!(flow.is_open() && flow.can_start_over());
         flow.start_over();
-        assert_eq!(flow.origin, WriteOrigin::Folder);
+        assert_eq!(flow.origin, WriteOrigin::Image);
         assert!(flow.review.is_none() && flow.package.is_none() && !flow.is_open());
     }
 
     #[test]
-    fn a_restore_flow_goes_back_to_an_empty_folder_flow_at_a_new_start() {
+    fn a_restore_flow_goes_back_to_an_empty_image_flow_at_a_new_start() {
         let mut flow = WriteFlow::for_backup(1_794_412_800);
         assert_eq!(flow.origin, WriteOrigin::Backup);
-        assert!(!flow.is_open() && !flow.can_start(), "no image folder");
+        assert!(!flow.is_open() && !flow.can_start(), "no image");
         flow.review = Some(review());
         assert!(flow.is_open() && flow.can_start_over());
         flow.start_over();
-        assert_eq!(flow.origin, WriteOrigin::Folder);
+        assert_eq!(flow.origin, WriteOrigin::Image);
         assert!(flow.restored_backup.is_none() && !flow.is_open());
     }
 
     #[test]
-    fn a_new_start_keeps_the_folder_only() {
+    fn a_new_start_keeps_the_image_only_and_reads_it_again() {
         let mut flow = staged();
-        flow.folder = None;
+        flow.image = None;
         flow.start_over();
         assert!(flow.review.is_none() && flow.kind.is_none() && !flow.staged);
+
+        let directory = tempfile::tempdir().expect("tempdir");
+        let image = directory.path().join("patched.img");
+        std::fs::write(&image, crate::write_kind::tests::boot_head(0)).expect("image");
+        let mut flow = WriteFlow::for_image(image.clone());
+        assert_eq!(flow.kind, Some(Ok(WriteKind::RootImage)));
+        flow.review = Some(review());
+        std::fs::write(&image, crate::write_kind::tests::boot_head(7)).expect("image");
+        flow.start_over();
+        assert_eq!(flow.image, Some(image));
+        assert_eq!(flow.kind, Some(Ok(WriteKind::Kernel)));
+        assert!(flow.review.is_none());
     }
 }

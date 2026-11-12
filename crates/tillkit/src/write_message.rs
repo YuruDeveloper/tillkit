@@ -5,8 +5,8 @@ use std::path::PathBuf;
 
 #[derive(Debug, Clone)]
 pub enum WriteMessage {
-    PickFolder,
-    FolderPicked(Option<PathBuf>),
+    PickImage,
+    ImagePicked(Option<PathBuf>),
     Start,
     Prepared(Result<Box<PlanReview>, String>),
     InstallPlanned(Result<Box<InstallReview>, String>),

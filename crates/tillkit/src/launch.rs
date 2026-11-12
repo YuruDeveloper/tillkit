@@ -123,8 +123,8 @@ pub fn preview(app: &mut App) {
     if let Some(folder) = std::env::var_os("TILLKIT_PREVIEW_FULL_BACKUP").map(PathBuf::from) {
         let _ = app.update(Message::FullBackupPicked(Some(folder)));
     }
-    if let Some(folder) = std::env::var_os("TILLKIT_PREVIEW_IMAGES").map(PathBuf::from) {
-        app.write = WriteFlow::for_folder(folder);
+    if let Some(image) = std::env::var_os("TILLKIT_PREVIEW_IMAGE").map(PathBuf::from) {
+        app.write = WriteFlow::for_image(image);
     }
     match std::env::var("TILLKIT_PREVIEW_FORCE").as_deref() {
         Ok("ask") => app.confirmation = Some(Confirmation::ForceSupport),
