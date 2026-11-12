@@ -3,13 +3,13 @@ use crate::install_review::InstallReview;
 use crate::message::Message;
 use crate::palette::Palette;
 use crate::view::confirm::{answers, stated};
-use crate::view::parts;
+use crate::view::{install_resume, parts};
 use iced::Element;
 use iced::widget::{Column, column};
 use std::path::Path;
 
 const WRITE_WARNING: &str = "아래 내용을 기기에 기록합니다. 이 기록은 기기의 사용자 데이터를 지웁니다. 기록을 시작한 뒤에는 데이터를 지우는 일만 따로 취소할 수 없습니다. 기록하는 동안에는 USB 케이블을 뽑거나 기기를 끄지 말아 주세요.";
-const WRITE_KEPT: &str = "기록한 영역은 모두 다시 읽어서 확인합니다. 기록하는 도중에 멈추면 기기가 부팅하지 못할 수 있습니다.";
+const WRITE_KEPT: &str = "기록한 영역은 모두 다시 읽어서 확인합니다. 기록하는 도중에 멈추면 기기가 부팅하지 못할 수 있습니다. 그때는 기기를 EDL 모드로 연결해 둔 채로 다시 점검해서, 멈춘 곳부터 이어 할 수 있는지 확인합니다.";
 const NO_RESTORE: &str = "순정으로 되돌리는 일은 아직 TillKit으로 할 수 없습니다. 되돌리려면 전체 백업을 다른 도구로 기기에 기록해야 합니다.";
 const NOT_TESTED: &str =
     "TillKit으로 GSI를 기록한 기기가 부팅하는지는 아직 실제 기기에서 확인하지 못했습니다.";
@@ -28,7 +28,9 @@ pub fn write(app: &App) -> Element<'_, Message> {
     if let Some(review) = &app.install.review {
         let image = app.gsi_image();
         let backup = app.install.backup.as_deref();
-        content = content.push(facts(review, image.as_deref(), backup, palette));
+        let first = app.install.verified_steps();
+        content = content.push(facts(review, image.as_deref(), backup, first, palette));
+        content = continued(content, app, review, palette);
         content = unknowns(content, review, palette);
     }
     content = content
@@ -43,6 +45,7 @@ fn facts<'a>(
     review: &InstallReview,
     image: Option<&Path>,
     backup: Option<&Path>,
+    first: usize,
     palette: Palette,
 ) -> Element<'a, Message> {
     let plan = &review.plan;
@@ -50,6 +53,7 @@ fn facts<'a>(
     let targets: Vec<&str> = plan
         .write_steps()
         .into_iter()
+        .filter(|(index, _)| *index >= first)
         .map(|(_, step)| step.name.as_str())
         .collect();
     let boot_lun = format!("LUN {} → LUN {}", plan.original_boot_lun, plan.new_boot_lun);
@@ -85,6 +89,21 @@ fn halved(sha256: &str) -> String {
         "{first}
 {second}"
     )
+}
+
+fn continued<'a>(
+    mut content: Column<'a, Message>,
+    app: &App,
+    review: &InstallReview,
+    palette: Palette,
+) -> Column<'a, Message> {
+    let Some(resume) = app.install.resume().filter(|resume| !resume.first_install) else {
+        return content;
+    };
+    for line in install_resume::lines(resume, &review.plan) {
+        content = content.push(parts::body(line, palette));
+    }
+    content
 }
 
 fn unknowns<'a>(

@@ -2,7 +2,7 @@ use crate::install_review::InstallReview;
 use crate::install_stage::InstallStage;
 use crate::step_status::StepStatus;
 use front2::install::{
-    DataWipeApproval, InstallProgress, InstallStep, RestartApproval, WriteApproval,
+    DataWipeApproval, InstallProgress, InstallStep, RestartApproval, ResumePoint, WriteApproval,
 };
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -101,10 +101,11 @@ impl InstallFlow {
 
     pub fn write_bytes(&self) -> Option<u64> {
         let plan = &self.review.as_ref()?.plan;
+        let first = self.verified_steps();
         let sectors: u64 = plan
             .write_steps()
             .into_iter()
-            .filter(|(_, step)| !step.requires_data_wipe_approval)
+            .filter(|(index, step)| *index >= first && !step.requires_data_wipe_approval)
             .map(|(_, step)| step.sectors)
             .sum();
         sectors.checked_mul(plan.sector_bytes)?.checked_mul(2)
@@ -118,7 +119,12 @@ impl InstallFlow {
         stopped_late && self.running.is_none()
     }
 
-    fn verified_steps(&self) -> usize {
+    pub fn resume(&self) -> Option<&ResumePoint> {
+        let progress = self.progress.as_ref().filter(|_| self.is_checked())?;
+        progress.preflight.as_ref()?.resume.as_ref()
+    }
+
+    pub fn verified_steps(&self) -> usize {
         self.progress
             .as_ref()
             .map_or(0, InstallProgress::verified_steps)
@@ -379,6 +385,33 @@ pub mod tests {
         flow.forget_the_check();
         assert_eq!(flow.next_stage(), Some(InstallStage::Check));
         assert!(flow.backup.is_some() && flow.review.is_some());
+    }
+
+    #[test]
+    fn a_second_check_continues_at_the_step_that_is_left() {
+        let (fixture, mut flow) = planned();
+        let directory = fixture.plan_directory();
+        let (_directory, mut link) = link_of(fixture);
+        flow.progress = Some(install_worker::check(&mut link, &directory).expect("check"));
+        assert!(flow.resume().is_some_and(|resume| resume.first_install));
+        assert!(flow.approve());
+        let (write, wipe) = flow.write_approvals(1).expect("the write is next");
+        install_worker::write(&mut link, &write, &wipe).expect("write");
+
+        flow.forget_the_check();
+        assert!(flow.resume().is_none());
+        flow.progress = Some(install_worker::check(&mut link, &directory).expect("second check"));
+        let resume = flow.resume().expect("the second check passed").clone();
+        assert!(!resume.first_install && resume.unknown_content.is_none());
+        assert_eq!(resume.next_index, flow.verified_steps());
+        assert_eq!(flow.status(InstallStage::Write), StepStatus::Done);
+        assert_eq!(flow.next_stage(), Some(InstallStage::Wipe));
+        assert_eq!(flow.write_bytes(), Some(0));
+
+        assert!(flow.approve());
+        let (write, wipe) = flow.write_approvals(2).expect("the wipe is next");
+        flow.progress = Some(install_worker::wipe(&mut link, &write, &wipe).expect("wipe"));
+        assert_eq!(flow.next_stage(), Some(InstallStage::Restart));
     }
 
     #[test]

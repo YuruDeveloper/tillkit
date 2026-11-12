@@ -116,13 +116,13 @@ When you select a system image on the `WRITE` screen, these steps open in sequen
 
 1. Connection: Select the Firehose loader file. The tool connects to the device in EDL mode.
 2. Full backup: The tool reads all of the device into `full-backups` in the data folder. If the data folder has full backups, the tool uses the latest one. You can also select a full backup in a different folder.
-3. Plan: The tool makes a plan file for the write.
-4. Check: The tool reads the device and compares it with the plan. The tool does not write to the device before step 5.
+3. Plan: The tool makes a plan file for the write. If the data folder has a plan for the same full backup and the same image, the tool uses that plan.
+4. Check: The tool reads the device and compares it with the plan. The check finds a first installation or an installation that stopped. The tool does not write to the device before step 5.
 5. Write: After your approval, the tool writes the images and the partition tables, and it changes the boot LUN. Then it reads all that it wrote and compares the hashes.
 6. User data: The tool erases the user data immediately after the write. The approval of step 5 is also the approval for this step.
 7. Restart: The tool gets a different approval for the restart.
 
-- If the write does not complete, the device can become unbootable. TillKit cannot write the stock firmware again.
+- If the write does not complete, the device can become unbootable. Keep the device in EDL mode and do the check again. If the check finds the step that stopped, the tool continues from that step. TillKit cannot write the stock firmware again.
 - TillKit cannot compare the rollback values that the device keeps with the values of the images.
 - TillKit cannot tell if the device started from the GSI after the restart.
 
@@ -158,6 +158,7 @@ The checks for these items used a simulated device and a local shell only.
 Write functions:
 
 - All steps of the GSI installation: the EDL connection, the full backup, the check, the write, the removal of the user data and the restart.
+- A GSI installation that stopped and that the tool continues from the step that stopped.
 - The start of the device from a GSI that TillKit wrote.
 - Backup, write and `RESTORE` on a device.
 - A write through `su`.
@@ -175,7 +176,6 @@ Other functions:
 
 - A write to a device that has no root access, and root access for such a device.
 - The restore of a full backup to the device. Thus TillKit cannot write the stock firmware again after a GSI installation.
-- A second start of an installation that did not complete.
 - Recovery of a device that does not start after a write.
 - Automatic removal of `/data/local/tmp/front2-write-*` on the device.
 - A time limit for device commands. If the device gives no result during a write, the tool continues to wait and the write state is not known. The tool does not try again and does not start the device again.

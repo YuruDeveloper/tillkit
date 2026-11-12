@@ -5,7 +5,7 @@ use crate::message::Message;
 use crate::palette::Palette;
 use crate::reboot_message::RebootMessage;
 use crate::step_status::StepStatus;
-use crate::view::{flow, parts};
+use crate::view::{flow, install_resume, parts};
 use iced::widget::{Column, Row, Space, column, container, row};
 use iced::{Alignment, Element, Length};
 use std::path::PathBuf;
@@ -17,7 +17,8 @@ const NOT_CHOSEN: &str = "고르지 않음";
 const NOT_FOUND: &str = "아직 없음";
 const NO_FULL_BACKUP: &str = "고른 폴더는 설치에 쓸 수 있는 전체 백업이 아닙니다. 다른 폴더를 고르거나, 전체 백업을 새로 만들어 주세요.";
 const SINGLE_READ: &str = "크기 때문에 한 번만 읽어서, 다시 읽어 대조하지 못한 영역";
-const CHECKED: &str = "기기의 내용이 이 계획과 맞습니다. 기록을 시작할 수 있습니다.";
+const CHECKED: &str = "기기의 내용이 이 계획과 맞습니다.";
+const READY: &str = "기록을 시작할 수 있습니다.";
 const RESTART_SENT: &str = "다시 시작을 요청했습니다. 첫 부팅은 사용자 데이터를 지우느라 오래 걸릴 수 있습니다. 기기가 GSI로 부팅했는지는 TillKit이 확인하지 못하므로, 기기에서 직접 확인해 주세요.";
 const METER_PARTS: u16 = 1000;
 const METER_LEAST: u16 = 4;
@@ -59,14 +60,13 @@ fn stage_row(app: &App, stage: InstallStage) -> Element<'_, Message> {
 }
 
 fn details(app: &App, stage: InstallStage, status: StepStatus) -> Vec<Element<'_, Message>> {
-    let palette = app.palette;
     let install = &app.install;
     let checked = status == StepStatus::Done && !install.needs_a_new_check();
     let mut details = match stage {
         InstallStage::Connect => connect_details(app, status),
         InstallStage::Backup => backup_details(app),
         InstallStage::Plan => plan_details(app),
-        InstallStage::Check if checked => vec![parts::note(CHECKED, palette)],
+        InstallStage::Check if checked => check_details(app),
         _ => Vec::new(),
     };
     if status == StepStatus::Running && install.transferred_bytes() > 0 {
@@ -123,6 +123,31 @@ fn backup_details(app: &App) -> Vec<Element<'_, Message>> {
         details.push(parts::note(format!("{SINGLE_READ}: {names}"), palette));
     }
     details
+}
+
+fn check_details(app: &App) -> Vec<Element<'_, Message>> {
+    let palette = app.palette;
+    let install = &app.install;
+    let continued = install.resume().filter(|resume| !resume.first_install);
+    let mut details: Vec<Element<'_, Message>> = match (install.resume(), &install.review) {
+        (Some(resume), Some(review)) => install_resume::lines(resume, &review.plan)
+            .into_iter()
+            .map(|line| resume_line(line, continued.is_some(), palette))
+            .collect(),
+        _ => vec![parts::note(CHECKED, palette)],
+    };
+    if install.next_stage() == Some(InstallStage::Write) {
+        details.push(parts::note(READY, palette));
+    }
+    details
+}
+
+fn resume_line<'a>(line: String, continued: bool, palette: Palette) -> Element<'a, Message> {
+    if continued {
+        parts::body(line, palette)
+    } else {
+        parts::note(line, palette)
+    }
 }
 
 fn plan_details(app: &App) -> Vec<Element<'_, Message>> {
