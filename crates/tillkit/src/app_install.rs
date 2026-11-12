@@ -60,7 +60,8 @@ impl App {
     }
 
     pub fn full_backup_picked(&mut self, folder: Option<PathBuf>) {
-        let (Some(folder), false) = (folder, self.is_busy()) else {
+        let closed = self.is_busy() || self.install.keeps_the_plan();
+        let (Some(folder), false) = (folder, closed) else {
             return;
         };
         match full_backup_store::refusal(&folder) {
@@ -242,7 +243,7 @@ impl App {
     }
 
     fn install_start_over(&mut self) {
-        if !self.is_busy() {
+        if !self.is_busy() && !self.install.keeps_the_plan() {
             self.install.forget_the_plan();
         }
     }
@@ -458,5 +459,75 @@ mod tests {
         let _ = app.update(install(InstallMessage::StartOver));
         assert!(!app.reboot_is_held() && app.install.connected);
         assert_eq!(app.install.next_stage(), Some(InstallStage::Plan));
+    }
+
+    fn stopped_write(app: &mut App) {
+        let (_kept, flow) = checked();
+        app.install = flow;
+        app.reboot.connection = Some(DeviceConnection::Edl);
+        let _ = app.update(install(InstallMessage::AskWrite));
+        let _ = app.update(Message::Confirm);
+        let stopped = InstallMessage::Written(Err("the cable came out".into()));
+        let _ = app.update(install(stopped));
+        assert!(app.install.needs_a_new_check() && app.reboot_is_held());
+        assert!(app.install.write_is_unfinished());
+    }
+
+    fn no_restart_opens(app: &mut App) {
+        assert!(app.reboot_is_held() && app.install.write_is_unfinished());
+        let ask = RebootMessage::Ask(RebootTarget::System);
+        let _ = app.update(Message::Reboot(ask));
+        assert!(app.confirmation.is_none());
+    }
+
+    #[test]
+    fn doc_1072_a_new_image_after_a_stopped_write_keeps_the_plan_and_the_reboot_hold() {
+        let (directory, mut app) = app_with_gsi();
+        stopped_write(&mut app);
+        app.reboot.loader = Some(directory.path().join("loader.elf"));
+        let image = app.gsi_image().expect("image");
+        let other = directory.path().join("other.img");
+        std::fs::copy(&image, &other).expect("image");
+        assert!(!app.can_choose_write_image());
+        let _ = app.update(Message::Write(WriteMessage::ImagePicked(Some(other))));
+        assert_eq!(app.gsi_image(), Some(image));
+        assert!(app.install.review.is_some() && app.install.failure.is_some());
+        no_restart_opens(&mut app);
+    }
+
+    #[test]
+    fn doc_1072_start_over_and_a_new_backup_after_a_stopped_write_keep_the_plan() {
+        let (_directory, mut app) = app_with_gsi();
+        stopped_write(&mut app);
+        let backup = app.install.backup.clone().expect("backup");
+        let _ = app.update(install(InstallMessage::StartOver));
+        let _ = app.update(Message::FullBackupPicked(Some(backup.clone())));
+        assert_eq!(app.install.backup, Some(backup));
+        assert!(app.install.review.is_some() && app.install.failure.is_some());
+        no_restart_opens(&mut app);
+    }
+
+    #[test]
+    fn doc_1072_a_failed_reconnect_after_a_stopped_write_keeps_the_reboot_hold() {
+        let (directory, mut app) = app_with_gsi();
+        app.reboot.loader = Some(directory.path().join("loader.elf"));
+        stopped_write(&mut app);
+        let _ = app.update(install(InstallMessage::Reconnect));
+        assert_eq!(app.install.running, Some(InstallStage::Connect));
+        let failed = InstallMessage::Connected(Err("no port".into()));
+        let _ = app.update(install(failed));
+        assert!(!app.install.connected && app.install.progress.is_none());
+        no_restart_opens(&mut app);
+    }
+
+    #[test]
+    fn doc_1072_the_reboot_hold_ends_when_the_restart_is_sent() {
+        let (_directory, mut app) = app_with_gsi();
+        stopped_write(&mut app);
+        let progress = app.install.progress.as_mut().expect("progress");
+        progress.restart_sent = true;
+        assert!(app.install.is_finished());
+        assert!(!app.reboot_is_held() && !app.install.write_is_unfinished());
+        assert!(!app.install.keeps_the_plan());
     }
 }

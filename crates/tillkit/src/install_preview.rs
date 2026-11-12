@@ -126,9 +126,11 @@ fn finish(app: &mut App, pose: &str) {
             app.confirmation = Some(Confirmation::InstallWrite);
         }
         "writing" => run(&mut app.install, InstallStage::Write, 3_277, 9_626),
-        "stopped" => app
-            .install
-            .stage_failed(InstallStage::Write, WRITE_STOPPED.into()),
+        "stopped" => {
+            app.install.device_changed = true;
+            app.install
+                .stage_failed(InstallStage::Write, WRITE_STOPPED.into());
+        }
         "restart-confirm" => app.confirmation = Some(Confirmation::InstallRestart),
         _ => {}
     }

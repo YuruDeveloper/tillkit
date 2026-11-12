@@ -21,6 +21,7 @@ pub struct InstallFlow {
     pub expected: Arc<AtomicU64>,
     pub running: Option<InstallStage>,
     pub failure: Option<(InstallStage, String)>,
+    pub device_changed: bool,
 }
 
 impl InstallFlow {
@@ -35,7 +36,17 @@ impl InstallFlow {
     }
 
     pub fn holds_the_device(&self) -> bool {
-        self.connected && self.progress.is_some() && !self.is_finished()
+        let checked = self.connected && self.progress.is_some();
+        (checked || self.device_changed) && !self.is_finished()
+    }
+
+    pub fn keeps_the_plan(&self) -> bool {
+        self.device_changed && !self.is_finished()
+    }
+
+    pub fn write_is_unfinished(&self) -> bool {
+        let changing = self.running.is_some_and(InstallStage::changes_the_device);
+        self.keeps_the_plan() && !changing && !self.is_done(InstallStage::Wipe)
     }
 
     pub fn begin(&mut self, stage: InstallStage) {
@@ -45,6 +56,7 @@ impl InstallFlow {
         self.expected
             .store(expected.unwrap_or(0), Ordering::Relaxed);
         self.running = Some(stage);
+        self.device_changed |= matches!(stage, InstallStage::Write | InstallStage::Wipe);
     }
 
     pub fn stage_failed(&mut self, stage: InstallStage, error: String) {

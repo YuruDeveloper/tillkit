@@ -53,7 +53,7 @@ impl App {
     }
 
     pub fn can_choose_write_image(&self) -> bool {
-        !self.is_busy() && !self.write.has_result()
+        !self.is_busy() && !self.write.has_result() && !self.install.keeps_the_plan()
     }
 
     fn pick_write_image(&mut self) -> Task<Message> {

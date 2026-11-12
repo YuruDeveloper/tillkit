@@ -17,7 +17,7 @@ const ROLLBACK_UNKNOWN: &str =
     "기기에 저장된 rollback 값과 기록할 이미지의 값이 맞는지는 TillKit이 확인하지 못했습니다.";
 const BOOT_LUN_UNKNOWN: &str =
     "바꾼 부팅 위치가 다시 시작한 뒤에도 유지되는지는 TillKit이 확인하지 못했습니다.";
-const RESTART_QUESTION: &str = "기록한 내용을 다시 읽어서 확인했습니다. 기기를 지금 다시 시작하면 GSI로 부팅하고, 첫 부팅에서 사용자 데이터를 지웁니다. 부팅에 성공하는지는 TillKit이 확인하지 못합니다. 나중에 하려면 LATER를 눌러 주세요.";
+const RESTART_QUESTION: &str = "기록한 내용을 다시 읽어서 확인했습니다. 기기를 지금 다시 시작하면, 기기는 사용자 데이터를 지운 뒤에 GSI로 부팅을 시도합니다. 부팅에 성공하는지는 TillKit이 확인하지 못합니다. 나중에 하려면 LATER를 눌러 주세요.";
 
 pub fn write(app: &App) -> Element<'_, Message> {
     let palette = app.palette;
