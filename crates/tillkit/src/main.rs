@@ -2,6 +2,7 @@
 
 mod adb_shell;
 mod app;
+mod app_full_restore;
 mod app_install;
 mod app_reboot;
 mod app_restore;
@@ -17,6 +18,13 @@ mod edl_storage;
 mod folder_choice;
 mod fonts;
 mod full_backup_store;
+mod full_restore_flow;
+mod full_restore_message;
+#[cfg(debug_assertions)]
+mod full_restore_preview;
+mod full_restore_review;
+mod full_restore_stage;
+mod full_restore_worker;
 mod grain;
 mod gsi_review;
 mod gsi_worker;

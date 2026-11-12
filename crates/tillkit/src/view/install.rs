@@ -1,11 +1,12 @@
 use crate::app::App;
+use crate::full_restore_message::FullRestoreMessage;
 use crate::install_message::InstallMessage;
-use crate::install_stage::InstallStage;
+use crate::install_stage::{InstallStage, OTHER_STATE};
 use crate::message::Message;
 use crate::palette::Palette;
 use crate::reboot_message::RebootMessage;
 use crate::step_status::StepStatus;
-use crate::view::{flow, install_resume, parts};
+use crate::view::{flow, full_restore, install_resume, parts};
 use iced::widget::{Column, Row, Space, column, container, row};
 use iced::{Alignment, Element, Length};
 use std::path::{Path, PathBuf};
@@ -18,6 +19,9 @@ const NOT_FOUND: &str = "아직 없음";
 const USE_EXISTING_BACKUP: &str = "USE EXISTING BACKUP";
 const NO_FULL_BACKUP: &str = "고른 폴더는 전체 백업이 아닙니다. USE EXISTING BACKUP은 이미 만들어 둔 전체 백업을 고르는 단추입니다. 새로 만들 때는 저장할 폴더를 고르지 않고 MAKE FULL BACKUP을 누릅니다.";
 const SINGLE_READ: &str = "크기 때문에 한 번만 읽어서, 다시 읽어 대조하지 못한 영역";
+const RESTORE_ENTRY: &str = "RESTORE TO DEVICE";
+const RESTORE_NOTE: &str =
+    "이 전체 백업을 기기에 되돌릴 수도 있습니다. 연결과 백업은 이 화면의 것을 그대로 씁니다.";
 const CHECKED: &str = "기록할 영역의 내용이 이 계획과 맞습니다.";
 const READY: &str = "기록을 시작할 수 있습니다.";
 const RESTART_SENT: &str = "다시 시작을 요청했습니다. 첫 부팅은 사용자 데이터를 지우느라 오래 걸릴 수 있습니다. 기기가 GSI로 부팅했는지는 TillKit이 확인하지 못하므로, 기기에서 직접 확인해 주세요.";
@@ -52,6 +56,9 @@ pub fn steps<'a>(app: &'a App, mut page: Column<'a, Message>) -> Column<'a, Mess
     if install.has_plan() && !app.is_busy() && !install.keeps_the_plan() {
         let start_over = Message::Install(InstallMessage::StartOver);
         page = page.push(parts::bracket("START OVER", Some(start_over), palette));
+    }
+    if app.full_restore.shown {
+        page = full_restore::section(app, page);
     }
     page
 }
@@ -138,6 +145,18 @@ fn backup_details(app: &App) -> Vec<Element<'_, Message>> {
         let names = install.single_read.join(" · ");
         details.push(parts::note(format!("{SINGLE_READ}: {names}"), palette));
     }
+    if install.backup.is_some() && !app.full_restore.shown {
+        let open = app
+            .can_open_full_restore()
+            .then_some(Message::FullRestore(FullRestoreMessage::Open));
+        let entry = row![
+            container(parts::note(RESTORE_NOTE, palette)).width(Length::Fill),
+            parts::bracket(RESTORE_ENTRY, open, palette),
+        ]
+        .spacing(12)
+        .align_y(Alignment::Center);
+        details.push(entry.into());
+    }
     details
 }
 
@@ -208,9 +227,12 @@ fn picked<'a>(
 }
 
 fn transfer(app: &App) -> Element<'_, Message> {
-    let palette = app.palette;
     let done = app.install.transferred_bytes();
-    let Some(expected) = app.install.expected_bytes() else {
+    progress(done, app.install.expected_bytes(), app.palette)
+}
+
+pub fn progress<'a>(done: u64, expected: Option<u64>, palette: Palette) -> Element<'a, Message> {
+    let Some(expected) = expected else {
         return parts::value(format!("{} transferred", gibibytes(done)), palette);
     };
     let words = format!("{} / {}", gibibytes(done), gibibytes(expected));
@@ -268,22 +290,36 @@ fn action<'a>(app: &App, stage: InstallStage) -> Element<'a, Message> {
 
 fn failure<'a>(app: &App, stage: InstallStage, error: &str) -> Element<'a, Message> {
     let palette = app.palette;
-    let fault = parts::fault(
-        stage.failed_caption(),
-        stage.failed_sentence(),
-        error,
-        palette,
-    );
+    let other_state = stage.stopped_by_another_device_state(error);
+    let fault = if other_state {
+        let fault = parts::fault(stage.failed_caption(), OTHER_STATE, "", palette);
+        column![fault, parts::label(error.to_string(), palette)]
+            .spacing(6)
+            .into()
+    } else {
+        parts::fault(
+            stage.failed_caption(),
+            stage.failed_sentence(),
+            error,
+            palette,
+        )
+    };
     if !app.install.needs_a_new_check() || app.is_busy() {
         return fault;
     }
     let check_again = Message::Install(InstallMessage::CheckAgain);
     let reconnect = Message::Install(InstallMessage::Reconnect);
-    let answers = row![
+    let mut answers = row![
         parts::bracket("CHECK AGAIN", Some(check_again), palette),
         parts::bracket("RECONNECT", Some(reconnect), palette),
     ]
     .spacing(18);
+    if other_state {
+        let open = app
+            .can_open_full_restore()
+            .then_some(Message::FullRestore(FullRestoreMessage::Open));
+        answers = answers.push(parts::bracket(RESTORE_ENTRY, open, palette));
+    }
     column![fault, answers].spacing(10).into()
 }
 

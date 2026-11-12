@@ -75,6 +75,7 @@ where
     let Some((plan, progress)) = link.install.take() else {
         return Err(Front2Error::Plan(NOT_CHECKED.into()));
     };
+    link.full_restore = None;
     let mut executor = InstallExecutor::with_progress(&plan, &mut link.storage, progress)?;
     let outcome = work(&mut executor);
     let progress = executor.progress().clone();
@@ -226,6 +227,36 @@ mod tests {
 
         let again = check(&mut link, &plan_directory).expect_err("the device still differs");
         assert!(again.to_string().contains("preflight"), "{again}");
+    }
+
+    #[test]
+    fn letter_1376_a_check_stopped_by_another_gpt_copy_is_told_in_words_of_the_user() {
+        use crate::install_stage::InstallStage;
+
+        let (mut fixture, plan_directory, _) = planned();
+        let mut table = fixture.storage.content(1, 0, 1);
+        table[0] ^= 0xff;
+        fixture.storage.load(1, 0, &table);
+        let (_directory, mut link, _) = link_of(fixture);
+        let error = check(&mut link, &plan_directory).expect_err("another GPT copy");
+        let error = error.to_string();
+        assert!(error.contains("gpt_main1"), "{error}");
+        assert!(InstallStage::Check.stopped_by_another_device_state(&error));
+        assert!(!InstallStage::Write.stopped_by_another_device_state(&error));
+
+        let (mut fixture, plan_directory, _) = planned();
+        let super_location = fixture.location("super");
+        let other = vec![0xA5u8; 4096];
+        fixture
+            .storage
+            .load(super_location.lun, super_location.start_sector, &other);
+        let (_directory, mut link, _) = link_of(fixture);
+        let error = check(&mut link, &plan_directory).expect_err("the device differs");
+        let error = error.to_string();
+        assert!(
+            !InstallStage::Check.stopped_by_another_device_state(&error),
+            "{error}"
+        );
     }
 
     #[test]

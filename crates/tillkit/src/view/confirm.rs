@@ -7,7 +7,7 @@ use crate::palette::Palette;
 use crate::plan_review::PlanReview;
 use crate::reboot_words;
 use crate::support_words;
-use crate::view::{install_confirm, parts, rail, support_rows};
+use crate::view::{full_restore_confirm, install_confirm, parts, rail, support_rows};
 use crate::write_origin::WriteOrigin;
 use iced::widget::scrollable::{Direction, Scrollbar};
 use iced::widget::{Column, Space, column, container, opaque, row, scrollable, text};
@@ -38,6 +38,8 @@ pub fn layer(app: &App, confirmation: Confirmation) -> Element<'_, Message> {
         Confirmation::RebootTo => reboot_to(app),
         Confirmation::InstallWrite => install_confirm::write(app),
         Confirmation::InstallRestart => install_confirm::restart(palette),
+        Confirmation::FullRestoreWrite => full_restore_confirm::write(app),
+        Confirmation::FullRestoreRestart => full_restore_confirm::restart(palette),
     };
     let scrim = Color {
         a: SCRIM_ALPHA,

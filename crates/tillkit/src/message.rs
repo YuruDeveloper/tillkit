@@ -1,4 +1,5 @@
 use crate::diagnosis::Diagnosis;
+use crate::full_restore_message::FullRestoreMessage;
 use crate::install_message::InstallMessage;
 use crate::reboot_message::RebootMessage;
 use crate::root_message::RootMessage;
@@ -27,4 +28,5 @@ pub enum Message {
     Root(RootMessage),
     Reboot(RebootMessage),
     Install(InstallMessage),
+    FullRestore(FullRestoreMessage),
 }
