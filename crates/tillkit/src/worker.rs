@@ -22,6 +22,10 @@ use std::time::Duration;
 const STATE_POLL_INTERVAL: Duration = Duration::from_secs(1);
 pub const NO_BACKUP: &str = "no backup holds the images that the device has now";
 
+pub fn is_no_backup(error: &str) -> bool {
+    error == Front2Error::Store(NO_BACKUP.into()).to_string()
+}
+
 pub fn run_blocking<T, F>(
     work: F,
     done: fn(std::result::Result<T, String>) -> Message,
@@ -202,6 +206,16 @@ pub mod tests {
         pair.id = id.into();
         pair.kind = kind;
         pair
+    }
+
+    #[test]
+    fn a_missing_backup_is_told_from_other_store_errors() {
+        let missing = Front2Error::Store(NO_BACKUP.into()).to_string();
+        assert!(is_no_backup(&missing));
+        let other = Front2Error::Store("the manifest is not valid".into()).to_string();
+        assert!(!is_no_backup(&other));
+        assert!(!is_no_backup(NO_BACKUP), "the bare text is no store error");
+        assert!(!is_no_backup(""));
     }
 
     #[test]
