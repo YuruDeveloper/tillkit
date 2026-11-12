@@ -147,6 +147,12 @@ impl InstallFlow {
         progress.preflight.as_ref()?.resume.as_ref()
     }
 
+    pub fn resume_before_a_write(&self) -> Option<&ResumePoint> {
+        let unchanged = self.running.is_none();
+        self.resume()
+            .filter(|resume| unchanged && resume.next_index == self.verified_steps())
+    }
+
     pub fn verified_steps(&self) -> usize {
         self.progress
             .as_ref()
@@ -433,8 +439,10 @@ pub mod tests {
 
         assert!(flow.approve());
         let (write, wipe) = flow.write_approvals(2).expect("the wipe is next");
+        assert!(flow.resume_before_a_write().is_some());
         flow.progress = Some(install_worker::wipe(&mut link, &write, &wipe).expect("wipe"));
         assert_eq!(flow.next_stage(), Some(InstallStage::Restart));
+        assert!(flow.resume().is_some() && flow.resume_before_a_write().is_none());
     }
 
     #[test]

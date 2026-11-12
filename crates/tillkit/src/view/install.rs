@@ -21,6 +21,7 @@ const CHECKED: &str = "기기의 내용이 이 계획과 맞습니다.";
 const READY: &str = "기록을 시작할 수 있습니다.";
 const RESTART_SENT: &str = "다시 시작을 요청했습니다. 첫 부팅은 사용자 데이터를 지우느라 오래 걸릴 수 있습니다. 기기가 GSI로 부팅했는지는 TillKit이 확인하지 못하므로, 기기에서 직접 확인해 주세요.";
 const UNFINISHED: &str = "이 기기는 기록이 끝나지 않은 상태입니다. 기기를 다시 시작하거나 끄지 말고, EDL 모드로 연결한 채로 점검부터 다시 진행해 주세요. 점검이 멈춘 단계를 찾으면 그 단계부터 이어서 기록합니다.";
+const UNFINISHED_OPEN: &str = "이 기기는 기록이 끝나지 않은 상태입니다. 기기를 다시 시작하거나 끄지 말고, EDL 모드로 연결한 채로 아래의 WRITE를 눌러서 남은 단계를 기록해 주세요.";
 const METER_PARTS: u16 = 1000;
 const METER_LEAST: u16 = 4;
 const GIBIBYTE: f64 = 1_073_741_824.0;
@@ -33,7 +34,12 @@ pub fn steps<'a>(app: &'a App, mut page: Column<'a, Message>) -> Column<'a, Mess
     }
     if install.write_is_unfinished() {
         let caption = "WRITE NOT FINISHED · KEEP THE DEVICE IN EDL";
-        page = page.push(parts::caution(caption, UNFINISHED, palette));
+        let open = matches!(
+            install.next_stage(),
+            Some(InstallStage::Write | InstallStage::Wipe)
+        );
+        let sentence = if open { UNFINISHED_OPEN } else { UNFINISHED };
+        page = page.push(parts::caution(caption, sentence, palette));
     }
     let rows = InstallStage::ALL
         .into_iter()
@@ -133,8 +139,9 @@ fn backup_details(app: &App) -> Vec<Element<'_, Message>> {
 fn check_details(app: &App) -> Vec<Element<'_, Message>> {
     let palette = app.palette;
     let install = &app.install;
-    let continued = install.resume().filter(|resume| !resume.first_install);
-    let mut details: Vec<Element<'_, Message>> = match (install.resume(), &install.review) {
+    let resume = install.resume_before_a_write();
+    let continued = resume.filter(|resume| !resume.first_install);
+    let mut details: Vec<Element<'_, Message>> = match (resume, &install.review) {
         (Some(resume), Some(review)) => install_resume::lines(resume, &review.plan)
             .into_iter()
             .map(|line| resume_line(line, continued.is_some(), palette))

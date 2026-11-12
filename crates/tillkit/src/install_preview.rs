@@ -73,14 +73,18 @@ fn progress(plan: &InstallPlan, sha256: &str, pose: &str) -> Option<InstallProgr
     if depth < 5 {
         return None;
     }
+    let checked = if pose.starts_with(RESUMED) {
+        RESUMED_STEPS
+    } else {
+        0
+    };
     let done = match depth {
-        5 if pose.starts_with(RESUMED) => RESUMED_STEPS,
-        5 => 0,
+        5 => checked,
         _ => plan.steps.len().saturating_sub(1),
     };
     let mut preflight = PreflightRecord::started(sha256);
     preflight.passed = true;
-    preflight.resume = Some(resume(plan, pose, done));
+    preflight.resume = Some(resume(plan, pose, checked));
     let mut progress = InstallProgress::new(sha256);
     progress.preflight = Some(preflight);
     progress.steps = plan
