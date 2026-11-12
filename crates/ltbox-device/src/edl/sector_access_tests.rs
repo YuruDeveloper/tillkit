@@ -293,6 +293,33 @@ fn write_sectors_rejects_empty_and_partial_sector_data_before_any_command() {
 }
 
 #[test]
+fn write_sectors_rejects_a_transfer_size_below_one_sector_before_any_command() {
+    for transfer_size in [0, SECTOR - 1] {
+        let (mut session, commands, disks) = session_with(&[], &[]);
+        session.dev.fh_cfg.send_buffer_size = transfer_size;
+        let before = disks.lock().unwrap()[&DATA_LUN].clone();
+
+        let message = session_error(session.write_sectors(DATA_LUN, 0, &[0xa5; SECTOR]));
+
+        assert!(message.contains("each transfer"), "{message}");
+        assert!(recorded(&commands).is_empty());
+        assert_eq!(disks.lock().unwrap()[&DATA_LUN], before);
+    }
+}
+
+#[test]
+fn write_sectors_accepts_a_transfer_size_of_one_sector() {
+    let (mut session, commands, disks) = session_with(&[], &[]);
+    session.dev.fh_cfg.send_buffer_size = SECTOR;
+    let data = vec![0xa5; 2 * SECTOR];
+
+    session.write_sectors(DATA_LUN, 1, &data).expect("write");
+
+    assert_eq!(disks.lock().unwrap()[&DATA_LUN][SECTOR..3 * SECTOR], data);
+    assert_eq!(recorded(&commands), ["program 4 1 2"]);
+}
+
+#[test]
 fn refused_write_is_an_error_and_sends_no_payload() {
     let (mut session, _, disks) = session_with(&["program"], &[]);
     let before = disks.lock().unwrap()[&DATA_LUN].clone();

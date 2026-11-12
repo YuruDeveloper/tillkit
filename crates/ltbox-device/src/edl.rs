@@ -1348,6 +1348,12 @@ impl EdlSession {
                 data.len()
             )));
         }
+        let transfer_size = self.dev.fh_config().send_buffer_size;
+        if transfer_size < sector_size {
+            return Err(EdlError::Session(format!(
+                "The device accepts {transfer_size} bytes in each transfer, a sector write needs at least one sector of {sector_size} bytes"
+            )));
+        }
         let sectors = data.len() / sector_size;
         let label = format!("LUN {lun} sector {start_sector}");
         qdl::firehose_program_storage(
