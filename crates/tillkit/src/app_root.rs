@@ -132,24 +132,24 @@ mod tests {
         assert!(app.can_start_root());
         app.write.review = Some(review());
         assert!(app.other_work_is_open(WriteOrigin::Magisk));
-        assert!(!app.other_work_is_open(WriteOrigin::Folder));
+        assert!(!app.other_work_is_open(WriteOrigin::Image));
         assert!(!app.can_start_root());
         let _ = app.update(Message::Root(RootMessage::Start));
-        assert_eq!(app.write.origin, WriteOrigin::Folder);
+        assert_eq!(app.write.origin, WriteOrigin::Image);
         assert!(app.write.review.is_some() && app.write.running.is_none());
     }
 
     #[test]
-    fn a_root_start_opens_its_own_flow_and_drops_a_folder_without_a_result() {
+    fn a_root_start_opens_its_own_flow_and_drops_an_image_without_a_result() {
         let (_directory, mut app) = app();
-        app.write = WriteFlow::for_folder(PathBuf::from("images"));
+        app.write = WriteFlow::for_image(PathBuf::from("new.img"));
         let _ = app.update(Message::Root(RootMessage::Start));
         assert_eq!(app.write.origin, WriteOrigin::Magisk);
         assert_eq!(app.write.running, Some(WriteStep::Prepare));
-        assert!(app.write.folder.is_none());
+        assert!(app.write.image.is_none());
         assert!(app.is_busy() && !app.can_start_root());
-        assert!(app.flow_of(WriteOrigin::Folder).is_none());
-        assert!(app.other_work_is_open(WriteOrigin::Folder));
+        assert!(app.flow_of(WriteOrigin::Image).is_none());
+        assert!(app.other_work_is_open(WriteOrigin::Image));
     }
 
     #[test]
@@ -166,7 +166,7 @@ mod tests {
         assert!(app.write.is_unapproved() && !app.is_busy());
         assert!(!app.can_change_root_package());
         let _ = app.update(Message::Cancel);
-        assert_eq!(app.write.origin, WriteOrigin::Folder);
+        assert_eq!(app.write.origin, WriteOrigin::Image);
         assert!(app.write.package.is_none() && app.can_start_root());
     }
 
@@ -177,8 +177,8 @@ mod tests {
         let _ = app.update(prepared(Err("no device".into())));
         assert!(app.write.failure.is_some() && !app.is_busy());
         assert!(app.can_start_root());
-        assert!(!app.other_work_is_open(WriteOrigin::Folder));
-        assert!(app.flow_of(WriteOrigin::Folder).is_none());
+        assert!(!app.other_work_is_open(WriteOrigin::Image));
+        assert!(app.flow_of(WriteOrigin::Image).is_none());
     }
 
     #[test]

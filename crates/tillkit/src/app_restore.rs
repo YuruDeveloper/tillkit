@@ -66,7 +66,7 @@ mod tests {
         assert_eq!(app.write.origin, WriteOrigin::Backup);
         assert_eq!(app.write.restored_backup, Some(SAVED));
         assert_eq!(app.write.running, Some(WriteStep::Prepare));
-        assert!(app.other_work_is_open(WriteOrigin::Folder));
+        assert!(app.other_work_is_open(WriteOrigin::Image));
         assert!(app.other_work_is_open(WriteOrigin::Magisk));
     }
 
@@ -76,7 +76,7 @@ mod tests {
         app.write.review = Some(review());
         assert!(!app.can_start_restore());
         let _ = app.update(Message::RestoreBackup(SAVED));
-        assert_eq!(app.write.origin, WriteOrigin::Folder);
+        assert_eq!(app.write.origin, WriteOrigin::Image);
         assert!(app.write.running.is_none());
     }
 
@@ -89,7 +89,7 @@ mod tests {
         assert!(app.write.is_unapproved() && !app.is_busy());
         assert_eq!(app.write.restored_backup, Some(SAVED));
         let _ = app.update(Message::Cancel);
-        assert_eq!(app.write.origin, WriteOrigin::Folder);
+        assert_eq!(app.write.origin, WriteOrigin::Image);
         assert!(app.write.restored_backup.is_none() && app.can_start_restore());
     }
 
@@ -99,6 +99,6 @@ mod tests {
         let _ = app.update(Message::RestoreBackup(SAVED));
         let _ = app.update(prepared(Err("no device".into())));
         assert!(app.write.failure.is_some() && app.can_start_restore());
-        assert!(!app.other_work_is_open(WriteOrigin::Folder));
+        assert!(!app.other_work_is_open(WriteOrigin::Image));
     }
 }
