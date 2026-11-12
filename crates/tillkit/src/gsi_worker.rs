@@ -26,7 +26,15 @@ pub fn prepare(
         return Ok(stored);
     }
     let review = build_candidate(paths, backup, gsi_image, profile)?;
-    plan_install(paths, &review, backup, profile)
+    let planned = plan_install(paths, &review, backup, profile);
+    removed_on_failure(&review.directory, planned)
+}
+
+fn removed_on_failure<T>(candidate_directory: &Path, result: Result<T>) -> Result<T> {
+    if result.is_err() {
+        let _ = std::fs::remove_dir_all(candidate_directory);
+    }
+    result
 }
 
 fn stored(
@@ -125,8 +133,13 @@ fn build_candidate(
         rollback_evidence: &[],
     };
     let candidate = GsiCandidate::build(&request)?;
+    let review = reviewed_candidate(directory.clone(), &candidate);
+    removed_on_failure(&directory, review)
+}
+
+fn reviewed_candidate(directory: PathBuf, built: &GsiCandidate) -> Result<GsiReview> {
     let review = load(directory)?;
-    if !is_same_record(&review.candidate, &candidate) {
+    if !is_same_record(&review.candidate, built) {
         return Err(Front2Error::Verification(
             "the stored GSI candidate record differs from the built one".into(),
         ));
@@ -203,6 +216,28 @@ mod tests {
             .expect("the store exists")
             .collect();
         assert!(left.is_empty());
+    }
+
+    #[test]
+    fn a_failure_after_the_build_removes_the_candidate_folder() {
+        let directory = tempfile::tempdir().expect("tempdir");
+        let candidate = directory.path().join("gsi-7");
+        std::fs::create_dir(&candidate).expect("candidate folder");
+        std::fs::write(candidate.join("super.img"), b"image").expect("image");
+
+        let kept = removed_on_failure(&candidate, Ok(7));
+        assert_eq!(kept.expect("the result is not changed"), 7);
+        assert!(candidate.join("super.img").is_file());
+
+        let failure: Result<u8> = Err(Front2Error::Plan("no plan".into()));
+        let stopped = removed_on_failure(&candidate, failure);
+        assert!(
+            stopped
+                .expect_err("the failure is not changed")
+                .to_string()
+                .contains("no plan")
+        );
+        assert!(!candidate.exists());
     }
 
     #[test]
