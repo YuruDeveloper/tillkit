@@ -1,7 +1,8 @@
 use front2::install::{InstallPlan, InstallStep, ResumePoint};
 
-const FIRST_INSTALL: &str = "처음 설치입니다. 기기의 내용이 전체 백업과 같습니다.";
-const ONLY_RESTART: &str = "기록은 이미 모두 끝나 있습니다. 다시 시작하는 일만 남았습니다.";
+const FIRST_INSTALL: &str = "기록할 영역의 내용이 전체 백업과 같습니다. 첫 단계부터 기록합니다.";
+const ONLY_RESTART: &str =
+    "기록할 영역의 내용이 이미 모두 이 계획과 같습니다. 다시 시작하는 일만 남았습니다.";
 const BOOT_LUN: &str = "부팅 위치 바꾸기";
 
 pub fn lines(resume: &ResumePoint, plan: &InstallPlan) -> Vec<String> {
@@ -30,11 +31,9 @@ fn next_name(resume: &ResumePoint, plan: &InstallPlan) -> Option<String> {
 
 fn continued(done: usize, name: &str) -> String {
     if done == 0 {
-        return format!("멈춘 설치를 이어 합니다. 첫 단계인 {name}부터 다시 기록합니다.");
+        return format!("첫 단계인 {name}부터 다시 기록합니다.");
     }
-    format!(
-        "멈춘 설치를 이어 합니다. 앞의 {done}단계는 이미 기록되어 있어서, {name}부터 기록합니다."
-    )
+    format!("앞의 {done}단계는 내용이 이미 이 계획과 같습니다. {name}부터 이어서 기록합니다.")
 }
 
 #[cfg(test)]

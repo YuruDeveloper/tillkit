@@ -36,21 +36,38 @@ fn stored(paths: &DataPaths, backup: &Path, gsi_image: &Path) -> Option<InstallR
     })
 }
 
+pub fn planned_backup(paths: &DataPaths) -> Option<PathBuf> {
+    newest_plan_folders(paths)
+        .iter()
+        .find_map(|directory| plan_record(directory))
+        .map(|plan| plan.backup_directory)
+}
+
 fn stored_where(paths: &DataPaths, fits: impl Fn(&InstallPlan) -> bool) -> Option<InstallReview> {
-    let entries = std::fs::read_dir(paths.install_plans()).ok()?;
+    newest_plan_folders(paths)
+        .into_iter()
+        .find_map(|directory| reviewed(directory, &fits))
+}
+
+fn newest_plan_folders(paths: &DataPaths) -> Vec<PathBuf> {
+    let Ok(entries) = std::fs::read_dir(paths.install_plans()) else {
+        return Vec::new();
+    };
     let mut folders: Vec<(u64, PathBuf)> = entries
         .filter_map(|entry| entry.ok())
         .filter_map(|entry| Some((created_unix(&entry.file_name())?, entry.path())))
         .collect();
     folders.sort_by_key(|(created, _)| std::cmp::Reverse(*created));
-    folders
-        .into_iter()
-        .find_map(|(_, directory)| reviewed(directory, &fits))
+    folders.into_iter().map(|(_, folder)| folder).collect()
+}
+
+fn plan_record(directory: &Path) -> Option<InstallPlan> {
+    let bytes = std::fs::read(directory.join(PLAN_FILE)).ok()?;
+    serde_json::from_slice(&bytes).ok()
 }
 
 fn reviewed(directory: PathBuf, fits: &impl Fn(&InstallPlan) -> bool) -> Option<InstallReview> {
-    let bytes = std::fs::read(directory.join(PLAN_FILE)).ok()?;
-    let plan: InstallPlan = serde_json::from_slice(&bytes).ok()?;
+    let plan = plan_record(&directory)?;
     if !fits(&plan) {
         return None;
     }
@@ -173,6 +190,7 @@ mod tests {
         assert_eq!(found.directory, plans.join("install-9"));
         assert_eq!(found.plan.steps, plan.steps);
         let backup = fixture.inputs.backup_directory.clone();
+        assert_eq!(planned_backup(&paths), Some(backup.clone()));
         assert!(stored_where(&paths, |plan| plan.backup_directory == backup).is_some());
         assert!(stored_where(&paths, |_| false).is_none());
 

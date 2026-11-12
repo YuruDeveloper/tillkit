@@ -55,7 +55,8 @@ impl App {
 
     pub fn find_full_backup(&mut self) {
         if self.install.backup.is_none() && !self.is_busy() {
-            self.install.backup = full_backup_store::newest(&self.paths);
+            let planned = gsi_worker::planned_backup(&self.paths);
+            self.install.backup = full_backup_store::found(&self.paths, planned);
         }
     }
 
