@@ -1,5 +1,6 @@
 use super::{EdlError, Result};
 
+const LUN_NUMBER_FIELD: &str = "UFS Current LUN Number:";
 const TOTAL_BLOCKS_FIELD: &str = "UFS LU Total Blocks:";
 const BLOCK_SIZE_FIELD: &str = "UFS Logical Block Size:";
 const SUPPORTED_BLOCK_SIZE_EXPONENT: u64 = 0xc;
@@ -13,7 +14,13 @@ pub struct UfsStorageInfo {
 }
 
 impl UfsStorageInfo {
-    pub fn parse(lines: &[String]) -> Result<Self> {
+    pub fn parse(lines: &[String], lun: u8) -> Result<Self> {
+        let reported_lun = field_value(lines, LUN_NUMBER_FIELD)?;
+        if reported_lun != u64::from(lun) {
+            return Err(EdlError::StorageInfo(format!(
+                "the response gives {LUN_NUMBER_FIELD} {reported_lun:#x}, but LUN {lun} was requested"
+            )));
+        }
         let total_blocks = field_value(lines, TOTAL_BLOCKS_FIELD)?;
         if total_blocks == 0 {
             return Err(EdlError::StorageInfo(format!("{TOTAL_BLOCKS_FIELD} is 0")));

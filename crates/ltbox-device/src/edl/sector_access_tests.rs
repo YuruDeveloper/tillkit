@@ -293,6 +293,33 @@ fn write_sectors_rejects_empty_and_partial_sector_data_before_any_command() {
 }
 
 #[test]
+fn write_sectors_rejects_a_transfer_size_below_one_sector_before_any_command() {
+    for transfer_size in [0, SECTOR - 1] {
+        let (mut session, commands, disks) = session_with(&[], &[]);
+        session.dev.fh_cfg.send_buffer_size = transfer_size;
+        let before = disks.lock().unwrap()[&DATA_LUN].clone();
+
+        let message = session_error(session.write_sectors(DATA_LUN, 0, &[0xa5; SECTOR]));
+
+        assert!(message.contains("each transfer"), "{message}");
+        assert!(recorded(&commands).is_empty());
+        assert_eq!(disks.lock().unwrap()[&DATA_LUN], before);
+    }
+}
+
+#[test]
+fn write_sectors_accepts_a_transfer_size_of_one_sector() {
+    let (mut session, commands, disks) = session_with(&[], &[]);
+    session.dev.fh_cfg.send_buffer_size = SECTOR;
+    let data = vec![0xa5; 2 * SECTOR];
+
+    session.write_sectors(DATA_LUN, 1, &data).expect("write");
+
+    assert_eq!(disks.lock().unwrap()[&DATA_LUN][SECTOR..3 * SECTOR], data);
+    assert_eq!(recorded(&commands), ["program 4 1 2"]);
+}
+
+#[test]
 fn refused_write_is_an_error_and_sends_no_payload() {
     let (mut session, _, disks) = session_with(&["program"], &[]);
     let before = disks.lock().unwrap()[&DATA_LUN].clone();
@@ -325,7 +352,11 @@ fn refused_boot_lun_selection_is_an_error() {
 fn storage_info_parses_the_log_lines_of_the_response() {
     let (mut session, commands, _) = session_with(
         &[],
-        &["UFS Logical Block Size: 0xc", "UFS LU Total Blocks: 0x800"],
+        &[
+            "UFS Current LUN Number: = 0x1",
+            "UFS Logical Block Size: 0xc",
+            "UFS LU Total Blocks: 0x800",
+        ],
     );
 
     let info = session.storage_info(1).expect("storage info");
@@ -344,7 +375,11 @@ fn storage_info_parses_the_log_lines_of_the_response() {
 fn storage_info_with_an_unknown_block_size_is_an_error() {
     let (mut session, _, _) = session_with(
         &[],
-        &["UFS Logical Block Size: 0x9", "UFS LU Total Blocks: 0x800"],
+        &[
+            "UFS Current LUN Number: = 0x1",
+            "UFS Logical Block Size: 0x9",
+            "UFS LU Total Blocks: 0x800",
+        ],
     );
 
     assert!(matches!(
@@ -361,4 +396,22 @@ fn refused_storage_info_is_an_error() {
     );
 
     assert!(session_error(session.storage_info(9)).contains("LUN 9"));
+}
+
+#[test]
+fn storage_info_rejects_the_log_of_another_lun() {
+    let (mut session, commands, _) = session_with(
+        &[],
+        &[
+            "UFS Current LUN Number: = 0x0",
+            "UFS Logical Block Size: 0xc",
+            "UFS LU Total Blocks: 0x66d000",
+        ],
+    );
+
+    assert!(matches!(
+        session.storage_info(1),
+        Err(EdlError::StorageInfo(message)) if message.contains("LUN 1 was requested")
+    ));
+    assert_eq!(recorded(&commands), ["getstorageinfo 1"]);
 }
