@@ -62,7 +62,7 @@ fn validate_partition(
     Ok(())
 }
 
-fn read_copies(manifest: &BackupManifest, lun: u8) -> Result<Vec<BackupGpt>> {
+pub(super) fn read_copies(manifest: &BackupManifest, lun: u8) -> Result<Vec<BackupGpt>> {
     let main = read_copy(manifest, lun, GptCopyKind::Main)?;
     let backup = read_copy(manifest, lun, GptCopyKind::Backup)?;
     main.copy
