@@ -13,7 +13,7 @@ use std::path::{Path, PathBuf};
 
 const CANDIDATE_PREFIX: &str = "gsi-";
 const PLAN_PREFIX: &str = "install-";
-const BACKUP_NOT_READ: &str = "이 이미지로 만든 계획이 쓰던 전체 백업을 읽지 못했습니다. 그 폴더를 읽을 수 있게 한 뒤에 MAKE PLAN을 다시 누르거나, CHOOSE FOLDER로 쓸 전체 백업을 직접 골라 주세요.";
+const BACKUP_NOT_READ: &str = "이 이미지로 만든 계획이 쓰던 전체 백업을 읽지 못했습니다. 그 폴더를 읽을 수 있게 한 뒤에 MAKE PLAN을 다시 누르거나, USE EXISTING BACKUP으로 쓸 전체 백업을 직접 골라 주세요.";
 
 pub fn prepare(
     paths: &DataPaths,
