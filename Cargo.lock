@@ -5720,7 +5720,6 @@ name = "tillkit"
 version = "0.1.0"
 dependencies = [
  "dark-light",
- "dirs",
  "front2",
  "iced",
  "ltbox-device",

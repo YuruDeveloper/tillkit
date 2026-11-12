@@ -1,6 +1,7 @@
 use crate::confirmation::Confirmation;
 use crate::data_paths::DataPaths;
 use crate::diagnosis::Diagnosis;
+use crate::folder_choice::FolderChoice;
 use crate::grain;
 use crate::launch;
 use crate::message::Message;
@@ -27,6 +28,9 @@ pub struct App {
     pub grain: Handle,
     pub screen: Screen,
     pub paths: DataPaths,
+    pub choice_home: Option<PathBuf>,
+    pub choice_error: Option<String>,
+    pub choice_unread: Option<String>,
     pub activity: Option<&'static str>,
     pub diagnosis: Option<Diagnosis>,
     pub device_error: Option<String>,
@@ -46,9 +50,27 @@ pub struct App {
 
 impl App {
     pub fn new() -> (Self, Task<Message>) {
-        let mut app = Self::with_paths(launch::paths());
+        let mut app = match launch::given_paths() {
+            Some(paths) => Self::with_paths(paths),
+            None => Self::beside_program(launch::program_folder()),
+        };
         launch::preview(&mut app);
         (app, Task::none())
+    }
+
+    pub fn beside_program(program_folder: PathBuf) -> Self {
+        let (choice, unread) = match FolderChoice::read(&program_folder) {
+            Ok(choice) => (choice, None),
+            Err(error) => (None, Some(error)),
+        };
+        let paths = choice.map_or_else(
+            || DataPaths::beside_program(&program_folder),
+            |choice| DataPaths::new(choice.data_folder),
+        );
+        let mut app = Self::with_paths(paths);
+        app.choice_home = Some(program_folder);
+        app.choice_unread = unread;
+        app
     }
 
     pub fn with_paths(paths: DataPaths) -> Self {
@@ -58,6 +80,9 @@ impl App {
             grain: grain::handle(palette),
             screen: launch::screen(),
             paths,
+            choice_home: None,
+            choice_error: None,
+            choice_unread: None,
             activity: None,
             diagnosis: None,
             device_error: None,
@@ -100,9 +125,11 @@ impl App {
             Message::AskForce => self.ask_force(),
             Message::Cancel => self.cancel(),
             Message::FullBackupPicked(folder) => self.full_backup_picked(folder),
+            Message::DataFolderPicked(folder) => self.data_folder_picked(folder),
             Message::Confirm => return self.confirm(),
             Message::ReadDevice => return self.read_device(),
             Message::BackUp => return self.back_up(),
+            Message::PickDataFolder => return self.pick_data_folder(),
             Message::PickFullBackup => return self.pick_full_backup(),
             Message::RestoreBackup(created_unix) => return self.start_restore(created_unix),
             Message::Write(message) => return self.update_write(message),
@@ -242,6 +269,30 @@ impl App {
         self.reload_backups();
     }
 
+    pub fn can_choose_data_folder(&self) -> bool {
+        !self.is_busy() && !self.write.has_result()
+    }
+
+    fn pick_data_folder(&mut self) -> Task<Message> {
+        if !self.can_choose_data_folder() {
+            return Task::none();
+        }
+        Task::perform(pick_data_folder(), Message::DataFolderPicked)
+    }
+
+    fn data_folder_picked(&mut self, folder: Option<PathBuf>) {
+        let (Some(folder), true) = (folder, self.can_choose_data_folder()) else {
+            return;
+        };
+        let choice = FolderChoice::new(&folder);
+        let written = self.choice_home.as_ref().map(|home| choice.write(home));
+        self.choice_error = written.and_then(Result::err);
+        self.choice_unread = None;
+        self.paths = DataPaths::new(folder);
+        self.backup_error = None;
+        self.reload_backups();
+    }
+
     fn pick_full_backup(&mut self) -> Task<Message> {
         if self.is_busy() {
             return Task::none();
@@ -257,6 +308,14 @@ impl App {
         self.full_backup = Some(folder);
         self.write.full_backup_changed();
     }
+}
+
+async fn pick_data_folder() -> Option<PathBuf> {
+    rfd::AsyncFileDialog::new()
+        .set_title("백업을 저장할 폴더")
+        .pick_folder()
+        .await
+        .map(|folder| folder.path().to_path_buf())
 }
 
 async fn pick_full_backup_folder() -> Option<PathBuf> {
@@ -335,5 +394,92 @@ mod tests {
         let app = App::with_paths(paths);
         assert!(app.store_error.is_some());
         assert!(app.backup_error.is_none());
+    }
+
+    fn folder_with_a_broken_store(parent: &std::path::Path, name: &str) -> PathBuf {
+        let folder = parent.join(name);
+        std::fs::create_dir_all(&folder).expect("folder");
+        std::fs::write(
+            folder.join("pairs"),
+            b"a file where the store folder must be",
+        )
+        .expect("file");
+        folder
+    }
+
+    #[test]
+    fn a_chosen_data_folder_is_read_at_once_and_remembered() {
+        let (directory, mut app) = app();
+        let home = directory.path().join("program");
+        std::fs::create_dir_all(&home).expect("folder");
+        app.choice_home = Some(home.clone());
+        let chosen = folder_with_a_broken_store(directory.path(), "chosen");
+        assert!(app.store_error.is_none());
+        let _ = app.update(Message::DataFolderPicked(Some(chosen.clone())));
+        assert_eq!(app.paths.root(), chosen);
+        assert!(app.store_error.is_some());
+        assert!(app.choice_error.is_none());
+        assert_eq!(App::beside_program(home).paths.root(), chosen);
+    }
+
+    #[test]
+    fn the_folder_beside_the_program_is_used_until_a_folder_is_chosen() {
+        let directory = tempfile::tempdir().expect("tempdir");
+        let app = App::beside_program(directory.path().to_path_buf());
+        let beside = DataPaths::beside_program(directory.path());
+        assert_eq!(app.paths, beside);
+        assert_eq!(app.choice_home.as_deref(), Some(directory.path()));
+        assert!(app.choice_unread.is_none());
+    }
+
+    #[test]
+    fn doc_1262_a_choice_that_cannot_be_read_is_told_until_a_folder_is_chosen() {
+        let directory = tempfile::tempdir().expect("tempdir");
+        let file = directory.path().join(crate::folder_choice::CHOICE_FILE);
+        std::fs::write(file, b"{ not json").expect("file");
+        let mut app = App::beside_program(directory.path().to_path_buf());
+        assert_eq!(app.paths, DataPaths::beside_program(directory.path()));
+        assert!(app.choice_unread.is_some());
+        let chosen = directory.path().join("chosen");
+        let _ = app.update(Message::DataFolderPicked(Some(chosen.clone())));
+        assert!(app.choice_unread.is_none() && app.choice_error.is_none());
+        assert_eq!(
+            App::beside_program(directory.path().to_path_buf())
+                .paths
+                .root(),
+            chosen
+        );
+    }
+
+    #[test]
+    fn a_choice_that_cannot_be_remembered_is_used_and_told() {
+        let (directory, mut app) = app();
+        app.choice_home = Some(directory.path().join("absent"));
+        let chosen = directory.path().join("chosen");
+        let _ = app.update(Message::DataFolderPicked(Some(chosen.clone())));
+        assert_eq!(app.paths.root(), chosen);
+        assert!(app.choice_error.is_some());
+        app.choice_home = Some(directory.path().to_path_buf());
+        let _ = app.update(Message::DataFolderPicked(Some(chosen)));
+        assert!(app.choice_error.is_none());
+    }
+
+    #[test]
+    fn the_data_folder_stays_while_an_operation_runs_or_a_plan_is_open() {
+        let (directory, mut app) = app();
+        let chosen = directory.path().join("chosen");
+        app.activity = Some("BACKING UP");
+        let _ = app.update(Message::DataFolderPicked(Some(chosen.clone())));
+        assert_eq!(app.paths.root(), directory.path());
+        app.activity = None;
+        app.write.review = Some(crate::write_flow::tests::review());
+        assert!(!app.can_choose_data_folder());
+        let _ = app.update(Message::DataFolderPicked(Some(chosen.clone())));
+        assert_eq!(app.paths.root(), directory.path());
+        let _ = app.update(Message::DataFolderPicked(None));
+        assert_eq!(app.paths.root(), directory.path());
+        app.write.review = None;
+        let _ = app.update(Message::DataFolderPicked(Some(chosen.clone())));
+        assert_eq!(app.paths.root(), chosen);
     }
 }

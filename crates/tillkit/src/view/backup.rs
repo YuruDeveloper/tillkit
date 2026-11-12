@@ -17,11 +17,12 @@ const RESTORE_HINT: &str = "RESTORE를 누르면 그 백업의 이미지를 기�
 const BACKUP_STOPPED: &str = "백업하는 도중에 오류가 나서 끝까지 하지 못했습니다. 아래 목록에 보이는 것만 저장되었으니, 목록을 확인한 뒤에 다시 백업해 주세요.";
 const STORE_NOT_READ: &str =
     "PC에 저장된 백업을 읽지 못했습니다. 읽지 못한 백업은 아래 목록에 나오지 않습니다.";
-const FULL_BACKUP: &str = "GSI를 기록할 때 원본으로 쓰는 기기 전체 백업 폴더입니다. 전체 백업은 TillKit이 만들지 않으므로, 이미 가지고 있는 폴더를 골라 주세요.";
-const FULL_BACKUP_FOUND: &str = "전체 백업을 찾았습니다.";
-const FULL_BACKUP_MISSING: &str =
-    "이 폴더에는 전체 백업이 없습니다. sha256-manifest.json이 들어 있는 폴더를 골라 주세요.";
-const NOT_CHOSEN: &str = "고르지 않음";
+const DATA_FOLDER: &str = "백업을 이 폴더에 저장합니다. 내려받은 Magisk와 기록 계획처럼 TillKit이 만드는 다른 파일도 이 폴더에 둡니다.";
+const CHOICE_KEPT: &str = "고른 폴더는 다음에 실행할 때도 그대로 씁니다.";
+const CHOICE_FOR_THIS_RUN: &str =
+    "TILLKIT_DATA_DIR로 정한 폴더로 시작했기 때문에, 여기에서 고른 폴더는 이번 실행에만 씁니다.";
+const CHOICE_NOT_READ: &str = "전에 고른 폴더를 적어 둔 파일을 읽지 못해서 실행 파일 옆의 기본 폴더를 쓰고 있습니다. 백업이 보이지 않으면 폴더를 다시 골라 주세요.";
+const CHOICE_NOT_KEPT: &str = "지금은 고른 폴더를 쓰지만, 고른 폴더를 적어 두지 못해서 다음에 실행할 때는 다시 골라야 합니다.";
 const TIME_WIDTH: f32 = 210.0;
 
 pub fn view(app: &App) -> Element<'_, Message> {
@@ -31,6 +32,8 @@ pub fn view(app: &App) -> Element<'_, Message> {
         parts::display("BACKUP", palette),
         parts::label("USB · ROOT REQUIRED", palette),
         parts::body(INTRODUCTION, palette),
+        parts::label("BACKUP FOLDER", palette),
+        data_folder(app),
         parts::go("BACK UP NOW", idle.then_some(Message::BackUp), palette),
     ]
     .spacing(14);
@@ -65,9 +68,48 @@ pub fn view(app: &App) -> Element<'_, Message> {
     if let Some(own) = app.flow_of(WriteOrigin::Backup) {
         page = restore(app, own, page);
     }
-    page.push(parts::label("FULL BACKUP FOLDER", palette))
-        .push(full_backup(app, idle))
-        .into()
+    page.into()
+}
+
+fn data_folder(app: &App) -> Element<'_, Message> {
+    let palette = app.palette;
+    let choose = app
+        .can_choose_data_folder()
+        .then_some(Message::PickDataFolder);
+    let path = app.paths.root().display().to_string();
+    let chosen = row![
+        container(parts::value(path, palette)).width(Length::Fill),
+        parts::bracket("CHOOSE FOLDER", choose, palette),
+    ]
+    .spacing(12)
+    .align_y(Alignment::Center);
+    let kept = if app.choice_home.is_some() {
+        CHOICE_KEPT
+    } else {
+        CHOICE_FOR_THIS_RUN
+    };
+    let mut content = column![
+        chosen,
+        parts::note(format!("{DATA_FOLDER} {kept}"), palette)
+    ]
+    .spacing(8);
+    if let Some(error) = &app.choice_unread {
+        content = content.push(parts::fault(
+            "FOLDER CHOICE NOT READ",
+            CHOICE_NOT_READ,
+            error,
+            palette,
+        ));
+    }
+    if let Some(error) = &app.choice_error {
+        content = content.push(parts::fault(
+            "FOLDER NOT REMEMBERED",
+            CHOICE_NOT_KEPT,
+            error,
+            palette,
+        ));
+    }
+    content.into()
 }
 
 fn saved<'a>(app: &App, palette: Palette) -> Element<'a, Message> {
@@ -126,29 +168,4 @@ fn restore<'a>(
         page = page.push(parts::bracket("REBOOT", Some(ask), palette));
     }
     flow::results(app, own, page)
-}
-
-fn full_backup(app: &App, idle: bool) -> Element<'_, Message> {
-    let palette = app.palette;
-    let choose = idle.then_some(Message::PickFullBackup);
-    let folder = app.full_backup.as_ref();
-    let path = folder.map_or_else(|| NOT_CHOSEN.to_string(), |path| path.display().to_string());
-    let chosen = row![
-        container(parts::value(path, palette)).width(Length::Fill),
-        parts::bracket("CHOOSE FOLDER", choose, palette),
-    ]
-    .spacing(12)
-    .align_y(Alignment::Center);
-    let mut content = column![parts::body(FULL_BACKUP, palette), chosen].spacing(8);
-    if folder.is_some() {
-        content = content.push(full_backup_state(app.full_backup_found, palette));
-    }
-    content.into()
-}
-
-fn full_backup_state<'a>(found: bool, palette: Palette) -> Element<'a, Message> {
-    if found {
-        return parts::body(FULL_BACKUP_FOUND, palette);
-    }
-    parts::caution("NO FULL BACKUP", FULL_BACKUP_MISSING, palette)
 }

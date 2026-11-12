@@ -15,7 +15,11 @@ use iced::{Alignment, Element, Length};
 const INTRODUCTION: &str = "기록할 이미지가 든 폴더를 고르고 WRITE를 누르면, 준비부터 확인까지 차례로 진행합니다. 기기에 기록하기 전에 한 번 더 확인을 받습니다.";
 const FILE_NAMES: &str = "폴더에는 init_boot.img(루트 패치본), boot.img(커널), system.img(GSI) 가운데 하나만 넣어 주세요.";
 const NOT_CHOSEN: &str = "고르지 않음";
-const FULL_BACKUP_NEEDED: &str = "GSI 설치 계획에는 기기 전체 백업이 필요합니다. BACKUP 화면에서 전체 백업 폴더를 먼저 골라 주세요.";
+const FULL_BACKUP: &str = "GSI 설치 계획의 원본으로 쓰는 기기 전체 백업 폴더입니다. 전체 백업은 TillKit이 만들지 않으므로, 이미 가지고 있는 폴더를 골라 주세요.";
+const FULL_BACKUP_NEEDED: &str = "GSI 설치 계획에는 기기 전체 백업이 필요합니다. sha256-manifest.json이 들어 있는 전체 백업 폴더를 골라 주세요.";
+const FULL_BACKUP_FOUND: &str = "전체 백업을 찾았습니다.";
+const FULL_BACKUP_MISSING: &str =
+    "이 폴더에는 전체 백업이 없습니다. sha256-manifest.json이 들어 있는 폴더를 골라 주세요.";
 const INSTALL_PLANNED: &str = "GSI 설치 계획을 만들어 아래 폴더에 저장했습니다. 이 계획을 기기에 기록하는 일은 아직 지원하지 않습니다.";
 
 pub fn view(app: &App) -> Element<'_, Message> {
@@ -28,9 +32,14 @@ pub fn view(app: &App) -> Element<'_, Message> {
         parts::body(INTRODUCTION, palette),
         parts::label("IMAGE FOLDER", palette),
         folder(app, own),
-        action(app, own),
     ]
     .spacing(14);
+    if own.kind == Some(Ok(WriteKind::Gsi)) {
+        page = page
+            .push(parts::label("FULL BACKUP FOLDER", palette))
+            .push(full_backup(app));
+    }
+    page = page.push(action(app, own));
     if app.other_work_is_open(WriteOrigin::Folder) {
         page = page.push(flow::other_work(app.write.origin, palette));
     }
@@ -59,13 +68,6 @@ fn folder<'a>(app: &App, own: &WriteFlow) -> Element<'a, Message> {
     .spacing(12)
     .align_y(Alignment::Center);
     let mut content = column![chosen, verdict(own.kind, palette)].spacing(8);
-    if needs_full_backup(app) {
-        content = content.push(parts::caution(
-            "FULL BACKUP NEEDED",
-            FULL_BACKUP_NEEDED,
-            palette,
-        ));
-    }
     if stopped_by_device(app) {
         content = content.push(flow::device_stops(palette));
     }
@@ -83,8 +85,25 @@ fn verdict<'a>(
     }
 }
 
-fn needs_full_backup(app: &App) -> bool {
-    app.write.kind == Some(Ok(WriteKind::Gsi)) && app.full_backup_for_gsi().is_none()
+fn full_backup(app: &App) -> Element<'_, Message> {
+    let palette = app.palette;
+    let choose = (!app.is_busy()).then_some(Message::PickFullBackup);
+    let folder = app.full_backup.as_ref();
+    let path = folder.map_or_else(|| NOT_CHOSEN.to_string(), |path| path.display().to_string());
+    let chosen = row![
+        container(parts::value(path, palette)).width(Length::Fill),
+        parts::bracket("CHOOSE FOLDER", choose, palette),
+    ]
+    .spacing(12)
+    .align_y(Alignment::Center);
+    let state = match (folder, app.full_backup_found) {
+        (None, _) => parts::caution("FULL BACKUP NEEDED", FULL_BACKUP_NEEDED, palette),
+        (Some(_), false) => parts::caution("NO FULL BACKUP", FULL_BACKUP_MISSING, palette),
+        (Some(_), true) => parts::body(FULL_BACKUP_FOUND, palette),
+    };
+    column![parts::note(FULL_BACKUP, palette), chosen, state]
+        .spacing(8)
+        .into()
 }
 
 fn stopped_by_device(app: &App) -> bool {
