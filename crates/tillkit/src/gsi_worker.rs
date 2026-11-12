@@ -2,12 +2,15 @@ use crate::clock::now_unix;
 use crate::data_paths::DataPaths;
 use crate::gsi_review::GsiReview;
 use crate::install_review::InstallReview;
+use front2::digest::sha256_file;
 use front2::gsi::{GsiCandidate, GsiCandidateRequest, install_inputs};
-use front2::install::InstallPlan;
+use front2::install::{InstallPlan, PLAN_FILE};
 use front2::{DeviceProfile, Front2Error, Result};
+use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
 
 const CANDIDATE_PREFIX: &str = "gsi-";
+const PLAN_PREFIX: &str = "install-";
 
 pub fn prepare(
     paths: &DataPaths,
@@ -15,8 +18,52 @@ pub fn prepare(
     gsi_image: &Path,
     profile: &DeviceProfile,
 ) -> Result<InstallReview> {
+    if let Some(stored) = stored(paths, backup, gsi_image) {
+        return Ok(stored);
+    }
     let review = build_candidate(paths, backup, gsi_image, profile)?;
     plan_install(paths, &review, backup, profile)
+}
+
+fn stored(paths: &DataPaths, backup: &Path, gsi_image: &Path) -> Option<InstallReview> {
+    let (gsi_bytes, gsi_sha256) = sha256_file(gsi_image).ok()?;
+    stored_where(paths, |plan| {
+        let candidate = GsiCandidate::load(&plan.candidate_directory).ok();
+        plan.backup_directory == backup
+            && candidate.is_some_and(|(candidate, _)| {
+                candidate.gsi_bytes == gsi_bytes && candidate.gsi_sha256 == gsi_sha256
+            })
+    })
+}
+
+fn stored_where(paths: &DataPaths, fits: impl Fn(&InstallPlan) -> bool) -> Option<InstallReview> {
+    let entries = std::fs::read_dir(paths.install_plans()).ok()?;
+    let mut folders: Vec<(u64, PathBuf)> = entries
+        .filter_map(|entry| entry.ok())
+        .filter_map(|entry| Some((created_unix(&entry.file_name())?, entry.path())))
+        .collect();
+    folders.sort_by_key(|(created, _)| std::cmp::Reverse(*created));
+    folders
+        .into_iter()
+        .find_map(|(_, directory)| reviewed(directory, &fits))
+}
+
+fn reviewed(directory: PathBuf, fits: &impl Fn(&InstallPlan) -> bool) -> Option<InstallReview> {
+    let bytes = std::fs::read(directory.join(PLAN_FILE)).ok()?;
+    let plan: InstallPlan = serde_json::from_slice(&bytes).ok()?;
+    if !fits(&plan) {
+        return None;
+    }
+    let stored = InstallPlan::load(&directory).ok()?;
+    Some(InstallReview {
+        plan: stored.plan().clone(),
+        sha256: stored.plan_sha256().to_string(),
+        directory,
+    })
+}
+
+fn created_unix(name: &OsStr) -> Option<u64> {
+    name.to_str()?.strip_prefix(PLAN_PREFIX)?.parse().ok()
 }
 
 fn build_candidate(
@@ -61,7 +108,7 @@ fn plan_install(
     let inputs = install_inputs(&candidate, &review.directory, backup, profile)?;
     let directory = paths
         .install_plans()
-        .join(format!("install-{}", now_unix()));
+        .join(format!("{PLAN_PREFIX}{}", now_unix()));
     InstallPlan::build(&inputs)?.save(&directory)?;
     let stored = InstallPlan::load(&directory)?;
     Ok(InstallReview {
@@ -106,5 +153,31 @@ mod tests {
             .expect("the store exists")
             .collect();
         assert!(left.is_empty());
+    }
+
+    #[test]
+    fn the_newest_stored_plan_that_fits_is_used_again() {
+        use crate::install_support::InstallFixture;
+
+        let fixture = InstallFixture::standard();
+        let paths = DataPaths::new(fixture.directory.path().join("data"));
+        let plans = paths.install_plans();
+        let plan = InstallPlan::build(&fixture.inputs).expect("plan");
+        assert!(stored_where(&paths, |_| true).is_none(), "no store yet");
+        for name in ["install-5", "install-9", "other-20"] {
+            plan.save(&plans.join(name)).expect("save the plan");
+        }
+        std::fs::create_dir_all(plans.join("install-30")).expect("a folder without a plan");
+
+        let found = stored_where(&paths, |_| true).expect("a stored plan");
+        assert_eq!(found.directory, plans.join("install-9"));
+        assert_eq!(found.plan.steps, plan.steps);
+        let backup = fixture.inputs.backup_directory.clone();
+        assert!(stored_where(&paths, |plan| plan.backup_directory == backup).is_some());
+        assert!(stored_where(&paths, |_| false).is_none());
+
+        std::fs::write(plans.join("install-9").join(PLAN_FILE), b"{}").expect("change the plan");
+        let found = stored_where(&paths, |_| true).expect("the plan before it");
+        assert_eq!(found.directory, plans.join("install-5"));
     }
 }
