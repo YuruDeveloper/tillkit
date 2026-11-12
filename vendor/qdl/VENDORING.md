@@ -88,6 +88,13 @@ carrying the minimal patches we need.
   `firehose_read_storage`, and `sahara_dump_region` now call
   `pb.finish_println("")` when their transfer loop ends.
 
+- **Add `firehose_get_storage_info_log`** (`src/lib.rs`). Additive API that
+  sends `<getstorageinfo>` and returns the `value` of every `<log>` packet
+  that arrives before the response, also when `skip_firehose_log` is set. A
+  NAK or a missing response is an error. The device reports the storage
+  fields only in these log packets. `firehose_get_storage_info` is unchanged.
+  Tests live in `crates/ltbox-device/tests/firehose_storage_info.rs`.
+
 - **Reject ambiguous USB selection** (`src/usb.rs`). Enumerate every matching
   EDL candidate before opening a handle, including duplicate serial matches.
   Multiple candidates require the user to disconnect other devices. Propagate

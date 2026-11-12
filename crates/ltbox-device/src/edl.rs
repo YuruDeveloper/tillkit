@@ -19,9 +19,13 @@ mod firmware_xml;
 mod partition_flash;
 mod rawprogram;
 #[cfg(test)]
+mod sector_access_tests;
+#[cfg(test)]
 mod test_support;
+mod ufs_storage_info;
 pub use firmware_xml::collect_firmware_xmls_for_flash;
 pub use partition_flash::{PartitionFlash, PartitionFlashError, PartitionOperation};
+pub use ufs_storage_info::UfsStorageInfo;
 
 use crate::driver::{QcomDriverMode, qcom_driver_mode};
 use ltbox_core::i18n::tr;
@@ -253,6 +257,8 @@ pub enum EdlError {
     PartitionNotFound(String),
     #[error("Partition {0} resolves to multiple LUNs (ambiguous; cannot target one)")]
     AmbiguousPartitionLun(String),
+    #[error("Storage info: {0}")]
+    StorageInfo(String),
     #[error("IO error: {0}")]
     Io(#[from] std::io::Error),
 }
@@ -1308,6 +1314,71 @@ impl EdlSession {
             ltbox_core::tr_args!("log_edl_flashed_lun", lun = lun)
         );
         Ok(())
+    }
+
+    pub fn read_sectors(&mut self, lun: u8, start_sector: u64, sectors: usize) -> Result<Vec<u8>> {
+        if sectors == 0 {
+            return Err(EdlError::Session(
+                "A sector read needs at least one sector".into(),
+            ));
+        }
+        let expected = padded_transfer_bytes(sectors, self.dev.fh_config().storage_sector_size)?;
+        let mut buffer = Cursor::new(Vec::new());
+        qdl::firehose_read_storage(&mut self.dev, &mut buffer, sectors, 0, lun, start_sector)
+            .map_err(|error| {
+                EdlError::Session(format!(
+                    "Read of {sectors} sectors at sector {start_sector} of LUN {lun} failed: {error}"
+                ))
+            })?;
+        let data = buffer.into_inner();
+        if data.len() as u64 != expected {
+            return Err(EdlError::Session(format!(
+                "Read of {sectors} sectors at sector {start_sector} of LUN {lun} gave {} bytes, {expected} were expected",
+                data.len()
+            )));
+        }
+        Ok(data)
+    }
+
+    pub fn write_sectors(&mut self, lun: u8, start_sector: u64, data: &[u8]) -> Result<()> {
+        let sector_size = self.dev.fh_config().storage_sector_size;
+        if data.is_empty() || sector_size == 0 || !data.len().is_multiple_of(sector_size) {
+            return Err(EdlError::Session(format!(
+                "A sector write needs whole sectors of {sector_size} bytes, the data has {} bytes",
+                data.len()
+            )));
+        }
+        let sectors = data.len() / sector_size;
+        let label = format!("LUN {lun} sector {start_sector}");
+        qdl::firehose_program_storage(
+            &mut self.dev,
+            &mut Cursor::new(data),
+            &label,
+            sectors,
+            0,
+            lun,
+            &start_sector.to_string(),
+        )
+        .map_err(|error| {
+            EdlError::Session(format!(
+                "Write of {sectors} sectors at sector {start_sector} of LUN {lun} failed: {error}"
+            ))
+        })
+    }
+
+    pub fn set_bootable_storage_drive(&mut self, lun: u8) -> Result<()> {
+        qdl::firehose_set_bootable(&mut self.dev, lun).map_err(|error| {
+            EdlError::Session(format!(
+                "Selecting LUN {lun} as the boot LUN failed: {error}"
+            ))
+        })
+    }
+
+    pub fn storage_info(&mut self, lun: u8) -> Result<UfsStorageInfo> {
+        let lines = qdl::firehose_get_storage_info_log(&mut self.dev, lun).map_err(|error| {
+            EdlError::Session(format!("Storage info of LUN {lun} failed: {error}"))
+        })?;
+        UfsStorageInfo::parse(&lines)
     }
 
     /// Erase a sector range. Used by the Flash Partitions wizard when
