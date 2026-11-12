@@ -50,7 +50,11 @@ impl App {
     }
 
     pub fn can_run_install(&self, stage: InstallStage) -> bool {
-        !self.is_busy() && self.gsi_image().is_some() && self.install.next_stage() == Some(stage)
+        let held = self.full_restore.holds_the_device() && stage.changes_the_device();
+        !self.is_busy()
+            && !held
+            && self.gsi_image().is_some()
+            && self.install.next_stage() == Some(stage)
     }
 
     pub fn find_full_backup(&mut self) {
@@ -197,7 +201,8 @@ impl App {
     }
 
     pub fn install_write(&mut self) -> Task<Message> {
-        if self.is_busy() || self.gsi_image().is_none() || !self.install.approve() {
+        let held = self.full_restore.holds_the_device();
+        if self.is_busy() || held || self.gsi_image().is_none() || !self.install.approve() {
             return Task::none();
         }
         self.run_install_write()
@@ -224,8 +229,9 @@ impl App {
     }
 
     pub fn install_restart(&mut self) -> Task<Message> {
+        let closed = self.is_busy() || self.full_restore.holds_the_device();
         let approval = self.install.restart_approval(now_unix());
-        let (Some(approval), false) = (approval, self.is_busy()) else {
+        let (Some(approval), false) = (approval, closed) else {
             return Task::none();
         };
         self.install.begin(InstallStage::Restart);
@@ -410,6 +416,22 @@ mod tests {
         assert_eq!(app.install.running, Some(InstallStage::Write));
         assert!(app.install.approved_sha256.is_some());
         assert!(app.install.expected_bytes().is_some());
+    }
+
+    #[test]
+    fn letter_1397_a_stopped_restore_closes_the_write_of_the_install() {
+        let (_directory, mut app) = app_with_gsi();
+        let (_kept, flow) = checked();
+        app.install = flow;
+        assert!(app.can_run_install(InstallStage::Write));
+        app.full_restore.device_changed = true;
+        assert!(!app.can_run_install(InstallStage::Write));
+        let _ = app.update(install(InstallMessage::AskWrite));
+        assert!(app.confirmation.is_none());
+        let _ = app.install_write();
+        assert!(!app.is_busy() && app.install.approved_sha256.is_none());
+        app.full_restore.device_changed = false;
+        assert!(app.can_run_install(InstallStage::Write));
     }
 
     #[test]

@@ -2,6 +2,7 @@ use crate::confirmation::Confirmation;
 use crate::data_paths::DataPaths;
 use crate::diagnosis::Diagnosis;
 use crate::folder_choice::FolderChoice;
+use crate::full_restore_flow::FullRestoreFlow;
 use crate::grain;
 use crate::install_device::DeviceSlot;
 use crate::install_flow::InstallFlow;
@@ -49,6 +50,7 @@ pub struct App {
     pub kernel_sets: Vec<KernelSet>,
     pub write: WriteFlow,
     pub install: InstallFlow,
+    pub full_restore: FullRestoreFlow,
     pub device: DeviceSlot,
     pub magisk_apk: Option<PathBuf>,
     pub reboot: RebootFlow,
@@ -104,6 +106,7 @@ impl App {
             kernel_sets: Vec::new(),
             write: WriteFlow::default(),
             install: InstallFlow::default(),
+            full_restore: FullRestoreFlow::default(),
             device: DeviceSlot::default(),
             magisk_apk: None,
             reboot: RebootFlow::default(),
@@ -121,17 +124,24 @@ impl App {
     }
 
     pub fn is_busy(&self) -> bool {
-        self.activity.is_some() || self.write.running.is_some() || self.install.running.is_some()
+        let device_work = self.install.running.is_some() || self.full_restore.running.is_some();
+        self.activity.is_some() || self.write.running.is_some() || device_work
     }
 
     pub fn subscription(&self) -> Subscription<Message> {
-        if self.install.running.is_none() {
+        if self.install.running.is_none() && self.full_restore.running.is_none() {
             return Subscription::none();
         }
         iced::time::every(PROGRESS_INTERVAL).map(|_| Message::Install(InstallMessage::Tick))
     }
 
     pub fn update(&mut self, message: Message) -> Task<Message> {
+        let task = self.route(message);
+        self.full_restore.keep_only_for(&self.install);
+        task
+    }
+
+    fn route(&mut self, message: Message) -> Task<Message> {
         match message {
             Message::Navigate(screen) => self.navigate(screen),
             Message::ToggleTheme => self.set_palette(self.palette.toggled()),
@@ -152,6 +162,7 @@ impl App {
             Message::Root(message) => return self.update_root(message),
             Message::Reboot(message) => return self.update_reboot(message),
             Message::Install(message) => return self.update_install(message),
+            Message::FullRestore(message) => return self.update_full_restore(message),
         }
         Task::none()
     }
@@ -236,6 +247,8 @@ impl App {
             Some(Confirmation::RebootTo) => self.reboot_to(),
             Some(Confirmation::InstallWrite) => self.install_write(),
             Some(Confirmation::InstallRestart) => self.install_restart(),
+            Some(Confirmation::FullRestoreWrite) => self.full_restore_write(),
+            Some(Confirmation::FullRestoreRestart) => self.full_restore_restart(),
             None => Task::none(),
         }
     }

@@ -6,4 +6,6 @@ pub enum Confirmation {
     RebootTo,
     InstallWrite,
     InstallRestart,
+    FullRestoreWrite,
+    FullRestoreRestart,
 }

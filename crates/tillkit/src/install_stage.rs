@@ -94,7 +94,14 @@ impl InstallStage {
             Self::Restart => RESTART_FAILED,
         }
     }
+
+    pub fn stopped_by_another_device_state(self, error: &str) -> bool {
+        self == Self::Check && error.contains(GPT_COPY_DIFFERS)
+    }
 }
+
+pub const OTHER_STATE: &str = "이 기기는 계획을 만든 전체 백업과 다른 상태입니다. 전체 백업을 기기에 되돌린 뒤에 다시 점검해 주세요.";
+const GPT_COPY_DIFFERS: &str = "preflight: the current gpt_";
 
 const PLAN: &str = "전체 백업과 GSI 이미지로 기록할 내용을 정합니다. 이 이미지로 만든 계획이 있으면 그 계획과 그 계획의 전체 백업을 다시 씁니다. 전체 백업을 직접 고른 때에는 그 백업으로 만든 계획만 다시 씁니다. 기기에는 기록하지 않습니다.";
 const CHECK: &str = "기기의 지금 내용을 읽어서, 처음 설치인지 멈춘 설치를 이어 하는지 확인합니다. 기기에는 기록하지 않습니다.";

@@ -24,6 +24,6 @@ pub use misc_wipe::misc_wipe_sector;
 pub use partition_location::PartitionLocation;
 pub use partition_map::PartitionMap;
 pub use permitted_bytes::PermittedBytes;
-pub use slot_activation::SlotActivation;
+pub use slot_activation::{ACTIVE_FLAG, SlotActivation};
 pub use slot_change::SlotChange;
 pub use usable_area::UsableArea;

@@ -3,6 +3,8 @@ pub mod backup;
 pub mod confirm;
 pub mod device;
 pub mod flow;
+pub mod full_restore;
+pub mod full_restore_confirm;
 pub mod info;
 pub mod install;
 pub mod install_confirm;

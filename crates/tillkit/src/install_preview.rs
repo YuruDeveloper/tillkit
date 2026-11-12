@@ -1,12 +1,13 @@
 use crate::app::App;
 use crate::confirmation::Confirmation;
+use crate::full_restore_preview;
 use crate::install_flow::InstallFlow;
 use crate::install_review::InstallReview;
 use crate::install_stage::InstallStage;
 use front2::install::{
     InstallPlan, InstallProgress, InstallStep, PreflightRecord, ResumePoint, StepRecord, StepState,
 };
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::Ordering;
 
 const POSE_VARIABLE: &str = "TILLKIT_PREVIEW_INSTALL";
@@ -18,6 +19,7 @@ const PLAN_FOLDER: &str = "D:\\tillkit-data\\install-plans\\5d1f0c9a";
 const NO_DEVICE: &str = "no device in EDL mode answered on USB";
 const NO_MANIFEST: &str = "the folder holds no sha256-manifest.json";
 const WRITE_STOPPED: &str = "write:super: the device gave no answer at sector 1024 of LUN 0";
+const OTHER_STATE_STOP: &str = "Verification failed: preflight: the current gpt_main1 has SHA-256 0d6c9e1a, the plan records 7f2b4c88";
 const MEBIBYTE: u64 = 1 << 20;
 const RESUMED: &str = "resumed";
 const RESUMED_UNKNOWN: &str = "resumed-unknown";
@@ -50,11 +52,14 @@ pub fn apply(app: &mut App) {
 }
 
 fn depth(pose: &str) -> u8 {
+    if full_restore_preview::POSES.contains(&pose) {
+        return 3;
+    }
     match pose {
         "loader" | "connect-failed" => 1,
         "backup" | "backing-up" | "backup-refused" => 2,
         "plan" => 3,
-        "check" => 4,
+        "check" | "check-other-state" => 4,
         "checked" | "confirm" | "writing" | "stopped" => 5,
         "resumed" | "resumed-unknown" | "resumed-unknown-confirm" => 5,
         "restart" | "restart-confirm" => 6,
@@ -137,7 +142,13 @@ fn finish(app: &mut App, pose: &str) {
                 .stage_failed(InstallStage::Write, WRITE_STOPPED.into());
         }
         "restart-confirm" => app.confirmation = Some(Confirmation::InstallRestart),
+        "check-other-state" => app
+            .install
+            .stage_failed(InstallStage::Check, OTHER_STATE_STOP.into()),
         _ => {}
+    }
+    if full_restore_preview::POSES.contains(&pose) {
+        full_restore_preview::apply(app, pose, Path::new(BACKUP));
     }
 }
 

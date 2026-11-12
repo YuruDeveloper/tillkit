@@ -24,7 +24,8 @@ impl App {
     }
 
     pub fn reboot_is_held(&self) -> bool {
-        self.write.write_is_uncertain() || self.install.holds_the_device()
+        let restore_holds = self.full_restore.holds_the_device();
+        self.write.write_is_uncertain() || self.install.holds_the_device() || restore_holds
     }
 
     pub fn can_reboot_to(&self, target: RebootTarget) -> bool {
