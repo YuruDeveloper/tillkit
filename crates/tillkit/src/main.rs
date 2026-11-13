@@ -12,6 +12,7 @@ mod clock;
 mod confirmation;
 mod counted_storage;
 mod data_paths;
+mod device_reading;
 mod diagnosis;
 mod edl_link;
 mod edl_storage;

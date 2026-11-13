@@ -1,6 +1,7 @@
 use crate::adb_shell::AdbShell;
 use crate::clock::now_unix;
 use crate::data_paths::DataPaths;
+use crate::device_reading::DeviceReading;
 use crate::diagnosis::Diagnosis;
 use crate::message::Message;
 use crate::pair_session::PairSession;
@@ -17,6 +18,7 @@ use front2::{
     PairStore, Result, SupportOverride, WritePlan, pair_apply,
 };
 use iced::Task;
+use ltbox_device::edl;
 use std::path::Path;
 use std::time::Duration;
 
@@ -49,7 +51,21 @@ where
     )
 }
 
-pub fn read_device() -> Result<Diagnosis> {
+pub fn read_device() -> Result<DeviceReading> {
+    reading_from(edl::check_device(), read_android_device)
+}
+
+fn reading_from(
+    edl_device_present: bool,
+    read_android: impl FnOnce() -> Result<Diagnosis>,
+) -> Result<DeviceReading> {
+    if edl_device_present {
+        return Ok(DeviceReading::Edl);
+    }
+    read_android().map(DeviceReading::Android)
+}
+
+fn read_android_device() -> Result<Diagnosis> {
     let mut shell = AdbShell::connect()?;
     let state = DeviceState::read(&mut shell)?;
     Ok(Diagnosis::evaluate(state))
@@ -247,5 +263,37 @@ pub mod tests {
         let mut other_vbmeta = readback;
         other_vbmeta.vbmeta.sha256 = "00".into();
         assert!(!is_backup_of(&other_vbmeta, &current));
+    }
+
+    fn diagnosis() -> Diagnosis {
+        Diagnosis::evaluate(DeviceState {
+            properties: Default::default(),
+            shell_uid: None,
+            root_access: None,
+            magisk_version: None,
+            kernel_release: None,
+        })
+    }
+
+    #[test]
+    fn a_device_in_edl_mode_is_reported_and_adb_is_not_used() {
+        let mut adb_used = false;
+        let reading = reading_from(true, || {
+            adb_used = true;
+            Ok(diagnosis())
+        })
+        .expect("reading");
+        assert!(matches!(reading, DeviceReading::Edl));
+        assert!(!adb_used);
+    }
+
+    #[test]
+    fn without_a_device_in_edl_mode_the_adb_result_is_kept() {
+        let reading = reading_from(false, || Ok(diagnosis())).expect("reading");
+        assert!(matches!(reading, DeviceReading::Android(_)));
+
+        let failure = || Err(Front2Error::Shell("no device answers".into()));
+        let error = reading_from(false, failure).expect_err("no device");
+        assert!(error.to_string().contains("no device answers"), "{error}");
     }
 }

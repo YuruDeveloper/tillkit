@@ -9,8 +9,8 @@ use iced::widget::{column, container, row};
 use iced::{Alignment, Element, Length};
 
 const INTRODUCTION: &str = "기기를 USB로 연결한 뒤에 확인을 누르면, 이 도구로 다룰 수 있는 기기인지 알려 드립니다. 이 화면은 기기에 아무것도 기록하지 않습니다.";
-const READ_FAILED: &str =
-    "기기를 읽지 못했습니다. USB 연결과 USB 디버깅 허용을 확인한 뒤에 다시 눌러 주세요.";
+const READ_FAILED: &str = "기기를 읽지 못했습니다. USB 연결과 USB 디버깅 허용을 확인한 뒤에 다시 눌러 주세요. GSI를 설치하려고 EDL 모드로 연결한 기기는 이 화면에서 읽지 않으니 WRITE 화면에서 시작해 주세요.";
+const EDL_FOUND: &str = "EDL 모드로 연결된 기기를 찾았습니다. 이 화면은 EDL 모드의 기기에서 정보를 읽지 않으므로, 지원하는 기기인지는 여기에서 알려 드리지 못합니다. GSI 설치와 전체 백업 복원은 WRITE 화면에서 시작해 주세요.";
 const SUPPORTED: &str = "지원하는 기기입니다. 백업과 기록을 진행할 수 있습니다.";
 const UNSUPPORTED: &str = "지원하는 조건과 맞지 않는 항목이 있어서, 이 기기에는 기록하지 않습니다.";
 const ROOT_MISSING: &str = "루트 권한이 없어서 이 기기에는 기록할 수 없습니다.";
@@ -42,6 +42,9 @@ pub fn view(app: &App) -> Element<'_, Message> {
     if let Some(error) = &app.device_error {
         page = page.push(parts::fault("CHECK FAILED", READ_FAILED, error, palette));
     }
+    if app.device_in_edl {
+        page = page.push(edl_notice(palette));
+    }
     if let Some(diagnosis) = &app.diagnosis {
         page = page
             .push(verdict(app, diagnosis))
@@ -50,6 +53,14 @@ pub fn view(app: &App) -> Element<'_, Message> {
             .push(details(app, diagnosis));
     }
     page.into()
+}
+
+fn edl_notice<'a>(palette: Palette) -> Element<'a, Message> {
+    let content = column![
+        parts::strong("EDL MODE", palette),
+        parts::body(EDL_FOUND, palette)
+    ];
+    parts::panel(content.spacing(8), palette)
 }
 
 fn verdict<'a>(app: &App, diagnosis: &Diagnosis) -> Element<'a, Message> {

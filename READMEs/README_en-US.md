@@ -60,7 +60,7 @@ The GSI installation does not use root access. These two items are necessary:
 1. The device must be in EDL mode and connected to the computer. If the device has an ADB connection, the `ADVANCED` screen can start it again in EDL mode.
 2. The Firehose loader file of this device is necessary. TillKit does not include this file.
 
-A device in EDL mode has no ADB connection. Thus the check on the `DEVICE` screen tells you that it cannot read the device. Start the GSI installation on the `WRITE` screen and do not use the `DEVICE` screen.
+A device in EDL mode has no ADB connection. Thus the check on the `DEVICE` screen tells you only that it found a device in EDL mode. It does not read data from that device. Start the GSI installation on the `WRITE` screen.
 
 ## Supported device
 
@@ -203,6 +203,7 @@ Other functions:
 
 - The start of the device from an image with the Magisk patch that TillKit made.
 - The start of the device from a kernel image that TillKit signed.
+- The check on the `DEVICE` screen with a device in EDL mode.
 - The restart from the `ADVANCED` screen.
 - The download of Magisk from GitHub.
 

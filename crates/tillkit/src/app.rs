@@ -1,5 +1,6 @@
 use crate::confirmation::Confirmation;
 use crate::data_paths::DataPaths;
+use crate::device_reading::DeviceReading;
 use crate::diagnosis::Diagnosis;
 use crate::folder_choice::FolderChoice;
 use crate::full_restore_flow::FullRestoreFlow;
@@ -41,6 +42,7 @@ pub struct App {
     pub activity: Option<&'static str>,
     pub diagnosis: Option<Diagnosis>,
     pub device_error: Option<String>,
+    pub device_in_edl: bool,
     pub details_open: bool,
     pub forced: bool,
     pub confirmation: Option<Confirmation>,
@@ -97,6 +99,7 @@ impl App {
             activity: None,
             diagnosis: None,
             device_error: None,
+            device_in_edl: false,
             details_open: false,
             forced: false,
             confirmation: None,
@@ -178,18 +181,21 @@ impl App {
         }
         self.activity = Some("READING DEVICE");
         self.device_error = None;
+        self.device_in_edl = false;
         self.forced = false;
         self.confirmation = None;
         run_blocking(worker::read_device, Message::DeviceRead)
     }
 
-    fn device_read(&mut self, result: Outcome<Diagnosis>) {
+    fn device_read(&mut self, result: Outcome<DeviceReading>) {
         self.activity = None;
-        let (diagnosis, error) = match result {
-            Ok(diagnosis) => (Some(diagnosis), None),
-            Err(error) => (None, Some(error)),
+        let (diagnosis, in_edl, error) = match result {
+            Ok(DeviceReading::Android(diagnosis)) => (Some(diagnosis), false, None),
+            Ok(DeviceReading::Edl) => (None, true, None),
+            Err(error) => (None, false, Some(error)),
         };
         self.diagnosis = diagnosis;
+        self.device_in_edl = in_edl;
         self.device_error = error;
         self.forced = false;
         self.confirmation = None;
@@ -380,6 +386,27 @@ mod tests {
         assert!(!app.forced && app.confirmation.is_none());
         let _ = app.update(Message::Confirm);
         assert!(!app.forced);
+    }
+
+    #[test]
+    fn a_device_in_edl_mode_is_shown_until_the_next_device_reading() {
+        let (_directory, mut app) = app();
+        app.device_error = Some("an earlier failure".into());
+        let _ = app.update(Message::DeviceRead(Ok(DeviceReading::Edl)));
+        assert!(app.device_in_edl);
+        assert!(app.diagnosis.is_none() && app.device_error.is_none());
+
+        let _ = app.update(Message::ReadDevice);
+        assert!(!app.device_in_edl);
+    }
+
+    #[test]
+    fn a_failed_device_reading_does_not_report_edl_mode() {
+        let (_directory, mut app) = app();
+        app.device_in_edl = true;
+        let _ = app.update(Message::DeviceRead(Err("no device answers".into())));
+        assert!(!app.device_in_edl);
+        assert_eq!(app.device_error.as_deref(), Some("no device answers"));
     }
 
     #[test]

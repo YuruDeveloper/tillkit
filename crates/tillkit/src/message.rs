@@ -1,4 +1,4 @@
-use crate::diagnosis::Diagnosis;
+use crate::device_reading::DeviceReading;
 use crate::full_restore_message::FullRestoreMessage;
 use crate::install_message::InstallMessage;
 use crate::reboot_message::RebootMessage;
@@ -12,7 +12,7 @@ pub enum Message {
     Navigate(Screen),
     ToggleTheme,
     ReadDevice,
-    DeviceRead(Result<Diagnosis, String>),
+    DeviceRead(Result<DeviceReading, String>),
     ToggleDetails,
     AskForce,
     Confirm,
