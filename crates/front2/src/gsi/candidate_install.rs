@@ -34,13 +34,27 @@ pub fn install_inputs(
 
 pub fn backup_boot_slot(backup_directory: &Path) -> Result<BootSlot> {
     let manifest = BackupManifest::load(&std::path::absolute(backup_directory)?)?;
+    boot_slot(&manifest)
+}
+
+fn boot_slot(manifest: &BackupManifest) -> Result<BootSlot> {
     let [_, boot_lun] = ACTIVATION_LUNS;
-    let (_, main) = gpt_backup(&manifest, boot_lun, GptCopyKind::Main)?;
+    let (_, main) = gpt_backup(manifest, boot_lun, GptCopyKind::Main)?;
     BootSlot::read(boot_lun, &GptCopy::parse(GptCopyKind::Main, &main)?)
+}
+
+fn require_boot_slot_a(manifest: &BackupManifest) -> Result<()> {
+    match boot_slot(manifest)? {
+        BootSlot::A => Ok(()),
+        BootSlot::B => Err(Front2Error::Unsupported(
+            "the backup shows slot B as the boot slot, the installation changes the boot slot only from A to B".into(),
+        )),
+    }
 }
 
 pub fn require_slot_a_active(backup_directory: &Path) -> Result<()> {
     let manifest = BackupManifest::load(&std::path::absolute(backup_directory)?)?;
+    require_boot_slot_a(&manifest)?;
     for lun in ACTIVATION_LUNS {
         let (_, main) = gpt_backup(&manifest, lun, GptCopyKind::Main)?;
         let (_, backup) = gpt_backup(&manifest, lun, GptCopyKind::Backup)?;
@@ -64,6 +78,7 @@ pub fn install_inputs_from_images(
             recorded_super.sha256
         )));
     }
+    require_boot_slot_a(&manifest)?;
     let mut gpt_backups = Vec::new();
     let mut main_copies = Vec::new();
     let mut backup_copies = Vec::new();

@@ -192,7 +192,12 @@ fn a_backup_of_a_device_that_does_not_start_from_slot_a_is_rejected_before_the_b
     let error = require_slot_a_active(backup).expect_err("slot A is not active");
     assert!(matches!(error, Front2Error::Unsupported(_)), "{error}");
     assert!(
-        error.to_string().contains("boot_a is not active"),
+        error.to_string().contains("slot B as the boot slot"),
+        "{error}"
+    );
+    let error = inputs_of(&fixture).expect_err("the inputs need slot A");
+    assert!(
+        error.to_string().contains("slot B as the boot slot"),
         "{error}"
     );
 
@@ -204,6 +209,25 @@ fn a_backup_of_a_device_that_does_not_start_from_slot_a_is_rejected_before_the_b
         error.to_string().contains("does not show one boot slot"),
         "{error}"
     );
+}
+
+#[test]
+fn a_backup_with_no_boot_a_partition_is_rejected_by_each_entry_of_the_inputs() {
+    let fixture = prepared_fixture();
+    let backup = &fixture.inputs.backup_directory;
+    inputs_of(&fixture).expect("the standard backup gives the inputs");
+
+    let no_boot_a = SyntheticGpt::standard().without("boot_a");
+    write_lun4_tables(backup, &no_boot_a);
+    let rejections = [
+        backup_boot_slot(backup).expect_err("no boot_a for the boot slot"),
+        require_slot_a_active(backup).expect_err("no boot_a for the slot check"),
+        inputs_of(&fixture).expect_err("no boot_a for the inputs"),
+    ];
+    for error in rejections {
+        assert!(matches!(error, Front2Error::Unsupported(_)), "{error}");
+        assert!(error.to_string().contains("holds no boot_a"), "{error}");
+    }
 }
 
 fn write_lun4_tables(backup: &Path, gpt: &SyntheticGpt) {
