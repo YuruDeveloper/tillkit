@@ -20,7 +20,7 @@ This file shows examples of the screens. The paths and the numbers on these scre
 > [!WARNING]
 > A change to firmware can make your device unbootable or erase your data. This tool comes without warranty. You use it at your risk.
 
-- The tests of TillKit on a device used only one Front 2. The GSI installation had a test only after a full restore of stock firmware 1.609.5. Many functions have no test on a device. Read "No test on a device" below.
+- The tests of TillKit on a device used only one Front 2. The GSI installation completed the write and the removal of the user data only after a full restore of stock firmware 1.609.5. Many functions have no test on a device. Read "No test on a device" below.
 - A write changes some partitions, one after the other. If the device or the connection stops during the writes, the device can become unbootable.
 - The usual recovery from that condition is an EDL restore from a full backup. TillKit makes a full backup as a step of the GSI installation. The `WRITE` screen can write that full backup to the device again. Read "Full restore" below.
 - The GSI installation erases the user data of the device.
