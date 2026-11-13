@@ -8,7 +8,7 @@ use front2::{DeviceState, SupportCheck, Verdict};
 use iced::widget::{column, container, row};
 use iced::{Alignment, Element, Length};
 
-const INTRODUCTION: &str = "기기를 USB로 연결한 뒤에 확인을 누르면, 이 도구로 다룰 수 있는 기기인지 알려 드립니다. 이 화면은 기기에 아무것도 기록하지 않습니다.";
+const INTRODUCTION: &str = "기기를 USB로 연결한 뒤에 확인을 누르면, 이 도구로 다룰 수 있는 기기인지 알려 드립니다. EDL 모드로 연결된 기기를 찾으면 연결 모드만 알려 드립니다. 이 화면은 기기에 아무것도 기록하지 않습니다.";
 const READ_FAILED: &str = "기기를 읽지 못했습니다. USB 연결과 USB 디버깅 허용을 확인한 뒤에 다시 눌러 주세요. GSI를 설치하려고 EDL 모드로 연결한 기기는 이 화면에서 읽지 않으니 WRITE 화면에서 시작해 주세요.";
 const EDL_FOUND: &str = "EDL 모드로 연결된 기기를 찾았습니다. 이 화면은 EDL 모드의 기기에서 정보를 읽지 않으므로, 지원하는 기기인지는 여기에서 알려 드리지 못합니다. GSI 설치와 전체 백업 복원은 WRITE 화면에서 시작해 주세요.";
 const SUPPORTED: &str = "지원하는 기기입니다. 백업과 기록을 진행할 수 있습니다.";

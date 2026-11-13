@@ -60,7 +60,7 @@ The GSI installation does not use root access. These two items are necessary:
 1. The device must be in EDL mode and connected to the computer. If the device has an ADB connection, the `ADVANCED` screen can start it again in EDL mode.
 2. The Firehose loader file of this device is necessary. TillKit does not include this file.
 
-A device in EDL mode has no ADB connection. Thus the check on the `DEVICE` screen tells you only that it found a device in EDL mode. It does not read data from that device. Start the GSI installation on the `WRITE` screen.
+A device in EDL mode has no ADB connection. If the check on the `DEVICE` screen finds a device in EDL mode, it tells you only that. It does not read data from that device. If the check does not find the device, it tells you that it cannot read the device. In the two conditions, start the GSI installation on the `WRITE` screen.
 
 ## Supported device
 

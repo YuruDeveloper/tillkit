@@ -392,6 +392,13 @@ mod tests {
     fn a_device_in_edl_mode_is_shown_until_the_next_device_reading() {
         let (_directory, mut app) = app();
         app.device_error = Some("an earlier failure".into());
+        app.diagnosis = Some(Diagnosis::evaluate(DeviceState {
+            properties: Default::default(),
+            shell_uid: None,
+            root_access: None,
+            magisk_version: None,
+            kernel_release: None,
+        }));
         let _ = app.update(Message::DeviceRead(Ok(DeviceReading::Edl)));
         assert!(app.device_in_edl);
         assert!(app.diagnosis.is_none() && app.device_error.is_none());
