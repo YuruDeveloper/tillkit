@@ -11,6 +11,10 @@ The Lenovo functions of LTBox are not in this repository.
 
 [한국어](READMEs/README_ko-KR.md)
 
+![The WRITE screen during the write step of a GSI installation](READMEs/Images/GsiInstallationWrite.png)
+
+This file shows examples of the screens. The paths and the numbers on these screens are not from a device. The screens show Korean text.
+
 ## Before you start
 
 > [!WARNING]
@@ -122,6 +126,8 @@ When you select a system image on the `WRITE` screen, these steps open in sequen
 6. User data: The tool erases the user data immediately after the write. The approval of step 5 is also the approval for this step.
 7. Restart: The tool gets a different approval for the restart.
 
+![The WRITE screen after all the steps of a GSI installation](READMEs/Images/GsiInstallationDone.png)
+
 - If the write does not complete, the device can become unbootable. Keep the device in EDL mode and do the check again. If the check finds the step that stopped, the tool continues from that step. To write the full backup to the device again, use the full restore.
 - If the check finds a partition table that the plan does not write and that is different from the full backup, the check stops. The tool tells you to write the full backup to the device first.
 - TillKit cannot compare the rollback values that the device keeps with the values of the images.
@@ -134,6 +140,8 @@ The full restore writes a full backup to the device again. When the GSI installa
 1. Check: The tool reads the device and compares each area with the hash in the full backup. It shows the number and the names of the different areas, the quantity of data to write and the boot LUN. The user data is part of the restore by default. If you set it to off, the tool does not compare or write `userdata`.
 2. Restore: After your approval, the tool writes only the different areas. It reads each area again and compares the hashes. Then it selects the boot LUN.
 3. Restart: The restart is not necessary. You can do the check of the GSI installation again on the same connection.
+
+![The full restore after the restore step](READMEs/Images/FullRestoreDone.png)
 
 - If the device is the same as the full backup, the tool tells you and does not write.
 - If a partition on LUN 1 or LUN 2 is different, the tool does not write. These partitions hold the first boot images.

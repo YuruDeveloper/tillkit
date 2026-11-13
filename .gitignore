@@ -38,3 +38,4 @@ desktop.ini
 .DS_Store
 *.png
 !crates/tillkit/assets/**
+!/READMEs/Images/*.png
