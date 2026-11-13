@@ -20,7 +20,7 @@ This file shows examples of the screens. The paths and the numbers on these scre
 > [!WARNING]
 > A change to firmware can make your device unbootable or erase your data. This tool comes without warranty. You use it at your risk.
 
-- No person did a test of the write functions of TillKit on a device.
+- The tests of TillKit on a device used only one device with stock firmware 1.609.5. Many functions have no test on a device. Read "No test on a device" below.
 - A write changes some partitions, one after the other. If the device or the connection stops during the writes, the device can become unbootable.
 - The usual recovery from that condition is an EDL restore from a full backup. TillKit makes a full backup as a step of the GSI installation. The `WRITE` screen can write that full backup to the device again. Read "Full restore" below.
 - The GSI installation erases the user data of the device.
@@ -59,6 +59,8 @@ The GSI installation does not use root access. These two items are necessary:
 
 1. The device must be in EDL mode and connected to the computer. If the device has an ADB connection, the `ADVANCED` screen can start it again in EDL mode.
 2. The Firehose loader file of this device is necessary. TillKit does not include this file.
+
+A device in EDL mode has no ADB connection. Thus the check on the `DEVICE` screen tells you that it cannot read the device. Start the GSI installation on the `WRITE` screen and do not use the `DEVICE` screen.
 
 ## Supported device
 
@@ -176,16 +178,21 @@ If the device does not start with a kernel that you wrote, TillKit cannot write 
 
 ## No test on a device
 
-No function of the TillKit screens operated on a device.
+The TillKit screens operated on only one device. That device had stock firmware 1.609.5. Only these two functions operated on it:
+
+- The GSI installation: the EDL connection, the full backup, the plan, the check, the write, the removal of the user data and the restart command.
+- The full restore: the check, the write with the user data and the boot LUN.
+
+The items below have no test on a device.
 The checks for these items used a simulated device and a local shell only.
 
 Write functions:
 
-- All steps of the GSI installation: the EDL connection, the full backup, the check, the write, the removal of the user data and the restart.
+- The start of the device from a GSI that TillKit wrote. We did not see the screen of the device after the restart command.
+- A GSI installation on a device with firmware that is not 1.609.5.
 - A GSI installation that stopped and that the tool continues from the step that stopped.
-- The full restore: the check, the write, the boot LUN and the restart.
-- The start of the device from a GSI that TillKit wrote.
-- Backup, write and `RESTORE` on a device.
+- The full restore without the user data, and the restart after the full restore.
+- Backup, write and `RESTORE` with root access.
 - A write through `su`.
 - A write to a device after you accept incorrect items.
 - The EDL recovery after the device stops during a write.
