@@ -24,6 +24,7 @@ const MEBIBYTE: u64 = 1 << 20;
 const RESUMED: &str = "resumed";
 const RESUMED_UNKNOWN: &str = "resumed-unknown";
 const RESUMED_STEPS: usize = 3;
+const FINISHED_DEPTH: u8 = 7;
 
 pub fn apply(app: &mut App) {
     let Ok(pose) = std::env::var(POSE_VARIABLE) else {
@@ -35,7 +36,7 @@ pub fn apply(app: &mut App) {
         app.reboot.loader = Some(PathBuf::from(LOADER));
     }
     let install = &mut app.install;
-    install.connected = depth >= 2;
+    install.connected = keeps_the_connection(depth);
     if depth >= 3 {
         install.backup = Some(PathBuf::from(BACKUP));
         install.single_read = vec!["super".into(), "userdata".into()];
@@ -63,9 +64,13 @@ fn depth(pose: &str) -> u8 {
         "checked" | "confirm" | "writing" | "stopped" => 5,
         "resumed" | "resumed-unknown" | "resumed-unknown-confirm" => 5,
         "restart" | "restart-confirm" => 6,
-        "done" => 7,
+        "done" => FINISHED_DEPTH,
         _ => 0,
     }
+}
+
+fn keeps_the_connection(depth: u8) -> bool {
+    (2..FINISHED_DEPTH).contains(&depth)
 }
 
 fn read_plan() -> Option<InstallPlan> {
@@ -99,7 +104,7 @@ fn progress(plan: &InstallPlan, sha256: &str, pose: &str) -> Option<InstallProgr
         .take(done)
         .map(verified)
         .collect();
-    progress.restart_sent = depth >= 7;
+    progress.restart_sent = depth >= FINISHED_DEPTH;
     Some(progress)
 }
 
@@ -160,4 +165,27 @@ fn run(install: &mut InstallFlow, stage: InstallStage, done: u64, expected: u64)
     install
         .expected
         .store(expected * MEBIBYTE, Ordering::Relaxed);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_done_pose_closes_the_connection_as_a_real_restart_does() {
+        assert!(!keeps_the_connection(depth("done")));
+    }
+
+    #[test]
+    fn the_poses_from_the_backup_to_the_restart_keep_the_connection() {
+        for pose in ["backup", "plan", "check", "writing", "restart"] {
+            assert!(keeps_the_connection(depth(pose)), "{pose}");
+        }
+    }
+
+    #[test]
+    fn the_poses_before_the_connection_do_not_have_it() {
+        assert!(!keeps_the_connection(depth("loader")));
+        assert!(!keeps_the_connection(depth("connect-failed")));
+    }
 }
