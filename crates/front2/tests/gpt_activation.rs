@@ -263,10 +263,27 @@ fn a_slot_a_partition_without_a_slot_b_partner_is_rejected() {
 }
 
 #[test]
-fn a_slot_a_partition_without_the_active_flag_is_rejected() {
-    let gpt = SyntheticGpt::standard().with_flags("vbmeta_a", 0x107b << 48);
-    let err = rejection(activate(&gpt), "vbmeta_a is not active");
+fn a_boot_a_partition_without_the_active_flag_is_rejected() {
+    let gpt = SyntheticGpt::standard().with_flags("boot_a", 0x0073 << 48);
+    let err = rejection(activate(&gpt), "boot_a is not active");
     assert!(matches!(err, Front2Error::Unsupported(_)));
+}
+
+#[test]
+fn a_pair_with_no_active_flag_is_switched_to_the_same_table_as_a_pair_with_the_flag() {
+    let flagged = activate(&SyntheticGpt::standard()).expect("flagged pair");
+    let unflagged_gpt = SyntheticGpt::standard().with_flags("vbmeta_a", 0x107b << 48);
+    let unflagged = activate(&unflagged_gpt).expect("pair with no active flag");
+    for kind in [GptCopyKind::Main, GptCopyKind::Backup] {
+        let expected = flagged.output(kind).expect("flagged output");
+        let actual = unflagged.output(kind).expect("unflagged output");
+        assert_eq!(actual.data, expected.data, "{kind:?}");
+        assert_ne!(actual.restore_sha256, expected.restore_sha256, "{kind:?}");
+    }
+    let change = &unflagged.changes[1];
+    assert_eq!(change.a, "vbmeta_a");
+    assert_eq!(change.flags_before_a, "107b000000000000");
+    assert_eq!(change.flags_after_b, "107f000000000000");
 }
 
 #[test]

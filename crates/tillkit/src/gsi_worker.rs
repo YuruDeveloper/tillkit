@@ -4,7 +4,10 @@ use crate::full_backup_store;
 use crate::gsi_review::GsiReview;
 use crate::install_review::InstallReview;
 use front2::digest::sha256_file;
-use front2::gsi::{GsiCandidate, GsiCandidateRequest, install_inputs, require_slot_a_active};
+use front2::gpt::BootSlot;
+use front2::gsi::{
+    GsiCandidate, GsiCandidateRequest, backup_boot_slot, install_inputs, require_slot_a_active,
+};
 use front2::install::{InstallPlan, PLAN_FILE};
 use front2::{DeviceProfile, Front2Error, Result};
 use serde::Serialize;
@@ -14,7 +17,8 @@ use std::path::{Path, PathBuf};
 const CANDIDATE_PREFIX: &str = "gsi-";
 const PLAN_PREFIX: &str = "install-";
 const BACKUP_NOT_READ: &str = "이 이미지로 만든 계획이 쓰던 전체 백업을 읽지 못했습니다. 그 폴더를 읽을 수 있게 한 뒤에 MAKE PLAN을 다시 누르거나, USE EXISTING BACKUP으로 쓸 전체 백업을 직접 골라 주세요.";
-const BACKUP_SLOTS_UNSUPPORTED: &str = "이 전체 백업으로는 설치 계획을 만들 수 없습니다. 설치는 부팅 슬롯을 A에서 B로 바꾸는데, 이 백업의 파티션 표는 그 전환을 할 수 있는 상태(슬롯 A만 활성)와 맞지 않습니다. 예를 들어 이미 GSI를 설치한 기기에서 만든 백업이 그렇습니다. 순정 상태에서 만들어 둔 전체 백업이 있으면 USE EXISTING BACKUP으로 그 폴더를 골라 주세요.";
+const BACKUP_SLOTS_UNSUPPORTED: &str = "이 전체 백업으로는 설치 계획을 만들 수 없습니다. 설치는 부팅 슬롯을 A에서 B로 바꾸는데, 이 백업의 파티션 표는 그 전환을 할 수 있는 상태(슬롯 A만 활성)와 맞지 않습니다. 순정 상태에서 만들어 둔 전체 백업이 있으면 USE EXISTING BACKUP으로 그 폴더를 골라 주세요.";
+const BACKUP_STARTS_FROM_SLOT_B: &str = "이 전체 백업을 만든 기기는 부팅 슬롯이 B로 표시된 상태입니다. TillKit의 GSI 설치는 부팅 슬롯을 A에서 B로 바꾸는 것만 할 수 있어서, 이 상태의 기기에는 아직 설치할 수 없습니다. 이미 GSI를 설치한 기기에서 만든 백업이라면, 순정 상태에서 만들어 둔 전체 백업을 USE EXISTING BACKUP으로 골라 주세요. 순정 기기의 부팅 슬롯이 B인 경우는 TillKit이 아직 지원하지 않습니다.";
 
 pub fn prepare(
     paths: &DataPaths,
@@ -26,13 +30,26 @@ pub fn prepare(
     if let Some(stored) = stored(paths, backup, backup_is_found, gsi_image)? {
         return Ok(stored);
     }
-    told_as_unsupported_slots(require_slot_a_active(backup))?;
+    require_switchable_slots(backup)?;
     let review = build_candidate(paths, backup, gsi_image, profile)?;
     let planned = plan_install(paths, &review, backup, profile);
     removed_on_failure(&review.directory, planned)
 }
 
-fn told_as_unsupported_slots(result: Result<()>) -> Result<()> {
+fn require_switchable_slots(backup: &Path) -> Result<()> {
+    let slot = told_as_unsupported_slots(backup_boot_slot(backup))?;
+    require_slot_a(slot)?;
+    told_as_unsupported_slots(require_slot_a_active(backup))
+}
+
+fn require_slot_a(slot: BootSlot) -> Result<()> {
+    match slot {
+        BootSlot::A => Ok(()),
+        BootSlot::B => Err(Front2Error::Plan(BACKUP_STARTS_FROM_SLOT_B.into())),
+    }
+}
+
+fn told_as_unsupported_slots<Value>(result: Result<Value>) -> Result<Value> {
     match result {
         Err(Front2Error::Unsupported(reason)) => Err(Front2Error::Plan(format!(
             "{BACKUP_SLOTS_UNSUPPORTED} ({reason})"
@@ -228,16 +245,27 @@ mod tests {
     }
 
     #[test]
+    fn a_backup_that_starts_from_slot_b_is_told_apart_from_other_slot_states() {
+        require_slot_a(BootSlot::A).expect("slot A is the slot that the installation starts from");
+        let told = require_slot_a(BootSlot::B).expect_err("slot B is not used");
+        assert!(matches!(told, Front2Error::Plan(_)), "{told}");
+        let text = told.to_string();
+        assert!(text.contains(BACKUP_STARTS_FROM_SLOT_B), "{text}");
+        assert!(!text.contains(BACKUP_SLOTS_UNSUPPORTED), "{text}");
+    }
+
+    #[test]
     fn a_backup_with_unsupported_slots_is_told_in_plain_words() {
-        let reason = "LUN 0: vbmeta_system_a is not active".to_string();
-        let told = told_as_unsupported_slots(Err(Front2Error::Unsupported(reason.clone())))
+        let reason = "LUN 4: boot_a is not active".to_string();
+        let told = told_as_unsupported_slots::<()>(Err(Front2Error::Unsupported(reason.clone())))
             .expect_err("the backup is not used");
         assert!(matches!(told, Front2Error::Plan(_)), "{told}");
         assert!(told.to_string().contains(BACKUP_SLOTS_UNSUPPORTED));
         assert!(told.to_string().contains(&reason));
 
-        let other = told_as_unsupported_slots(Err(Front2Error::Verification("changed".into())))
-            .expect_err("other failures stay as they are");
+        let changed = Err(Front2Error::Verification("changed".into()));
+        let other =
+            told_as_unsupported_slots::<()>(changed).expect_err("other failures stay as they are");
         assert!(matches!(other, Front2Error::Verification(_)), "{other}");
         assert!(told_as_unsupported_slots(Ok(())).is_ok());
     }
@@ -245,7 +273,7 @@ mod tests {
     #[test]
     fn letter_1354_two_active_slots_are_not_told_as_an_inactive_slot_a() {
         let reason = "LUN 4: boot_b is already active".to_string();
-        let told = told_as_unsupported_slots(Err(Front2Error::Unsupported(reason.clone())))
+        let told = told_as_unsupported_slots::<()>(Err(Front2Error::Unsupported(reason.clone())))
             .expect_err("the backup is not used");
         let text = told.to_string();
         assert!(text.contains(&reason), "{text}");

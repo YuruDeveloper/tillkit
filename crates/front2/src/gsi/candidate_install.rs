@@ -1,6 +1,8 @@
 use crate::device_profile::DeviceProfile;
 use crate::error::{Front2Error, Result};
-use crate::gpt::{GptCopyKind, PartitionMap, SECTOR_BYTES, SlotActivation, misc_wipe_sector};
+use crate::gpt::{
+    BootSlot, GptCopy, GptCopyKind, PartitionMap, SECTOR_BYTES, SlotActivation, misc_wipe_sector,
+};
 use crate::gsi::backup_manifest::BackupManifest;
 use crate::gsi::backup_partition::BackupPartition;
 use crate::gsi::candidate_image::CandidateImage;
@@ -28,6 +30,13 @@ pub fn install_inputs(
         candidate_directory,
         backup_directory,
     )
+}
+
+pub fn backup_boot_slot(backup_directory: &Path) -> Result<BootSlot> {
+    let manifest = BackupManifest::load(&std::path::absolute(backup_directory)?)?;
+    let [_, boot_lun] = ACTIVATION_LUNS;
+    let (_, main) = gpt_backup(&manifest, boot_lun, GptCopyKind::Main)?;
+    BootSlot::read(boot_lun, &GptCopy::parse(GptCopyKind::Main, &main)?)
 }
 
 pub fn require_slot_a_active(backup_directory: &Path) -> Result<()> {

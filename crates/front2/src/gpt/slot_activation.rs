@@ -12,6 +12,7 @@ use serde::Serialize;
 pub const SLOT_A_SUFFIX: &str = "_a";
 pub const SLOT_B_SUFFIX: &str = "_b";
 pub const BOOT_A_NAME: &str = "boot_a";
+pub const BOOT_B_NAME: &str = "boot_b";
 pub const ACTIVE_FLAG: u64 = 1 << 50;
 pub const PRIORITY_MASK: u64 = 3 << 48;
 pub const INACTIVE_BOOT_PRIORITY: u64 = 2 << 48;
@@ -111,7 +112,8 @@ fn switch_pair(
     entry_b: &GptEntry,
     table: &mut [u8],
 ) -> Result<SlotChange> {
-    if entry_a.flags & ACTIVE_FLAG == 0 {
+    let is_boot_pair = entry_a.name == BOOT_A_NAME;
+    if is_boot_pair && entry_a.flags & ACTIVE_FLAG == 0 {
         return Err(Front2Error::Unsupported(format!(
             "LUN {lun}: {} is not active, flags {:016x}",
             entry_a.name, entry_a.flags
@@ -125,7 +127,7 @@ fn switch_pair(
     }
     let mut flags_a = entry_a.flags & !ACTIVE_FLAG;
     let mut flags_b = entry_b.flags | ACTIVE_FLAG;
-    if entry_a.name == BOOT_A_NAME {
+    if is_boot_pair {
         flags_a = (flags_a & !PRIORITY_MASK) | INACTIVE_BOOT_PRIORITY;
         flags_b =
             (flags_b | PRIORITY_MASK | RETRY_COUNT_MASK) & !SUCCESSFUL_FLAG & !UNBOOTABLE_FLAG;

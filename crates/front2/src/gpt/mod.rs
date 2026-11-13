@@ -1,3 +1,4 @@
+pub mod boot_slot;
 pub mod crc32;
 pub mod current_gpt;
 pub mod gpt_copy;
@@ -13,6 +14,7 @@ pub mod slot_activation;
 pub mod slot_change;
 pub mod usable_area;
 
+pub use boot_slot::BootSlot;
 pub use crc32::crc32;
 pub use current_gpt::{require_current_copy_matches, require_matching_table_areas};
 pub use gpt_copy::GptCopy;

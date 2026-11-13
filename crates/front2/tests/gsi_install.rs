@@ -3,8 +3,10 @@ mod gpt_support;
 mod install_support;
 
 use front2::digest::{sha256_bytes, sha256_file};
+use front2::gpt::BootSlot;
 use front2::gsi::{
-    CandidateImage, GsiCandidate, install_inputs, install_inputs_from_images, require_slot_a_active,
+    CandidateImage, GsiCandidate, backup_boot_slot, install_inputs, install_inputs_from_images,
+    require_slot_a_active,
 };
 use front2::install::{InstallInputs, InstallPlan, InstallStep};
 use front2::{Front2Error, Result};
@@ -175,16 +177,39 @@ fn a_backup_of_a_device_that_does_not_start_from_slot_a_is_rejected_before_the_b
     let backup = &fixture.inputs.backup_directory;
     require_slot_a_active(backup).expect("the standard backup starts from slot A");
 
-    let changed = SyntheticGpt::standard().with_flags("vbmeta_a", 0x107b << 48);
-    fs::write(backup.join("gpt/gpt_main4.bin"), changed.main()).expect("main copy");
-    fs::write(backup.join("gpt/gpt_backup4.bin"), changed.backup()).expect("backup copy");
-    write_manifest(backup, &manifest_entries(backup));
+    assert_eq!(backup_boot_slot(backup).expect("boot slot"), BootSlot::A);
+
+    let unflagged = SyntheticGpt::standard().with_flags("vbmeta_a", 0x107b << 48);
+    write_lun4_tables(backup, &unflagged);
+    assert_eq!(backup_boot_slot(backup).expect("boot slot"), BootSlot::A);
+    require_slot_a_active(backup).expect("a pair with no active flag follows the boot slot");
+
+    let slot_b = SyntheticGpt::standard()
+        .with_flags("boot_a", 0x0073 << 48)
+        .with_flags("boot_b", 0x0077 << 48);
+    write_lun4_tables(backup, &slot_b);
+    assert_eq!(backup_boot_slot(backup).expect("boot slot"), BootSlot::B);
     let error = require_slot_a_active(backup).expect_err("slot A is not active");
     assert!(matches!(error, Front2Error::Unsupported(_)), "{error}");
     assert!(
-        error.to_string().contains("vbmeta_a is not active"),
+        error.to_string().contains("boot_a is not active"),
         "{error}"
     );
+
+    let no_slot = SyntheticGpt::standard().with_flags("boot_a", 0x0073 << 48);
+    write_lun4_tables(backup, &no_slot);
+    let error = backup_boot_slot(backup).expect_err("no boot slot is active");
+    assert!(matches!(error, Front2Error::Unsupported(_)), "{error}");
+    assert!(
+        error.to_string().contains("does not show one boot slot"),
+        "{error}"
+    );
+}
+
+fn write_lun4_tables(backup: &Path, gpt: &SyntheticGpt) {
+    fs::write(backup.join("gpt/gpt_main4.bin"), gpt.main()).expect("main copy");
+    fs::write(backup.join("gpt/gpt_backup4.bin"), gpt.backup()).expect("backup copy");
+    write_manifest(backup, &manifest_entries(backup));
 }
 
 fn environment_path(name: &str) -> Option<PathBuf> {

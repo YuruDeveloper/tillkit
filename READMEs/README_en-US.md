@@ -192,6 +192,7 @@ Write functions:
 - The restart step of the GSI installation, and the start of the device from a GSI that TillKit wrote. We did not see the screen of the device after the write.
 - A full backup of a device with stock firmware, and a GSI installation that uses that full backup.
 - A GSI installation on a device with firmware that is not 1.609.5.
+- A GSI installation on a device with a partition pair that has no active flag on A and no active flag on B.
 - A GSI installation that stopped and that the tool continues from the step that stopped.
 - The full restore without the user data. The restart after the full restore, and the start of the stock firmware after that restart.
 - Backup, write and `RESTORE` with root access.
@@ -209,6 +210,7 @@ Other functions:
 
 ## Not in this tool
 
+- A GSI installation on a stock device that shows slot B as the boot slot. The installation changes the boot slot only from A to B.
 - A write to a device that has no root access, and root access for such a device.
 - Recovery of a device that does not start after a write.
 - Automatic removal of `/data/local/tmp/front2-write-*` on the device.
