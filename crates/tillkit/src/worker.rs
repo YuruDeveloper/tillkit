@@ -24,7 +24,7 @@ use std::time::Duration;
 
 const STATE_POLL_INTERVAL: Duration = Duration::from_secs(1);
 pub const NO_BACKUP: &str = "no backup holds the images that the device has now";
-pub const DEVICE_IN_EDL: &str = "the device is in EDL mode and does not answer ADB";
+pub const DEVICE_IN_EDL: &str = "a device in EDL mode is connected to the PC";
 
 pub fn is_no_backup(error: &str) -> bool {
     let store = |text: &str| Front2Error::Store(text.into()).to_string();
