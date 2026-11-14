@@ -241,6 +241,29 @@ fn plan_rejects_a_missing_dynamic_group_or_retained_partition() {
 }
 
 #[test]
+fn letter_1486_plan_rejects_a_slot_1_partition_with_an_unknown_name() {
+    let mut synthetic = SyntheticSuper::standard();
+    synthetic.slots[TARGET_SLOT as usize]
+        .partition_mut("system_b-cow")
+        .name = "extra_b".to_string();
+    let error = plan_error(&synthetic, GSI_BYTES);
+    assert!(matches!(error, Front2Error::Plan(_)), "{error}");
+    assert!(error.to_string().contains("extra_b"), "{error}");
+    assert!(error.to_string().contains("not one of"), "{error}");
+}
+
+#[test]
+fn letter_1486_plan_rejects_a_slot_1_group_with_an_unknown_name() {
+    let mut synthetic = SyntheticSuper::standard();
+    synthetic.slots[TARGET_SLOT as usize]
+        .groups
+        .push(("extra_group".to_string(), 0));
+    let error = plan_error(&synthetic, GSI_BYTES);
+    assert!(matches!(error, Front2Error::Plan(_)), "{error}");
+    assert!(error.to_string().contains("extra_group"), "{error}");
+}
+
+#[test]
 fn damaged_checksums_are_rejected() {
     let image = SyntheticSuper::standard().image();
     let primary = SyntheticSuper::primary_offset(TARGET_SLOT) as usize;
