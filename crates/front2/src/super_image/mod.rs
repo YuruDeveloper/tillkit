@@ -50,6 +50,7 @@ pub const SLOT_COUNT: u32 = 3;
 pub const ORIGINAL_SLOT: u32 = 0;
 pub const TARGET_SLOT: u32 = 1;
 pub const SYSTEM_PARTITION: &str = "system_b";
+pub const SYSTEM_EXT_PARTITION: &str = "system_ext_b";
 pub const RETAINED_PARTITIONS: [&str; 5] = [
     "odm_b",
     "product_b",
@@ -57,8 +58,10 @@ pub const RETAINED_PARTITIONS: [&str; 5] = [
     "vendor_b",
     "vendor_dlkm_b",
 ];
+pub const COW_SUFFIX: &str = "-cow";
 pub const DEFAULT_GROUP: &str = "default";
 pub const DYNAMIC_GROUP: &str = "qti_dynamic_partitions_b";
+pub const COW_GROUP: &str = "cow";
 pub const REBUILT_GROUP_INDEX: u32 = 1;
 pub const SYSTEM_ATTRIBUTES: u32 = 1;
 pub const GSI_BLOCK_BYTES: u64 = 4096;

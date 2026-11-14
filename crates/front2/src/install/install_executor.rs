@@ -1,9 +1,9 @@
 use crate::error::{Front2Error, Result};
-use crate::install::boot_lun::select_boot_lun;
+use crate::install::boot_lun::{observe_boot_lun, select_boot_lun};
 use crate::install::data_wipe_approval::DataWipeApproval;
 use crate::install::install_progress::InstallProgress;
 use crate::install::install_step::InstallStep;
-use crate::install::layout::BOOT_LUN_STEP_NAME;
+use crate::install::layout::{KEEP_BOOT_LUN_STEP_NAME, SET_BOOT_LUN_STEP_NAME};
 use crate::install::preflight::run_preflight;
 use crate::install::restart_approval::RestartApproval;
 use crate::install::sector_storage::SectorStorage;
@@ -157,9 +157,11 @@ impl<'run> InstallExecutor<'run> {
         let Some(step) = self.next_step() else {
             return Err(Front2Error::Plan("the plan holds no further step".into()));
         };
+        let keeps_boot_lun = step.keeps_boot_lun();
         match (step.as_write(), step.boot_lun()) {
             (Some(write), _) => self.run_write(index, write),
-            (None, Some(lun)) => self.run_boot_lun(index, lun),
+            (None, Some(lun)) if keeps_boot_lun => self.run_keep_boot_lun(index, lun),
+            (None, Some(lun)) => self.run_set_boot_lun(index, lun),
             (None, None) => Err(Front2Error::Plan(
                 "the next step is the restart, it needs the restart approval".into(),
             )),
@@ -175,9 +177,20 @@ impl<'run> InstallExecutor<'run> {
         Ok(())
     }
 
-    fn run_boot_lun(&mut self, index: usize, lun: u8) -> Result<()> {
-        self.progress.start_step(index, BOOT_LUN_STEP_NAME);
+    fn run_set_boot_lun(&mut self, index: usize, lun: u8) -> Result<()> {
+        self.progress.start_step(index, SET_BOOT_LUN_STEP_NAME);
         let (record, outcome) = select_boot_lun(self.plan.plan(), &mut *self.storage, lun);
+        self.progress.boot_lun = Some(record);
+        match outcome {
+            Ok(()) => self.progress.verify_step(None),
+            Err(err) => return Err(self.progress.fail_step(err)),
+        }
+        Ok(())
+    }
+
+    fn run_keep_boot_lun(&mut self, index: usize, lun: u8) -> Result<()> {
+        self.progress.start_step(index, KEEP_BOOT_LUN_STEP_NAME);
+        let (record, outcome) = observe_boot_lun(self.plan.plan(), &mut *self.storage, lun);
         self.progress.boot_lun = Some(record);
         match outcome {
             Ok(()) => self.progress.verify_step(None),

@@ -1,8 +1,8 @@
 use crate::digest::{hex, is_sha256_hex, sha256_bytes};
 use crate::error::{Front2Error, Result};
 use crate::gpt::{
-    GptCopy, GptCopyKind, GptOutput, PartitionLocation, PartitionMap, SECTOR_BYTES, SlotActivation,
-    misc_wipe_sector, require_current_copy_matches,
+    BootSlot, GptCopy, GptCopyKind, GptOutput, PartitionLocation, PartitionMap, SECTOR_BYTES,
+    SlotActivation, misc_wipe_sector, require_current_copy_matches,
 };
 use crate::image_record::ImageRecord;
 use crate::install::gpt_copy_record::GptCopyRecord;
@@ -58,8 +58,10 @@ pub fn planned_targets(inputs: &InstallInputs) -> Result<Vec<PlannedTarget>> {
         targets.push(image_target(inputs, name)?);
     }
     targets.push(metadata_target(inputs)?);
-    for (kind, lun) in GPT_STEP_ORDER {
-        targets.push(gpt_target(inputs, kind, lun)?);
+    if inputs.stock_slot == BootSlot::A {
+        for (kind, lun) in GPT_STEP_ORDER {
+            targets.push(gpt_target(inputs, kind, lun)?);
+        }
     }
     targets.push(misc_target(inputs)?);
     Ok(targets)
@@ -290,8 +292,11 @@ fn activation_for(inputs: &InstallInputs, lun: u8) -> Result<&SlotActivation> {
     ACTIVATION_LUNS
         .iter()
         .zip(activations)
-        .find(|(expected, activation)| **expected == lun && activation.lun == lun)
-        .map(|(_, activation)| activation)
+        .find_map(|(expected, activation)| {
+            activation
+                .as_ref()
+                .filter(|prepared| *expected == lun && prepared.lun == lun)
+        })
         .ok_or_else(|| {
             Front2Error::Plan(format!(
                 "the inputs hold no slot activation that was prepared for LUN {lun}"

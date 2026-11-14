@@ -101,6 +101,13 @@ fn prepared_fixture() -> InstallFixture {
     fixture
 }
 
+fn prepared_b_fixture() -> InstallFixture {
+    let fixture = InstallFixture::stock_b();
+    let backup = &fixture.inputs.backup_directory;
+    write_manifest(backup, &manifest_entries(backup));
+    fixture
+}
+
 #[test]
 fn the_backup_and_the_candidate_images_give_the_inputs_of_the_install_plan() {
     let fixture = prepared_fixture();
@@ -195,11 +202,9 @@ fn a_backup_of_a_device_that_does_not_start_from_slot_a_is_rejected_before_the_b
         error.to_string().contains("slot B as the boot slot"),
         "{error}"
     );
-    let error = inputs_of(&fixture).expect_err("the inputs need slot A");
-    assert!(
-        error.to_string().contains("slot B as the boot slot"),
-        "{error}"
-    );
+    let error = inputs_of(&fixture).expect_err("the slot A tables of the other LUNs are not tidy");
+    assert!(matches!(error, Front2Error::Unsupported(_)), "{error}");
+    assert!(error.to_string().contains("has the active flag"), "{error}");
 
     let no_slot = SyntheticGpt::standard().with_flags("boot_a", 0x0073 << 48);
     write_lun4_tables(backup, &no_slot);
@@ -230,10 +235,66 @@ fn a_backup_with_no_boot_a_partition_is_rejected_by_each_entry_of_the_inputs() {
     }
 }
 
-fn write_lun4_tables(backup: &Path, gpt: &SyntheticGpt) {
-    fs::write(backup.join("gpt/gpt_main4.bin"), gpt.main()).expect("main copy");
-    fs::write(backup.join("gpt/gpt_backup4.bin"), gpt.backup()).expect("backup copy");
+#[test]
+fn a_tidy_stock_slot_b_backup_gives_the_inputs_with_no_slot_activation() {
+    let fixture = prepared_b_fixture();
+    assert_eq!(
+        backup_boot_slot(&fixture.inputs.backup_directory).expect("boot slot"),
+        BootSlot::B
+    );
+    let inputs = inputs_of(&fixture).expect("the tidy stock slot B backup gives the inputs");
+    assert_eq!(inputs.stock_slot, BootSlot::B);
+    assert!(inputs.activation_lun0.is_none());
+    assert!(inputs.activation_lun4.is_none());
+
+    let plan = InstallPlan::build(&inputs).expect("plan");
+    assert!(
+        plan.steps
+            .iter()
+            .any(|step| matches!(step, InstallStep::KeepBootLun { .. }))
+    );
+    assert!(
+        !plan
+            .steps
+            .iter()
+            .any(|step| matches!(step, InstallStep::SetBootLun { .. }))
+    );
+}
+
+#[test]
+fn a_stock_slot_b_backup_with_an_active_slot_a_partition_is_rejected() {
+    let fixture = prepared_b_fixture();
+    let backup = &fixture.inputs.backup_directory;
+    let mixed = SyntheticGpt::standard()
+        .with_flags("boot_a", 0x00c3 << 48)
+        .with_flags("boot_b", 0x0077 << 48);
+    write_lun_tables(backup, 4, &mixed);
+    let error = inputs_of(&fixture).expect_err("a slot A partition is active");
+    assert!(matches!(error, Front2Error::Unsupported(_)), "{error}");
+    assert!(error.to_string().contains("has the active flag"), "{error}");
+}
+
+#[test]
+fn a_stock_slot_b_backup_that_does_not_boot_lun_2_is_rejected() {
+    let fixture = prepared_b_fixture();
+    let backup = &fixture.inputs.backup_directory;
+    let xbl_a_active = SyntheticGpt::empty().with_entry("xbl_a", 0x0077 << 48);
+    write_lun_tables(backup, 1, &xbl_a_active);
+    let error = inputs_of(&fixture).expect_err("the backup does not boot LUN 2");
+    assert!(matches!(error, Front2Error::Unsupported(_)), "{error}");
+    assert!(error.to_string().contains("boot LUN"), "{error}");
+}
+
+fn write_lun_tables(backup: &Path, lun: u8, gpt: &SyntheticGpt) {
+    let main = backup.join(format!("gpt/gpt_main{lun}.bin"));
+    let secondary = backup.join(format!("gpt/gpt_backup{lun}.bin"));
+    fs::write(main, gpt.main()).expect("main copy");
+    fs::write(secondary, gpt.backup()).expect("backup copy");
     write_manifest(backup, &manifest_entries(backup));
+}
+
+fn write_lun4_tables(backup: &Path, gpt: &SyntheticGpt) {
+    write_lun_tables(backup, 4, gpt);
 }
 
 fn environment_path(name: &str) -> Option<PathBuf> {

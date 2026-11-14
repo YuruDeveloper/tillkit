@@ -6,6 +6,7 @@ use avbtool_rs::info::AvbImageInfo;
 use std::path::{Path, PathBuf};
 
 const VBMETA_HEADER_BYTES: u64 = 256;
+const KNOWN_KEY_SPECS: [&str; 2] = ["testkey_rsa2048", "testkey_rsa4096"];
 
 #[derive(Debug, Clone)]
 pub struct VbmetaSource {
@@ -46,12 +47,26 @@ impl VbmetaSource {
             .map_err(|error| Front2Error::Image(format!("key {key_spec}: {error}")))?;
         if self.public_key != expected || self.info.algorithm_name != algorithm_name {
             return Err(Front2Error::Unsupported(format!(
-                "{} is not signed with {key_spec} and {algorithm_name}; its algorithm is {}",
+                "{} is not signed with {key_spec} and {algorithm_name}; its algorithm is {}; {}",
                 self.path.display(),
-                self.info.algorithm_name
+                self.info.algorithm_name,
+                self.key_identification()
             )));
         }
         verify_top_signature(&self.path, key_spec)
+    }
+
+    fn key_identification(&self) -> String {
+        match self.identify_known_key() {
+            Some(known) => format!("its public key matches the known key {known}"),
+            None => "its public key matches no known key".to_string(),
+        }
+    }
+
+    fn identify_known_key(&self) -> Option<&'static str> {
+        KNOWN_KEY_SPECS
+            .into_iter()
+            .find(|spec| extract_public_key(spec).is_ok_and(|key| key == self.public_key))
     }
 
     pub fn require_no_public_key_metadata(&self) -> Result<()> {

@@ -2,10 +2,11 @@ use avbtool_rs::builder::{ChainPartitionSpec, PropertySpec, VbmetaImageArgs, mak
 use avbtool_rs::crypto::extract_public_key;
 use avbtool_rs::info::DescriptorInfo;
 use front2::digest::sha256_file;
+use front2::gpt::BootSlot;
 use front2::gsi::{
     GsiCandidate, GsiCandidateRequest, RawDescriptor, RollbackEvidence, StockBuild, VbmetaSource,
     VbmetaTemplate, backup_stock_build, build_system_vbmeta, build_top_vbmeta,
-    require_stock_front2_top,
+    require_stock_front2_system, require_stock_front2_top,
 };
 use front2::profiles::toss_front2::PROFILE;
 use front2::top_signature::verify_top_signature;
@@ -16,6 +17,9 @@ const STOCK_ROLLBACK: u64 = 1_700_000_000;
 const SYSTEM_ROLLBACK: u64 = 1_710_000_000;
 const OTHER_KEY: &str = "testkey_rsa8192";
 const OTHER_ALGORITHM: &str = "SHA256_RSA8192";
+const STOCK_SYSTEM: &str = "qti/qssi/qssi:13/TKQ1.230110.001/475:user/dev-keys";
+const GSI_SYSTEM: &str =
+    "generic/lineage_gsi_arm64_gN/lineage_gsi_arm64:13/TQ3A.230901.001/1:userdebug/test-keys";
 
 struct Source<'a> {
     key_spec: &'a str,
@@ -140,7 +144,7 @@ fn stock_system() -> Source<'static> {
         rollback_index: SYSTEM_ROLLBACK,
         flags: 0,
         properties: vec![
-            ("com.android.build.system.fingerprint", "stock/475"),
+            ("com.android.build.system.fingerprint", STOCK_SYSTEM),
             ("com.android.build.product.fingerprint", "stock/475"),
             ("com.android.build.system_ext.fingerprint", "stock/475"),
         ],
@@ -270,6 +274,21 @@ fn top_refuses_an_original_slot_b_with_another_key() {
         message.contains("is not signed with testkey_rsa4096"),
         "{message}"
     );
+    assert!(message.contains("no known key"), "{message}");
+    assert!(!bench.path("vbmeta.img").exists());
+}
+
+#[test]
+fn top_names_a_known_key_that_is_not_the_expected_one() {
+    let bench = Bench::new();
+    let mut original = original_top();
+    original.key_spec = "testkey_rsa2048";
+    original.algorithm = "SHA256_RSA2048";
+    let message = refusal(bench.top(&stock_top(), &original));
+    assert!(
+        message.contains("the known key testkey_rsa2048"),
+        "{message}"
+    );
     assert!(!bench.path("vbmeta.img").exists());
 }
 
@@ -390,6 +409,10 @@ fn system_refuses_an_original_slot_b_with_another_key() {
         message.contains("is not signed with testkey_rsa2048"),
         "{message}"
     );
+    assert!(
+        message.contains("the known key testkey_rsa4096"),
+        "{message}"
+    );
 }
 
 #[test]
@@ -501,6 +524,38 @@ fn letter_1134_system_refuses_an_original_slot_b_with_a_damaged_signature() {
     assert!(!output.exists());
 }
 
+#[test]
+fn letter_1515_a_damaged_signature_is_not_told_as_signed_with_a_known_key() {
+    let bench = Bench::new();
+    let path = bench.path("signed-system.bin");
+    original_system().write(&path);
+    flip_signature_byte(&path);
+    let source = VbmetaSource::read(&path).expect("source");
+
+    let against_its_own_key = source
+        .require_signed_with("testkey_rsa2048", "SHA256_RSA2048")
+        .expect_err("the damaged signature fails");
+    assert!(
+        against_its_own_key
+            .to_string()
+            .contains("RSA verification rejected the signature"),
+        "{against_its_own_key}"
+    );
+
+    let against_another_key = source
+        .require_signed_with("testkey_rsa4096", "SHA256_RSA4096")
+        .expect_err("the key does not match")
+        .to_string();
+    assert!(
+        against_another_key.contains("its public key matches the known key testkey_rsa2048"),
+        "{against_another_key}"
+    );
+    assert!(
+        !against_another_key.contains("signed with the known key"),
+        "{against_another_key}"
+    );
+}
+
 const TESTED_BUILD: &str = "TOSSPLACE/toss_front2/toss_front2:13/TKQ1.230110.001/475:user/dev-keys";
 const OTHER_BUILD: &str = "TOSSPLACE/toss_front2/toss_front2:13/TKQ1.230110.001/468:user/dev-keys";
 const OTHER_DEVICE: &str = "OTHER/other_device/other_device:13/TKQ1.230110.001/475:user/dev-keys";
@@ -559,6 +614,73 @@ fn the_stock_top_refusal_tells_the_fingerprints_of_the_backup() {
     }
 }
 
+fn stock_system_with(fingerprint: &str) -> Source<'_> {
+    Source {
+        key_spec: "testkey_rsa2048",
+        algorithm: "SHA256_RSA2048",
+        rollback_index: SYSTEM_ROLLBACK,
+        flags: 0,
+        properties: vec![("com.android.build.system.fingerprint", fingerprint)],
+        descriptors: vec![hashtree("system", 10)],
+        chains: Vec::new(),
+    }
+}
+
+fn system_without_fingerprint() -> Source<'static> {
+    Source {
+        key_spec: "testkey_rsa2048",
+        algorithm: "SHA256_RSA2048",
+        rollback_index: SYSTEM_ROLLBACK,
+        flags: 0,
+        properties: vec![("com.android.build.product.fingerprint", "stock/475")],
+        descriptors: vec![hashtree("system", 10)],
+        chains: Vec::new(),
+    }
+}
+
+fn read_system(source: &Source<'_>) -> front2::Result<()> {
+    let bench = Bench::new();
+    let path = bench.path("vbmeta_system.bin");
+    source.write(&path);
+    require_stock_front2_system(&VbmetaSource::read(&path)?)
+}
+
+#[test]
+fn the_stock_system_passes_a_qti_fingerprint() {
+    read_system(&stock_system()).expect("the stock system passes");
+    read_system(&stock_system_with(
+        "qti/qssi/qssi:13/TKQ1.230110.001/468:user/dev-keys",
+    ))
+    .expect("another stock build passes");
+}
+
+#[test]
+fn a_gsi_or_a_broken_system_fingerprint_is_refused() {
+    for refused in [
+        GSI_SYSTEM,
+        "qti/qssi/qssi:13/TKQ1.230110.001/:user/dev-keys",
+        "qti/qssi/qssi:13/TKQ1.230110.001/46x:user/dev-keys",
+        "qti/qssi/qssi:13/TKQ1.230110.001/475:user/release-keys",
+    ] {
+        let error = read_system(&stock_system_with(refused)).expect_err(refused);
+        assert!(
+            matches!(error, front2::Front2Error::Unsupported(_)),
+            "{refused}: {error}"
+        );
+        assert!(
+            error.to_string().contains("not the form"),
+            "{refused}: {error}"
+        );
+    }
+    let missing = read_system(&system_without_fingerprint()).expect_err("no system fingerprint");
+    assert!(
+        missing
+            .to_string()
+            .contains("no com.android.build.system.fingerprint"),
+        "{missing}"
+    );
+}
+
 fn write_vbmeta_backup(backup: &Path, stock_top: &Source<'_>) {
     let directory = backup.join("partitions").join("lun4");
     std::fs::create_dir_all(&directory).expect("create the LUN directory");
@@ -598,12 +720,13 @@ fn a_candidate_from_an_untested_build_needs_the_acceptance_of_its_fingerprint() 
             output_directory: &output,
             rollback_evidence: &[],
             accepted_untested_build: accepted,
+            stock_slot: BootSlot::A,
         })
         .expect_err("the backup has no super dump")
         .to_string()
     };
 
-    let asked = backup_stock_build(&backup).expect("the build of the backup");
+    let asked = backup_stock_build(&backup, BootSlot::A).expect("the build of the backup");
     assert_eq!(asked, StockBuild::Untested(OTHER_BUILD.to_string()));
     for accepted in [None, Some(TESTED_BUILD)] {
         let refused = build(accepted);
@@ -632,13 +755,51 @@ fn a_candidate_from_the_tested_build_needs_no_acceptance() {
         output_directory: &output,
         rollback_evidence: &[],
         accepted_untested_build: None,
+        stock_slot: BootSlot::A,
     })
     .expect_err("the backup has no super dump")
     .to_string();
 
-    let asked = backup_stock_build(&backup).expect("the build of the backup");
+    let asked = backup_stock_build(&backup, BootSlot::A).expect("the build of the backup");
     assert_eq!(asked, StockBuild::Tested);
     assert!(later.contains("partition super"), "{later}");
+}
+
+fn write_front2_tops(backup: &Path, slot_a: &Source<'_>, slot_b: &Source<'_>) {
+    let directory = backup.join("partitions").join("lun4");
+    std::fs::create_dir_all(&directory).expect("create the LUN directory");
+    let mut entries = Vec::new();
+    for (name, source) in [("vbmeta_a", slot_a), ("vbmeta_b", slot_b)] {
+        let path = directory.join(format!("{name}.bin"));
+        source.write(&path);
+        let (bytes, sha256) = sha256_file(&path).expect("digest of the dump");
+        entries.push(serde_json::json!({
+            "path": format!("partitions\\lun4\\{name}.bin"),
+            "bytes": bytes,
+            "sha256": sha256.to_ascii_uppercase(),
+        }));
+    }
+    let text = serde_json::to_string_pretty(&entries).expect("manifest text");
+    std::fs::write(backup.join("sha256-manifest.json"), text).expect("write the manifest");
+}
+
+#[test]
+fn backup_stock_build_reads_the_top_vbmeta_of_the_given_slot() {
+    let bench = Bench::new();
+    let backup = bench.path("backup");
+    write_front2_tops(
+        &backup,
+        &front2_stock_top(&[TESTED_BUILD]),
+        &front2_stock_top(&[OTHER_BUILD]),
+    );
+    assert_eq!(
+        backup_stock_build(&backup, BootSlot::A).expect("the build of slot A"),
+        StockBuild::Tested
+    );
+    assert_eq!(
+        backup_stock_build(&backup, BootSlot::B).expect("the build of slot B"),
+        StockBuild::Untested(OTHER_BUILD.to_string())
+    );
 }
 
 #[test]

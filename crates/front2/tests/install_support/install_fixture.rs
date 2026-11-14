@@ -2,7 +2,9 @@ use super::mock_call::MockCall;
 use super::mock_storage::MockStorage;
 use crate::gpt_support::{ENTRY_BYTES, LAST_LBA, PARTITION_SECTORS, SECTOR, SyntheticGpt, seal};
 use front2::ImageRecord;
-use front2::gpt::{GptCopyKind, PartitionLocation, PartitionMap, SlotActivation, misc_wipe_sector};
+use front2::gpt::{
+    BootSlot, GptCopyKind, PartitionLocation, PartitionMap, SlotActivation, misc_wipe_sector,
+};
 use front2::install::{
     GptBackup, IMAGE_PARTITIONS, InstallImage, InstallInputs, InstallPlan, StoredInstallPlan,
 };
@@ -19,6 +21,14 @@ const SUPER_ENTRY_POSITION: usize = 5;
 const BACKUP_FOLDER: &str = "backup";
 const CANDIDATE_FOLDER: &str = "candidate";
 const PLAN_FOLDER: &str = "plan";
+const STOCK_B_BOOT_LUN: u8 = 2;
+const IDENTITY_PARTITIONS: [&str; 5] = [
+    "boot_b",
+    "dtbo_b",
+    "init_boot_b",
+    "recovery_b",
+    "vendor_boot_b",
+];
 
 pub struct InstallFixture {
     pub directory: TempDir,
@@ -29,15 +39,19 @@ pub struct InstallFixture {
 
 impl InstallFixture {
     pub fn standard() -> Self {
-        Self::build(PARTITION_SECTORS, true)
+        Self::build(PARTITION_SECTORS, true, BootSlot::A)
     }
 
     pub fn with_super_sectors(super_sectors: u64) -> Self {
-        Self::build(super_sectors, true)
+        Self::build(super_sectors, true, BootSlot::A)
     }
 
     pub fn with_identical_boot_lun_tables() -> Self {
-        Self::build(PARTITION_SECTORS, false)
+        Self::build(PARTITION_SECTORS, false, BootSlot::A)
+    }
+
+    pub fn stock_b() -> Self {
+        Self::build(PARTITION_SECTORS, true, BootSlot::B)
     }
 
     pub fn plan_directory(&self) -> PathBuf {
@@ -84,19 +98,27 @@ impl InstallFixture {
         fs::write(path, data).expect("candidate file");
     }
 
-    fn build(super_sectors: u64, distinct_boot_lun_tables: bool) -> Self {
+    fn build(super_sectors: u64, distinct_boot_lun_tables: bool, stock_slot: BootSlot) -> Self {
         let directory = TempDir::new().expect("temporary directory");
         let backup_directory = directory.path().join(BACKUP_FOLDER);
         let candidate_directory = directory.path().join(CANDIDATE_FOLDER);
-        let copies = gpt_copies(super_sectors, distinct_boot_lun_tables);
+        let copies = gpt_copies(super_sectors, distinct_boot_lun_tables, stock_slot);
         let mut storage = MockStorage::new(LUN_COUNT, LAST_LBA + 1);
+        if stock_slot == BootSlot::B {
+            storage.start_with_boot_lun(STOCK_B_BOOT_LUN);
+        }
         let gpt_backups = store_gpt_copies(&backup_directory, &mut storage, &copies);
         let partition_map = partition_map_of(&copies);
         let mut images = Vec::new();
         for name in IMAGE_PARTITIONS {
             let location = partition_map.locate(name).expect("image partition");
             let original = store_original(&backup_directory, &mut storage, name, location);
-            images.push(install_image(&candidate_directory, name, original));
+            images.push(install_image(
+                &candidate_directory,
+                name,
+                original,
+                stock_slot,
+            ));
         }
         let metadata_location = partition_map.locate("metadata").expect("metadata");
         let metadata_original = store_original(
@@ -118,6 +140,7 @@ impl InstallFixture {
         let inputs = InstallInputs {
             candidate_directory,
             backup_directory,
+            stock_slot,
             partition_map,
             images,
             metadata_original,
@@ -125,8 +148,8 @@ impl InstallFixture {
             userdata_original,
             misc_first_sector: misc_wipe_sector(&misc_sector).expect("misc sector"),
             gpt_backups,
-            activation_lun0: activation(0, &copies),
-            activation_lun4: activation(4, &copies),
+            activation_lun0: slot_activation(stock_slot, 0, &copies),
+            activation_lun4: slot_activation(stock_slot, 4, &copies),
         };
         let calls = storage.calls();
         Self {
@@ -171,9 +194,20 @@ fn write_file(path: &Path, data: &[u8]) {
     fs::write(path, data).expect("file");
 }
 
-fn tables(distinct_boot_lun_tables: bool) -> Vec<SyntheticGpt> {
-    let boot_lun_table = |name: &str| {
-        let named = SyntheticGpt::empty().with_entry(name, 0);
+fn tables(distinct_boot_lun_tables: bool, stock_slot: BootSlot) -> Vec<SyntheticGpt> {
+    let pair = |active: u64, inactive: u64| match stock_slot {
+        BootSlot::A => (active, inactive),
+        BootSlot::B => (inactive, active),
+    };
+    let (boot_a_flags, boot_b_flags) = pair(0x0077 << 48, 0x00c3 << 48);
+    let (vbmeta_a_flags, vbmeta_b_flags) = pair(ACTIVE_SLOT_FLAGS, INACTIVE_SLOT_FLAGS);
+    let (system_a_flags, system_b_flags) = pair(ACTIVE_SLOT_FLAGS, INACTIVE_SLOT_FLAGS);
+    let xbl_b_flags = match stock_slot {
+        BootSlot::A => 0,
+        BootSlot::B => ACTIVE_SLOT_FLAGS,
+    };
+    let boot_lun_table = |name: &str, flags: u64| {
+        let named = SyntheticGpt::empty().with_entry(name, flags);
         if distinct_boot_lun_tables {
             named
         } else {
@@ -182,20 +216,20 @@ fn tables(distinct_boot_lun_tables: bool) -> Vec<SyntheticGpt> {
     };
     vec![
         SyntheticGpt::empty()
-            .with_entry("vbmeta_system_a", ACTIVE_SLOT_FLAGS)
-            .with_entry("vbmeta_system_b", INACTIVE_SLOT_FLAGS)
+            .with_entry("vbmeta_system_a", system_a_flags)
+            .with_entry("vbmeta_system_b", system_b_flags)
             .with_entry("metadata", 0)
             .with_entry("misc", 0)
             .with_entry("userdata", 0)
             .with_entry("super", 0),
-        boot_lun_table("xbl_a"),
-        boot_lun_table("xbl_b"),
+        boot_lun_table("xbl_a", 0),
+        boot_lun_table("xbl_b", xbl_b_flags),
         SyntheticGpt::empty().with_entry("cdt", 0),
         SyntheticGpt::empty()
-            .with_entry("boot_a", 0x0077 << 48)
-            .with_entry("boot_b", 0x00c3 << 48)
-            .with_entry("vbmeta_a", ACTIVE_SLOT_FLAGS)
-            .with_entry("vbmeta_b", INACTIVE_SLOT_FLAGS)
+            .with_entry("boot_a", boot_a_flags)
+            .with_entry("boot_b", boot_b_flags)
+            .with_entry("vbmeta_a", vbmeta_a_flags)
+            .with_entry("vbmeta_b", vbmeta_b_flags)
             .with_entry("dtbo_b", INACTIVE_SLOT_FLAGS)
             .with_entry("init_boot_b", INACTIVE_SLOT_FLAGS)
             .with_entry("recovery_b", INACTIVE_SLOT_FLAGS)
@@ -204,8 +238,12 @@ fn tables(distinct_boot_lun_tables: bool) -> Vec<SyntheticGpt> {
     ]
 }
 
-fn gpt_copies(super_sectors: u64, distinct_boot_lun_tables: bool) -> Vec<(Vec<u8>, Vec<u8>)> {
-    let mut copies: Vec<(Vec<u8>, Vec<u8>)> = tables(distinct_boot_lun_tables)
+fn gpt_copies(
+    super_sectors: u64,
+    distinct_boot_lun_tables: bool,
+    stock_slot: BootSlot,
+) -> Vec<(Vec<u8>, Vec<u8>)> {
+    let mut copies: Vec<(Vec<u8>, Vec<u8>)> = tables(distinct_boot_lun_tables, stock_slot)
         .iter()
         .map(|table| (table.main(), table.backup()))
         .collect();
@@ -267,13 +305,31 @@ fn partition_map_of(copies: &[(Vec<u8>, Vec<u8>)]) -> PartitionMap {
     PartitionMap::from_main_copies(&main_copies).expect("partition map")
 }
 
-fn activation(lun: u8, copies: &[(Vec<u8>, Vec<u8>)]) -> SlotActivation {
+fn slot_activation(
+    stock_slot: BootSlot,
+    lun: u8,
+    copies: &[(Vec<u8>, Vec<u8>)],
+) -> Option<SlotActivation> {
+    if stock_slot != BootSlot::A {
+        return None;
+    }
     let (main, backup) = &copies[usize::from(lun)];
-    SlotActivation::prepare(lun, main, backup).expect("slot activation")
+    Some(SlotActivation::prepare(lun, main, backup).expect("slot activation"))
 }
 
-fn install_image(candidate_directory: &Path, name: &str, original: ImageRecord) -> InstallImage {
-    let data = pattern(&format!("{name}-candidate"), original.bytes as usize);
+fn install_image(
+    candidate_directory: &Path,
+    name: &str,
+    original: ImageRecord,
+    stock_slot: BootSlot,
+) -> InstallImage {
+    let identity = stock_slot == BootSlot::B && IDENTITY_PARTITIONS.contains(&name);
+    let seed = if identity {
+        format!("{name}-original")
+    } else {
+        format!("{name}-candidate")
+    };
+    let data = pattern(&seed, original.bytes as usize);
     let file = match name {
         "super" => "super.img".to_string(),
         _ => format!("view/{}.img", name.trim_end_matches("_b")),

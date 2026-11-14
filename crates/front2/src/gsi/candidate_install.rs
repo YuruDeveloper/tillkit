@@ -1,13 +1,15 @@
 use crate::device_profile::DeviceProfile;
 use crate::error::{Front2Error, Result};
+use crate::gpt::slot_activation::SLOT_A_SUFFIX;
 use crate::gpt::{
-    BootSlot, GptCopy, GptCopyKind, PartitionMap, SECTOR_BYTES, SlotActivation, misc_wipe_sector,
+    ACTIVE_FLAG, BootSlot, GptCopy, GptCopyKind, PartitionMap, SECTOR_BYTES, SlotActivation,
+    misc_wipe_sector,
 };
 use crate::gsi::backup_manifest::BackupManifest;
 use crate::gsi::backup_partition::BackupPartition;
 use crate::gsi::candidate_image::CandidateImage;
 use crate::gsi::gsi_candidate::{GsiCandidate, SUPER_PARTITION};
-use crate::install::layout::{ACTIVATION_LUNS, GPT_LUN_COUNT};
+use crate::install::layout::{ACTIVATION_LUNS, GPT_LUN_COUNT, NEW_BOOT_LUN, ORIGINAL_BOOT_LUN};
 use crate::install::{GptBackup, InstallImage, InstallInputs};
 use std::fs;
 use std::io::Read;
@@ -16,6 +18,7 @@ use std::path::Path;
 const METADATA_PARTITION: &str = "metadata";
 const MISC_PARTITION: &str = "misc";
 const USERDATA_PARTITION: &str = "userdata";
+const XBL_BOOT_TABLES: [(u8, &str); 2] = [(ORIGINAL_BOOT_LUN, "xbl_a"), (NEW_BOOT_LUN, "xbl_b")];
 
 pub fn install_inputs(
     candidate: &GsiCandidate,
@@ -24,12 +27,23 @@ pub fn install_inputs(
     profile: &DeviceProfile,
 ) -> Result<InstallInputs> {
     profile.require_gsi()?;
-    install_inputs_from_images(
+    let inputs = install_inputs_from_images(
         &candidate.images(),
         &candidate.original_super.sha256,
         candidate_directory,
         backup_directory,
-    )
+    )?;
+    require_matching_stock_slot(candidate.stock_slot, inputs.stock_slot)?;
+    Ok(inputs)
+}
+
+fn require_matching_stock_slot(candidate: BootSlot, backup: BootSlot) -> Result<()> {
+    if candidate != backup {
+        return Err(Front2Error::Plan(format!(
+            "the candidate was made for stock slot {candidate:?}, the backup boots slot {backup:?}"
+        )));
+    }
+    Ok(())
 }
 
 pub fn backup_boot_slot(backup_directory: &Path) -> Result<BootSlot> {
@@ -78,7 +92,7 @@ pub fn install_inputs_from_images(
             recorded_super.sha256
         )));
     }
-    require_boot_slot_a(&manifest)?;
+    let stock_slot = boot_slot(&manifest)?;
     let mut gpt_backups = Vec::new();
     let mut main_copies = Vec::new();
     let mut backup_copies = Vec::new();
@@ -93,14 +107,12 @@ pub fn install_inputs_from_images(
         .zip(&main_copies)
         .map(|(lun, bytes)| (lun, bytes.as_slice()))
         .collect();
-    let activation = |lun: u8| {
-        let position = usize::from(lun);
-        SlotActivation::prepare(lun, &main_copies[position], &backup_copies[position])
-    };
-    let [first_lun, second_lun] = ACTIVATION_LUNS;
+    let (activation_lun0, activation_lun4) =
+        slot_activations(stock_slot, &main_copies, &backup_copies)?;
     let misc = manifest.partition(MISC_PARTITION)?;
     Ok(InstallInputs {
         candidate_directory: std::path::absolute(candidate_directory)?,
+        stock_slot,
         partition_map: PartitionMap::from_main_copies(&borrowed)?,
         images: images
             .iter()
@@ -111,10 +123,92 @@ pub fn install_inputs_from_images(
         misc_original: misc.record(),
         userdata_original: manifest.partition(USERDATA_PARTITION)?.record(),
         gpt_backups,
-        activation_lun0: activation(first_lun)?,
-        activation_lun4: activation(second_lun)?,
+        activation_lun0,
+        activation_lun4,
         backup_directory,
     })
+}
+
+fn slot_activations(
+    stock_slot: BootSlot,
+    main_copies: &[Vec<u8>],
+    backup_copies: &[Vec<u8>],
+) -> Result<(Option<SlotActivation>, Option<SlotActivation>)> {
+    match stock_slot {
+        BootSlot::A => {
+            let [first_lun, second_lun] = ACTIVATION_LUNS;
+            Ok((
+                Some(prepare_activation(first_lun, main_copies, backup_copies)?),
+                Some(prepare_activation(second_lun, main_copies, backup_copies)?),
+            ))
+        }
+        BootSlot::B => {
+            require_tidy_stock_b(main_copies, backup_copies)?;
+            Ok((None, None))
+        }
+    }
+}
+
+fn prepare_activation(
+    lun: u8,
+    main_copies: &[Vec<u8>],
+    backup_copies: &[Vec<u8>],
+) -> Result<SlotActivation> {
+    let position = usize::from(lun);
+    SlotActivation::prepare(lun, &main_copies[position], &backup_copies[position])
+}
+
+fn require_tidy_stock_b(main_copies: &[Vec<u8>], backup_copies: &[Vec<u8>]) -> Result<()> {
+    for lun in ACTIVATION_LUNS {
+        let position = usize::from(lun);
+        let main = GptCopy::parse(GptCopyKind::Main, &main_copies[position])?;
+        let backup = GptCopy::parse(GptCopyKind::Backup, &backup_copies[position])?;
+        main.require_pair_with(&backup, &format!("LUN {lun}"))?;
+        require_no_active_slot_a(lun, &main)?;
+    }
+    require_stock_b_boot_lun(main_copies)
+}
+
+fn require_no_active_slot_a(lun: u8, main: &GptCopy) -> Result<()> {
+    for entry in main.entries() {
+        if entry.name.ends_with(SLOT_A_SUFFIX) && entry.flags & ACTIVE_FLAG != 0 {
+            return Err(Front2Error::Unsupported(format!(
+                "LUN {lun}: {} has the active flag, a tidy stock slot B backup has no active slot A partition",
+                entry.name
+            )));
+        }
+    }
+    Ok(())
+}
+
+fn require_stock_b_boot_lun(main_copies: &[Vec<u8>]) -> Result<()> {
+    let boot_lun = xbl_boot_lun(main_copies)?;
+    if boot_lun != NEW_BOOT_LUN {
+        return Err(Front2Error::Unsupported(format!(
+            "the backup shows boot LUN {boot_lun}, a stock slot B backup boots LUN {NEW_BOOT_LUN}"
+        )));
+    }
+    Ok(())
+}
+
+fn xbl_boot_lun(main_copies: &[Vec<u8>]) -> Result<u8> {
+    let mut active = Vec::new();
+    for (lun, name) in XBL_BOOT_TABLES {
+        let main = GptCopy::parse(GptCopyKind::Main, &main_copies[usize::from(lun)])?;
+        if main
+            .entry(name)
+            .is_some_and(|entry| entry.flags & ACTIVE_FLAG != 0)
+        {
+            active.push(lun);
+        }
+    }
+    match active.as_slice() {
+        [lun] => Ok(*lun),
+        _ => Err(Front2Error::Unsupported(format!(
+            "the backup does not show one boot LUN: {} of xbl_a on LUN {ORIGINAL_BOOT_LUN} and xbl_b on LUN {NEW_BOOT_LUN} have the active flag",
+            active.len()
+        ))),
+    }
 }
 
 fn gpt_backup(
@@ -152,4 +246,23 @@ fn first_sector(path: &Path) -> Result<Vec<u8>> {
     let mut sector = vec![0u8; SECTOR_BYTES];
     fs::File::open(path)?.read_exact(&mut sector)?;
     Ok(sector)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_candidate_and_a_backup_of_the_same_stock_slot_agree() {
+        require_matching_stock_slot(BootSlot::A, BootSlot::A).expect("slot A and slot A agree");
+        require_matching_stock_slot(BootSlot::B, BootSlot::B).expect("slot B and slot B agree");
+    }
+
+    #[test]
+    fn a_candidate_of_a_different_stock_slot_than_the_backup_is_rejected() {
+        let error = require_matching_stock_slot(BootSlot::B, BootSlot::A)
+            .expect_err("a slot B candidate on a slot A backup");
+        assert!(matches!(error, Front2Error::Plan(_)), "{error}");
+        assert!(error.to_string().contains("stock slot"), "{error}");
+    }
 }

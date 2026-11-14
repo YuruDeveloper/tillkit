@@ -3,6 +3,7 @@ mod super_support;
 
 use front2::Front2Error;
 use front2::digest::{sha256_bytes, sha256_file};
+use front2::gpt::BootSlot;
 use front2::gsi::{
     BackupManifest, GsiCandidate, GsiCandidateRequest, extract_logical_view,
     gsi_candidate::{CANDIDATE_FILE, SUPER_FILE, VIEW_DIRECTORY},
@@ -42,7 +43,25 @@ fn request<'a>(backup: &'a Path, gsi: &'a Path, output: &'a Path) -> GsiCandidat
         output_directory: output,
         rollback_evidence: &[],
         accepted_untested_build: None,
+        stock_slot: BootSlot::A,
     }
+}
+
+#[test]
+fn the_boot_slot_is_stored_as_a_lowercase_letter_and_defaults_to_slot_a() {
+    assert_eq!(
+        serde_json::to_string(&BootSlot::A).expect("slot A"),
+        "\"a\""
+    );
+    assert_eq!(
+        serde_json::to_string(&BootSlot::B).expect("slot B"),
+        "\"b\""
+    );
+    assert_eq!(
+        serde_json::from_str::<BootSlot>("\"b\"").expect("read slot B"),
+        BootSlot::B
+    );
+    assert_eq!(BootSlot::default(), BootSlot::A);
 }
 
 static NO_GSI: front2::DeviceProfile = front2::DeviceProfile {

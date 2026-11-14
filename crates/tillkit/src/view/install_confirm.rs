@@ -5,6 +5,8 @@ use crate::palette::Palette;
 use crate::plan_build::PlanBuild;
 use crate::view::confirm::{answers, stated};
 use crate::view::{install_resume, parts};
+use front2::gpt::BootSlot;
+use front2::install::InstallPlan;
 use front2::profiles::toss_front2;
 use iced::Element;
 use iced::widget::{Column, column};
@@ -19,6 +21,9 @@ const ROLLBACK_UNKNOWN: &str =
     "기기에 저장된 rollback 값과 기록할 이미지의 값이 맞는지는 TillKit이 확인하지 못했습니다.";
 const BOOT_LUN_UNKNOWN: &str =
     "바꾼 부팅 위치가 다시 시작한 뒤에도 유지되는지는 TillKit이 확인하지 못했습니다.";
+const SLOT_B_NOT_TESTED: &str =
+    "부팅 슬롯 B에서 시작하는 설치는 실제 기기에서 실행해 본 적이 없습니다.";
+const BOOT_LUN_KEPT: &str = "바꾸지 않음";
 const OTHER_BUILD_WARNING: &str = "이 전체 백업의 순정 빌드는 TillKit이 GSI 설치 절차의 기준으로 삼은 빌드와 빌드 번호가 다릅니다. 그래도 진행하면 이 빌드의 부팅 이미지와 vbmeta로 설치 계획을 만듭니다. 이 빌드에 설치한 GSI가 부팅하는 것은 보장하지 않습니다.";
 const OTHER_BUILD_KEPT: &str = "서명, 파티션 구성, rollback 값의 검사는 그대로 합니다. 이 단계에서는 기기에 기록하지 않으며, 기기에 기록하기 전에 한 번 더 확인을 받습니다.";
 pub const OTHER_BUILD_PLAN: &str = "이 계획은 기준 빌드와 빌드 번호가 다른 순정 빌드의 전체 백업으로 만들었습니다. 이 빌드에 설치한 GSI가 부팅하는 것은 보장하지 않습니다.";
@@ -84,8 +89,16 @@ pub fn write(app: &App) -> Element<'_, Message> {
     content = content
         .push(parts::body(WRITE_KEPT, palette))
         .push(parts::body(NO_RESTORE, palette))
-        .push(parts::body(NOT_TESTED, palette))
-        .push(answers("WRITE AND ERASE", "CANCEL", palette));
+        .push(parts::body(NOT_TESTED, palette));
+    let slot_b_plan = app
+        .install
+        .review
+        .as_ref()
+        .is_some_and(|review| shows_slot_b_not_tested(&review.plan));
+    if slot_b_plan {
+        content = content.push(parts::body(SLOT_B_NOT_TESTED, palette));
+    }
+    content = content.push(answers("WRITE AND ERASE", "CANCEL", palette));
     parts::block(content, palette.tint_warn, palette)
 }
 
@@ -104,7 +117,7 @@ fn facts<'a>(
         .filter(|(index, _)| *index >= first)
         .map(|(_, step)| step.name.as_str())
         .collect();
-    let boot_lun = format!("LUN {} → LUN {}", plan.original_boot_lun, plan.new_boot_lun);
+    let boot_lun = boot_lun_text(plan);
     let rows = vec![
         stated(
             "고른 이미지",
@@ -129,6 +142,21 @@ fn facts<'a>(
         ),
     ];
     parts::ruled(rows, palette)
+}
+
+fn boot_lun_text(plan: &InstallPlan) -> String {
+    match plan.stock_slot {
+        BootSlot::A => format!("LUN {} → LUN {}", plan.original_boot_lun, plan.new_boot_lun),
+        BootSlot::B => format!("LUN {}, {BOOT_LUN_KEPT}", plan.new_boot_lun),
+    }
+}
+
+fn shows_boot_lun_unknown(plan: &InstallPlan) -> bool {
+    plan.stock_slot == BootSlot::A && !plan.boot_lun_persistence_confirmed
+}
+
+fn shows_slot_b_not_tested(plan: &InstallPlan) -> bool {
+    plan.stock_slot == BootSlot::B
 }
 
 fn halved(sha256: &str) -> String {
@@ -162,7 +190,7 @@ fn unknowns<'a>(
     if !review.plan.stored_rollback_source_confirmed {
         content = content.push(parts::body(ROLLBACK_UNKNOWN, palette));
     }
-    if !review.plan.boot_lun_persistence_confirmed {
+    if shows_boot_lun_unknown(&review.plan) {
         content = content.push(parts::body(BOOT_LUN_UNKNOWN, palette));
     }
     content
@@ -176,4 +204,25 @@ pub fn restart<'a>(palette: Palette) -> Element<'a, Message> {
     ]
     .spacing(12);
     parts::panel(content, palette)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::install_support::InstallFixture;
+
+    #[test]
+    fn a_slot_a_plan_moves_the_boot_lun_and_a_slot_b_plan_keeps_it() {
+        let slot_a = InstallPlan::build(&InstallFixture::standard().inputs).expect("slot A plan");
+        assert_eq!(slot_a.stock_slot, BootSlot::A);
+        assert_eq!(boot_lun_text(&slot_a), "LUN 1 → LUN 2");
+        assert!(shows_boot_lun_unknown(&slot_a));
+        assert!(!shows_slot_b_not_tested(&slot_a));
+
+        let slot_b = InstallPlan::build(&InstallFixture::stock_b().inputs).expect("slot B plan");
+        assert_eq!(slot_b.stock_slot, BootSlot::B);
+        assert_eq!(boot_lun_text(&slot_b), format!("LUN 2, {BOOT_LUN_KEPT}"));
+        assert!(!shows_boot_lun_unknown(&slot_b));
+        assert!(shows_slot_b_not_tested(&slot_b));
+    }
 }

@@ -1,4 +1,5 @@
 use crate::device_profile::DeviceProfile;
+use crate::gpt::BootSlot;
 use crate::gsi::rollback_evidence::RollbackEvidence;
 use std::path::Path;
 
@@ -10,4 +11,5 @@ pub struct GsiCandidateRequest<'a> {
     pub output_directory: &'a Path,
     pub rollback_evidence: &'a [RollbackEvidence],
     pub accepted_untested_build: Option<&'a str>,
+    pub stock_slot: BootSlot,
 }

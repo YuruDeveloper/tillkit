@@ -7,8 +7,8 @@ use super::partition_overlap::PartitionOverlap;
 use super::planned_extent::PlannedExtent;
 use super::retained_partition::RetainedPartition;
 use super::{
-    DYNAMIC_GROUP, EXTENT_ALIGNMENT_SECTORS, GSI_BLOCK_BYTES, ORIGINAL_SLOT, RETAINED_PARTITIONS,
-    SYSTEM_PARTITION, TARGET_SLOT,
+    COW_GROUP, COW_SUFFIX, DEFAULT_GROUP, DYNAMIC_GROUP, EXTENT_ALIGNMENT_SECTORS, GSI_BLOCK_BYTES,
+    ORIGINAL_SLOT, RETAINED_PARTITIONS, SYSTEM_EXT_PARTITION, SYSTEM_PARTITION, TARGET_SLOT,
 };
 use crate::error::{Front2Error, Result};
 use serde::{Deserialize, Serialize};
@@ -54,6 +54,7 @@ impl SuperLayoutPlan {
         let (_, group) = target.group(DYNAMIC_GROUP)?;
         require_group_fits(used_bytes, group.maximum_size)?;
         require_aligned_system(target, alignment_sectors)?;
+        require_known_slot_1_names(target)?;
         Ok(Self {
             gsi_bytes,
             super_bytes: device.size,
@@ -186,6 +187,36 @@ fn require_aligned_system(target: &LpMetadata, alignment_sectors: u64) -> Result
         return Err(Front2Error::Plan(format!(
             "{SYSTEM_PARTITION} has an extent that is not linear or does not start on a multiple of {alignment_sectors} sectors"
         )));
+    }
+    Ok(())
+}
+
+fn require_known_slot_1_names(target: &LpMetadata) -> Result<()> {
+    let base: Vec<&str> = [SYSTEM_PARTITION, SYSTEM_EXT_PARTITION]
+        .into_iter()
+        .chain(RETAINED_PARTITIONS)
+        .collect();
+    let mut allowed: Vec<String> = Vec::with_capacity(base.len() * 2);
+    for name in base {
+        allowed.push(name.to_string());
+        allowed.push(format!("{name}{COW_SUFFIX}"));
+    }
+    for partition in &target.partitions {
+        let name = partition.name.as_str();
+        if !allowed.iter().any(|known| known == name) {
+            return Err(Front2Error::Plan(format!(
+                "super slot 1 has the partition {name}, which is not one of {allowed:?}"
+            )));
+        }
+    }
+    let groups = [DEFAULT_GROUP, DYNAMIC_GROUP, COW_GROUP];
+    for group in &target.groups {
+        let name = group.name.as_str();
+        if !groups.contains(&name) {
+            return Err(Front2Error::Plan(format!(
+                "super slot 1 has the group {name}, which is not one of {groups:?}"
+            )));
+        }
     }
     Ok(())
 }
