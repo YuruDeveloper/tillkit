@@ -274,6 +274,21 @@ fn top_refuses_an_original_slot_b_with_another_key() {
         message.contains("is not signed with testkey_rsa4096"),
         "{message}"
     );
+    assert!(message.contains("no known key"), "{message}");
+    assert!(!bench.path("vbmeta.img").exists());
+}
+
+#[test]
+fn top_names_a_known_key_that_is_not_the_expected_one() {
+    let bench = Bench::new();
+    let mut original = original_top();
+    original.key_spec = "testkey_rsa2048";
+    original.algorithm = "SHA256_RSA2048";
+    let message = refusal(bench.top(&stock_top(), &original));
+    assert!(
+        message.contains("the known key testkey_rsa2048"),
+        "{message}"
+    );
     assert!(!bench.path("vbmeta.img").exists());
 }
 
@@ -392,6 +407,10 @@ fn system_refuses_an_original_slot_b_with_another_key() {
     let message = refusal(bench.system(&stock_system(), &original, &gsi()));
     assert!(
         message.contains("is not signed with testkey_rsa2048"),
+        "{message}"
+    );
+    assert!(
+        message.contains("the known key testkey_rsa4096"),
         "{message}"
     );
 }
