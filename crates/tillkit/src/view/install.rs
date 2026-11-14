@@ -4,6 +4,7 @@ use crate::install_message::InstallMessage;
 use crate::install_stage::{InstallStage, OTHER_STATE};
 use crate::message::Message;
 use crate::palette::Palette;
+use crate::plan_build::PlanBuild;
 use crate::reboot_message::RebootMessage;
 use crate::step_status::StepStatus;
 use crate::view::{flow, full_restore, install_confirm, install_resume, parts};
@@ -214,15 +215,26 @@ fn plan_details(app: &App) -> Vec<Element<'_, Message>> {
         ),
         parts::label(review.directory.display().to_string(), palette),
     ];
-    if let Some(fingerprint) = &review.untested_build {
-        details.push(parts::caution(
-            OTHER_BUILD,
-            install_confirm::OTHER_BUILD_PLAN,
-            palette,
-        ));
-        details.push(parts::value(fingerprint.clone(), palette));
-    }
+    details.extend(build_details(&review.build, palette));
     details
+}
+
+fn build_details<'a>(build: &PlanBuild, palette: Palette) -> Vec<Element<'a, Message>> {
+    let (title, text, shown) = match build {
+        PlanBuild::Tested => return Vec::new(),
+        PlanBuild::Untested(fingerprint) => {
+            (OTHER_BUILD, install_confirm::OTHER_BUILD_PLAN, fingerprint)
+        }
+        PlanBuild::NotRead(reason) => (
+            install_confirm::BUILD_NOT_READ_TITLE,
+            install_confirm::BUILD_NOT_READ,
+            reason,
+        ),
+    };
+    vec![
+        parts::caution(title, text, palette),
+        parts::value(shown.clone(), palette),
+    ]
 }
 
 fn asked_build_details(app: &App) -> Vec<Element<'_, Message>> {

@@ -43,6 +43,7 @@ mod launch;
 mod message;
 mod pair_session;
 mod palette;
+mod plan_build;
 mod plan_review;
 mod plan_source;
 mod prepared_install;

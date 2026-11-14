@@ -1,3 +1,4 @@
+use crate::plan_build::PlanBuild;
 use front2::install::InstallPlan;
 use std::path::PathBuf;
 
@@ -6,5 +7,5 @@ pub struct InstallReview {
     pub plan: InstallPlan,
     pub sha256: String,
     pub directory: PathBuf,
-    pub untested_build: Option<String>,
+    pub build: PlanBuild,
 }

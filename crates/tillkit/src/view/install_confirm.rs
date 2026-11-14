@@ -2,6 +2,7 @@ use crate::app::App;
 use crate::install_review::InstallReview;
 use crate::message::Message;
 use crate::palette::Palette;
+use crate::plan_build::PlanBuild;
 use crate::view::confirm::{answers, stated};
 use crate::view::{install_resume, parts};
 use front2::profiles::toss_front2;
@@ -21,6 +22,8 @@ const BOOT_LUN_UNKNOWN: &str =
 const OTHER_BUILD_WARNING: &str = "이 전체 백업의 순정 빌드는 TillKit이 GSI 설치 절차의 기준으로 삼은 빌드와 빌드 번호가 다릅니다. 그래도 진행하면 이 빌드의 부팅 이미지와 vbmeta로 설치 계획을 만듭니다. 이 빌드에 설치한 GSI가 부팅하는 것은 보장하지 않습니다.";
 const OTHER_BUILD_KEPT: &str = "서명, 파티션 구성, rollback 값의 검사는 그대로 합니다. 이 단계에서는 기기에 기록하지 않으며, 기기에 기록하기 전에 한 번 더 확인을 받습니다.";
 pub const OTHER_BUILD_PLAN: &str = "이 계획은 기준 빌드와 빌드 번호가 다른 순정 빌드의 전체 백업으로 만들었습니다. 이 빌드에 설치한 GSI가 부팅하는 것은 보장하지 않습니다.";
+pub const BUILD_NOT_READ_TITLE: &str = "STOCK BUILD NOT CHECKED";
+pub const BUILD_NOT_READ: &str = "이 계획이 쓰는 전체 백업에서 순정 빌드를 다시 읽지 못했습니다. 그래서 이 계획이 기준 빌드의 전체 백업으로 만든 것인지, 빌드 번호가 다른 빌드의 전체 백업으로 만든 것인지 TillKit이 알 수 없습니다. 전체 백업 폴더의 파일이 바뀌지 않았는지 확인해 주세요.";
 const RESTART_QUESTION: &str = "기록한 내용을 다시 읽어서 확인했습니다. 기기를 지금 다시 시작하면, 기기는 사용자 데이터를 지운 뒤에 GSI로 부팅을 시도합니다. 부팅에 성공하는지는 TillKit이 확인하지 못합니다. 나중에 하려면 LATER를 눌러 주세요.";
 
 pub fn untested_build(app: &App) -> Element<'_, Message> {
@@ -68,16 +71,16 @@ pub fn write(app: &App) -> Element<'_, Message> {
         content = continued(content, app, review, palette);
         content = unknowns(content, review, palette);
     }
-    let untested = app
-        .install
-        .review
-        .as_ref()
-        .and_then(|review| review.untested_build.as_ref());
-    if let Some(fingerprint) = untested {
-        content = content
+    let build = app.install.review.as_ref().map(|review| &review.build);
+    content = match build {
+        Some(PlanBuild::Untested(fingerprint)) => content
             .push(parts::body(OTHER_BUILD_PLAN, palette))
-            .push(builds(fingerprint, palette));
-    }
+            .push(builds(fingerprint, palette)),
+        Some(PlanBuild::NotRead(reason)) => content
+            .push(parts::body(BUILD_NOT_READ, palette))
+            .push(parts::value(reason.clone(), palette)),
+        Some(PlanBuild::Tested) | None => content,
+    };
     content = content
         .push(parts::body(WRITE_KEPT, palette))
         .push(parts::body(NO_RESTORE, palette))

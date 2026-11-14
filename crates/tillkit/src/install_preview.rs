@@ -47,7 +47,7 @@ pub fn apply(app: &mut App) {
             plan,
             sha256,
             directory: PathBuf::from(PLAN_FOLDER),
-            untested_build: None,
+            build: crate::plan_build::PlanBuild::Tested,
         });
     }
     finish(app, &pose);

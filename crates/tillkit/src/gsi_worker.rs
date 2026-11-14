@@ -3,6 +3,7 @@ use crate::data_paths::DataPaths;
 use crate::full_backup_store;
 use crate::gsi_review::GsiReview;
 use crate::install_review::InstallReview;
+use crate::plan_build::PlanBuild;
 use crate::prepared_install::PreparedInstall;
 use front2::digest::sha256_file;
 use front2::gpt::BootSlot;
@@ -31,8 +32,8 @@ pub fn prepare(
     accepted_build: Option<&str>,
 ) -> Result<PreparedInstall> {
     if let Some(stored) = stored(paths, backup, backup_is_found, gsi_image)? {
-        let build = backup_stock_build(&stored.plan.backup_directory).ok();
-        return Ok(planned(stored, build.as_ref()));
+        let build = backup_stock_build(&stored.plan.backup_directory);
+        return Ok(planned(stored, build));
     }
     require_switchable_slots(backup)?;
     let build = backup_stock_build(backup)?;
@@ -42,17 +43,12 @@ pub fn prepare(
     let review = build_candidate(paths, backup, gsi_image, profile, accepted_build)?;
     let install = plan_install(paths, &review, backup, profile);
     let install = removed_on_failure(&review.directory, install)?;
-    Ok(planned(install, Some(&build)))
+    Ok(planned(install, Ok(build)))
 }
 
-fn planned(review: InstallReview, build: Option<&StockBuild>) -> PreparedInstall {
-    let untested_build = build
-        .and_then(StockBuild::untested_fingerprint)
-        .map(str::to_string);
-    PreparedInstall::Planned(Box::new(InstallReview {
-        untested_build,
-        ..review
-    }))
+fn planned(review: InstallReview, build: Result<StockBuild>) -> PreparedInstall {
+    let build = PlanBuild::from_read(build);
+    PreparedInstall::Planned(Box::new(InstallReview { build, ..review }))
 }
 
 fn require_switchable_slots(backup: &Path) -> Result<()> {
@@ -156,7 +152,7 @@ fn reviewed(directory: PathBuf, fits: &impl Fn(&InstallPlan) -> bool) -> Option<
         plan: stored.plan().clone(),
         sha256: stored.plan_sha256().to_string(),
         directory,
-        untested_build: None,
+        build: PlanBuild::Tested,
     })
 }
 
@@ -227,7 +223,7 @@ fn plan_install(
         plan: stored.plan().clone(),
         sha256: stored.plan_sha256().to_string(),
         directory,
-        untested_build: None,
+        build: PlanBuild::Tested,
     })
 }
 
@@ -269,7 +265,7 @@ mod tests {
     }
 
     #[test]
-    fn a_plan_shows_the_untested_build_only_when_the_backup_gives_one() {
+    fn letter_1462_a_plan_keeps_the_build_or_the_failure_of_its_read() {
         use crate::install_support::InstallFixture;
 
         let fixture = InstallFixture::standard();
@@ -278,18 +274,22 @@ mod tests {
             plan: stored.plan().clone(),
             sha256: stored.plan_sha256().to_string(),
             directory: fixture.plan_directory(),
-            untested_build: None,
+            build: PlanBuild::Tested,
         };
         let other = "TOSSPLACE/toss_front2/toss_front2:13/TKQ1.230110.001/468:user/dev-keys";
         let untested = StockBuild::Untested(other.to_string());
-        let shown = |build: Option<&StockBuild>| match planned(review.clone(), build) {
-            PreparedInstall::Planned(planned) => planned.untested_build,
+        let shown = |build: Result<StockBuild>| match planned(review.clone(), build) {
+            PreparedInstall::Planned(planned) => planned.build,
             PreparedInstall::UntestedBuild(asked) => panic!("{asked} is not a plan"),
         };
 
-        assert_eq!(shown(Some(&untested)).as_deref(), Some(other));
-        assert_eq!(shown(Some(&StockBuild::Tested)), None);
-        assert_eq!(shown(None), None, "a stored plan stays usable");
+        assert_eq!(shown(Ok(untested)), PlanBuild::Untested(other.to_string()));
+        assert_eq!(shown(Ok(StockBuild::Tested)), PlanBuild::Tested);
+        let changed = Front2Error::Verification("vbmeta_a.bin changed".into());
+        let PlanBuild::NotRead(reason) = shown(Err(changed)) else {
+            panic!("a stored plan with a changed backup stays usable and tells the failure");
+        };
+        assert!(reason.contains("vbmeta_a.bin changed"), "{reason}");
     }
 
     #[test]

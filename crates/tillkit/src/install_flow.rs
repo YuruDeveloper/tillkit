@@ -292,7 +292,7 @@ pub mod tests {
             plan: stored.plan().clone(),
             sha256: stored.plan_sha256().to_string(),
             directory: fixture.plan_directory(),
-            untested_build: None,
+            build: crate::plan_build::PlanBuild::Tested,
         };
         let flow = InstallFlow {
             connected: true,
