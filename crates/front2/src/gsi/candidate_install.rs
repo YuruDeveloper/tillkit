@@ -101,6 +101,7 @@ pub fn install_inputs_from_images(
     let misc = manifest.partition(MISC_PARTITION)?;
     Ok(InstallInputs {
         candidate_directory: std::path::absolute(candidate_directory)?,
+        stock_slot: BootSlot::A,
         partition_map: PartitionMap::from_main_copies(&borrowed)?,
         images: images
             .iter()
@@ -111,8 +112,8 @@ pub fn install_inputs_from_images(
         misc_original: misc.record(),
         userdata_original: manifest.partition(USERDATA_PARTITION)?.record(),
         gpt_backups,
-        activation_lun0: activation(first_lun)?,
-        activation_lun4: activation(second_lun)?,
+        activation_lun0: Some(activation(first_lun)?),
+        activation_lun4: Some(activation(second_lun)?),
         backup_directory,
     })
 }

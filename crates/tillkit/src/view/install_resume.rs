@@ -4,6 +4,7 @@ const FIRST_INSTALL: &str = "기록할 영역의 내용이 전체 백업과 같�
 const ONLY_RESTART: &str =
     "기록할 영역의 내용이 이미 모두 이 계획과 같습니다. 다시 시작하는 일만 남았습니다.";
 const BOOT_LUN: &str = "부팅 위치 바꾸기";
+const KEEP_BOOT_LUN: &str = "부팅 위치 확인";
 
 pub fn lines(resume: &ResumePoint, plan: &InstallPlan) -> Vec<String> {
     if resume.first_install {
@@ -25,6 +26,7 @@ fn next_name(resume: &ResumePoint, plan: &InstallPlan) -> Option<String> {
     match plan.steps.get(resume.next_index)? {
         InstallStep::Write(step) => Some(step.name.clone()),
         InstallStep::SetBootLun { .. } => Some(BOOT_LUN.to_string()),
+        InstallStep::KeepBootLun { .. } => Some(KEEP_BOOT_LUN.to_string()),
         InstallStep::Restart => None,
     }
 }

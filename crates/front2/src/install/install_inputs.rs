@@ -1,4 +1,4 @@
-use crate::gpt::{PartitionMap, SlotActivation};
+use crate::gpt::{BootSlot, PartitionMap, SlotActivation};
 use crate::image_record::ImageRecord;
 use crate::install::gpt_backup::GptBackup;
 use crate::install::install_image::InstallImage;
@@ -8,6 +8,7 @@ use std::path::PathBuf;
 pub struct InstallInputs {
     pub candidate_directory: PathBuf,
     pub backup_directory: PathBuf,
+    pub stock_slot: BootSlot,
     pub partition_map: PartitionMap,
     pub images: Vec<InstallImage>,
     pub metadata_original: ImageRecord,
@@ -15,6 +16,6 @@ pub struct InstallInputs {
     pub userdata_original: ImageRecord,
     pub misc_first_sector: Vec<u8>,
     pub gpt_backups: Vec<GptBackup>,
-    pub activation_lun0: SlotActivation,
-    pub activation_lun4: SlotActivation,
+    pub activation_lun0: Option<SlotActivation>,
+    pub activation_lun4: Option<SlotActivation>,
 }

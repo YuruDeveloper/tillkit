@@ -1,6 +1,6 @@
 use crate::digest::sha256_bytes;
 use crate::error::{Front2Error, Result};
-use crate::gpt::{GptCopyKind, SECTOR_BYTES};
+use crate::gpt::{BootSlot, GptCopyKind, SECTOR_BYTES};
 use crate::image_record::ImageRecord;
 use crate::install::gpt_copy_record::GptCopyRecord;
 use crate::install::install_inputs::InstallInputs;
@@ -30,6 +30,8 @@ pub struct InstallPlan {
     pub restore_tested_on_device: bool,
     pub stored_rollback_source_confirmed: bool,
     pub boot_lun_persistence_confirmed: bool,
+    #[serde(default, skip_serializing_if = "is_slot_a")]
+    pub stock_slot: BootSlot,
     pub original_boot_lun: u8,
     pub new_boot_lun: u8,
     pub boot_wlun: u8,
@@ -57,6 +59,7 @@ impl InstallPlan {
             restore_tested_on_device: false,
             stored_rollback_source_confirmed: false,
             boot_lun_persistence_confirmed: false,
+            stock_slot: inputs.stock_slot,
             original_boot_lun: ORIGINAL_BOOT_LUN,
             new_boot_lun: NEW_BOOT_LUN,
             boot_wlun: BOOT_WLUN,
@@ -145,7 +148,8 @@ impl InstallPlan {
 
     fn push_target(&mut self, target: PlannedTarget) {
         if target.step.requires_data_wipe_approval {
-            self.steps.push(boot_lun_step(self.new_boot_lun));
+            self.steps
+                .push(boot_lun_step(self.stock_slot, self.new_boot_lun));
         }
         self.restore_set.push(target.restore);
         self.payloads.extend(target.payload);
@@ -175,8 +179,15 @@ impl InstallPlan {
     }
 }
 
-fn boot_lun_step(lun: u8) -> InstallStep {
-    InstallStep::SetBootLun { lun }
+fn boot_lun_step(stock_slot: BootSlot, lun: u8) -> InstallStep {
+    match stock_slot {
+        BootSlot::A => InstallStep::SetBootLun { lun },
+        BootSlot::B => InstallStep::KeepBootLun { lun },
+    }
+}
+
+fn is_slot_a(slot: &BootSlot) -> bool {
+    matches!(slot, BootSlot::A)
 }
 
 fn plan_file_of(step: &WriteStep) -> Option<&str> {

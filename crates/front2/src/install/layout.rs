@@ -1,5 +1,5 @@
 use crate::error::{Front2Error, Result};
-use crate::gpt::{GptCopyKind, SECTOR_BYTES};
+use crate::gpt::{BootSlot, GptCopyKind, SECTOR_BYTES};
 use std::path::{Component, Path};
 
 pub const PLAN_FILE: &str = "install-plan.json";
@@ -30,7 +30,8 @@ pub const GPT_STEP_ORDER: [(GptCopyKind, u8); 4] = [
 pub const ORIGINAL_BOOT_LUN: u8 = 1;
 pub const NEW_BOOT_LUN: u8 = 2;
 pub const BOOT_WLUN: u8 = 176;
-pub const BOOT_LUN_STEP_NAME: &str = "set_boot_lun";
+pub const SET_BOOT_LUN_STEP_NAME: &str = "set_boot_lun";
+pub const KEEP_BOOT_LUN_STEP_NAME: &str = "keep_boot_lun";
 pub const CHUNK_SECTORS: u64 = 1024;
 
 pub fn gpt_step_name(kind: GptCopyKind, lun: u8) -> String {
@@ -41,17 +42,19 @@ pub fn gpt_plan_file(kind: GptCopyKind, lun: u8) -> String {
     format!("gpt_{}{lun}-slot-b.bin", kind.label())
 }
 
-pub fn write_step_names() -> Vec<String> {
+pub fn write_step_names(stock_slot: BootSlot) -> Vec<String> {
     let mut names: Vec<String> = IMAGE_PARTITIONS
         .iter()
         .map(|name| name.to_string())
         .collect();
     names.push(METADATA_PARTITION.to_string());
-    names.extend(
-        GPT_STEP_ORDER
-            .iter()
-            .map(|(kind, lun)| gpt_step_name(*kind, *lun)),
-    );
+    if stock_slot == BootSlot::A {
+        names.extend(
+            GPT_STEP_ORDER
+                .iter()
+                .map(|(kind, lun)| gpt_step_name(*kind, *lun)),
+        );
+    }
     names.push(MISC_PARTITION.to_string());
     names
 }

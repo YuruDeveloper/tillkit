@@ -4,7 +4,9 @@ use crate::image_record::ImageRecord;
 use crate::install::digest_check::DigestCheck;
 use crate::install::install_plan::InstallPlan;
 use crate::install::install_step::InstallStep;
-use crate::install::layout::{BOOT_LUN_STEP_NAME, GPT_LUN_COUNT, gpt_step_name};
+use crate::install::layout::{
+    GPT_LUN_COUNT, KEEP_BOOT_LUN_STEP_NAME, SET_BOOT_LUN_STEP_NAME, gpt_step_name,
+};
 use crate::install::payload_reader::PayloadReader;
 use crate::install::preflight_record::PreflightRecord;
 use crate::install::resume_point::ResumePoint;
@@ -126,7 +128,7 @@ fn check_steps(
     for (index, step) in plan.steps.iter().enumerate() {
         let check = match (step.as_write(), step.boot_lun()) {
             (Some(write), _) => check_write(storage, index, write)?,
-            (None, Some(lun)) => check_boot_lun(plan, storage, index, lun)?,
+            (None, Some(lun)) => check_boot_lun(plan, storage, index, lun, step.keeps_boot_lun())?,
             (None, None) => continue,
         };
         record.steps.push(check);
@@ -159,6 +161,7 @@ fn check_boot_lun(
     storage: &mut dyn SectorStorage,
     index: usize,
     lun: u8,
+    keep: bool,
 ) -> Result<StepCheck> {
     let new = plan.gpt_copy(plan.new_boot_lun, GptCopyKind::Main)?;
     let original = plan.gpt_copy(plan.original_boot_lun, GptCopyKind::Main)?;
@@ -168,20 +171,35 @@ fn check_boot_lun(
         )));
     }
     let sha256 = read_sectors_sha256(storage, plan.boot_wlun, new.start_sector, new.sectors)?;
-    let judgment = if sha256 == new.sha256 {
-        StepJudgment::Done
-    } else if sha256 == original.sha256 {
-        StepJudgment::NotYet
-    } else {
-        return Err(Front2Error::Verification(format!(
+    let judgment = boot_lun_judgment(keep, &sha256, &new.sha256, &original.sha256).ok_or_else(|| {
+        Front2Error::Verification(format!(
             "preflight: the GPT that is read through boot WLUN {} has SHA-256 {sha256}; the main GPT of LUN {} has {}, the main GPT of LUN {} has {}",
             plan.boot_wlun, plan.new_boot_lun, new.sha256, plan.original_boot_lun, original.sha256
-        )));
+        ))
+    })?;
+    let name = if keep {
+        KEEP_BOOT_LUN_STEP_NAME
+    } else {
+        SET_BOOT_LUN_STEP_NAME
     };
     Ok(StepCheck {
         index,
-        name: BOOT_LUN_STEP_NAME.to_string(),
+        name: name.to_string(),
         sha256,
         judgment,
     })
+}
+
+fn boot_lun_judgment(keep: bool, sha256: &str, new: &str, original: &str) -> Option<StepJudgment> {
+    if sha256 == new {
+        return Some(if keep {
+            StepJudgment::Neutral
+        } else {
+            StepJudgment::Done
+        });
+    }
+    if !keep && sha256 == original {
+        return Some(StepJudgment::NotYet);
+    }
+    None
 }
