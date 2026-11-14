@@ -24,6 +24,7 @@ use std::time::Duration;
 
 const STATE_POLL_INTERVAL: Duration = Duration::from_secs(1);
 pub const NO_BACKUP: &str = "no backup holds the images that the device has now";
+pub const DEVICE_IN_EDL: &str = "the device is in EDL mode and does not answer ADB";
 
 pub fn is_no_backup(error: &str) -> bool {
     let store = |text: &str| Front2Error::Store(text.into()).to_string();
@@ -71,7 +72,25 @@ fn read_android_device() -> Result<Diagnosis> {
     Ok(Diagnosis::evaluate(state))
 }
 
+pub fn is_edl_refusal(error: &str) -> bool {
+    error == Front2Error::Unsupported(DEVICE_IN_EDL.into()).to_string()
+}
+
 pub fn back_up(paths: &DataPaths) -> Result<()> {
+    back_up_from(edl::check_device(), || back_up_android_device(paths))
+}
+
+fn back_up_from(
+    edl_device_present: bool,
+    back_up_android: impl FnOnce() -> Result<()>,
+) -> Result<()> {
+    if edl_device_present {
+        return Err(Front2Error::Unsupported(DEVICE_IN_EDL.into()));
+    }
+    back_up_android()
+}
+
+fn back_up_android_device(paths: &DataPaths) -> Result<()> {
     let mut shell = AdbShell::connect()?;
     let state = DeviceState::read(&mut shell)?;
     let created_unix = now_unix();
@@ -295,5 +314,29 @@ pub mod tests {
         let failure = || Err(Front2Error::Shell("no device answers".into()));
         let error = reading_from(false, failure).expect_err("no device");
         assert!(error.to_string().contains("no device answers"), "{error}");
+    }
+
+    #[test]
+    fn the_backup_refuses_a_device_in_edl_mode_and_adb_is_not_used() {
+        let mut adb_used = false;
+        let error = back_up_from(true, || {
+            adb_used = true;
+            Ok(())
+        })
+        .expect_err("EDL mode");
+        assert!(is_edl_refusal(&error.to_string()), "{error}");
+        assert!(!adb_used);
+    }
+
+    #[test]
+    fn without_a_device_in_edl_mode_the_backup_result_is_kept() {
+        back_up_from(false, || Ok(())).expect("backup");
+
+        let failure = || Err(Front2Error::Shell("no device answers".into()));
+        let error = back_up_from(false, failure).expect_err("no device");
+        assert!(error.to_string().contains("no device answers"), "{error}");
+        assert!(!is_edl_refusal(&error.to_string()));
+        let unsupported = Front2Error::Unsupported("the boot is not finished".into());
+        assert!(!is_edl_refusal(&unsupported.to_string()));
     }
 }

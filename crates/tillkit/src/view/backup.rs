@@ -1,9 +1,11 @@
+use crate::adb_shell;
 use crate::app::App;
 use crate::clock::format_utc;
 use crate::message::Message;
 use crate::palette::Palette;
 use crate::saved_backup::SavedBackup;
 use crate::view::{flow, parts, rabbit};
+use crate::worker;
 use crate::write_flow::WriteFlow;
 use crate::write_message::WriteMessage;
 use crate::write_origin::WriteOrigin;
@@ -15,6 +17,8 @@ const INTRODUCTION: &str = "기기의 부팅 영역을 PC에 읽어 둡니다. �
 const EMPTY: &str = "저장된 백업이 없습니다. 백업을 누르면 여기에 나타납니다.";
 const RESTORE_HINT: &str = "RESTORE를 누르면 그 백업의 이미지를 기기에 다시 기록합니다. 기기에 기록하기 전에 한 번 더 확인을 받습니다.";
 const BACKUP_STOPPED: &str = "백업하는 도중에 오류가 나서 끝까지 하지 못했습니다. 아래 목록에 보이는 것만 저장되었으니, 목록을 확인한 뒤에 다시 백업해 주세요.";
+const DEVICE_IN_EDL: &str = "EDL 모드로 연결된 기기를 찾아서 백업을 시작하지 않았습니다. 이 화면의 백업은 Android로 켜진 기기에서 USB 디버깅으로 부팅 영역을 읽기 때문에, EDL 모드의 기기에서는 하지 못합니다. 기기 전체 백업은 WRITE 화면의 GSI 설치 단계에서 만듭니다.";
+const DEVICE_NOT_FOUND: &str = "PC에서 기기를 찾지 못해서 백업을 시작하지 않았습니다. USB 케이블이 연결되어 있는지, 기기가 Android로 켜져 있는지, 개발자 옵션의 USB 디버깅이 켜져 있는지 확인한 뒤에 다시 눌러 주세요.";
 const STORE_NOT_READ: &str =
     "PC에 저장된 백업을 읽지 못했습니다. 읽지 못한 백업은 아래 목록에 나오지 않습니다.";
 const DATA_FOLDER: &str = "백업을 이 폴더에 저장합니다. 내려받은 Magisk와 기록 계획처럼 TillKit이 만드는 다른 파일도 이 폴더에 둡니다.";
@@ -42,12 +46,8 @@ pub fn view(app: &App) -> Element<'_, Message> {
         page = page.push(parts::running(activity, palette));
     }
     if let Some(error) = &app.backup_error {
-        page = page.push(parts::fault(
-            "BACKUP STOPPED",
-            BACKUP_STOPPED,
-            error,
-            palette,
-        ));
+        let (caption, sentence) = stop_words(error);
+        page = page.push(parts::fault(caption, sentence, error, palette));
     }
     if let Some(error) = &app.store_error {
         page = page.push(parts::fault(
@@ -70,6 +70,16 @@ pub fn view(app: &App) -> Element<'_, Message> {
         page = restore(app, own, page);
     }
     page.into()
+}
+
+fn stop_words(error: &str) -> (&'static str, &'static str) {
+    if worker::is_edl_refusal(error) {
+        return ("DEVICE IN EDL MODE", DEVICE_IN_EDL);
+    }
+    if adb_shell::is_absent(error) {
+        return ("DEVICE NOT FOUND", DEVICE_NOT_FOUND);
+    }
+    ("BACKUP STOPPED", BACKUP_STOPPED)
 }
 
 fn data_folder(app: &App) -> Element<'_, Message> {
@@ -176,4 +186,27 @@ fn restore<'a>(
         page = page.push(parts::bracket("REBOOT", Some(ask), palette));
     }
     flow::results(app, own, page)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use front2::Front2Error;
+
+    #[test]
+    fn a_backup_that_did_not_start_tells_the_user_why() {
+        let in_edl = Front2Error::Unsupported(worker::DEVICE_IN_EDL.into()).to_string();
+        assert_eq!(stop_words(&in_edl), ("DEVICE IN EDL MODE", DEVICE_IN_EDL));
+        let absent = "Device shell: the ADB device state is absent, expected device";
+        assert_eq!(stop_words(absent), ("DEVICE NOT FOUND", DEVICE_NOT_FOUND));
+    }
+
+    #[test]
+    fn a_backup_that_stopped_later_keeps_the_general_words() {
+        let stopped = ("BACKUP STOPPED", BACKUP_STOPPED);
+        let unauthorized = "Device shell: the ADB device state is unauthorized, expected device";
+        assert_eq!(stop_words(unauthorized), stopped);
+        let command = "Device shell: command exited with status 1: dd: write error";
+        assert_eq!(stop_words(command), stopped);
+    }
 }

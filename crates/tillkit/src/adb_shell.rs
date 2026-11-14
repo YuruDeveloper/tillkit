@@ -11,13 +11,21 @@ impl AdbShell {
         let mut manager = AdbManager::new();
         let state = manager.check_device_state().map_err(shell_error)?;
         if state != Some("device") {
-            return Err(Front2Error::Shell(format!(
-                "the ADB device state is {}, expected device",
-                state.unwrap_or("absent")
-            )));
+            return Err(state_error(state));
         }
         Ok(Self { manager })
     }
+}
+
+fn state_error(state: Option<&str>) -> Front2Error {
+    Front2Error::Shell(format!(
+        "the ADB device state is {}, expected device",
+        state.unwrap_or("absent")
+    ))
+}
+
+pub fn is_absent(error: &str) -> bool {
+    error == state_error(None).to_string()
 }
 
 fn shell_error(error: AdbError) -> Front2Error {
@@ -43,5 +51,20 @@ impl DeviceShell for AdbShell {
 
     fn reboot(&mut self) -> Result<()> {
         self.manager.reboot("system").map_err(shell_error)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn an_absent_device_is_told_from_other_device_states() {
+        assert!(is_absent(&state_error(None).to_string()));
+        assert!(!is_absent(&state_error(Some("unauthorized")).to_string()));
+        assert!(!is_absent(&state_error(Some("recovery")).to_string()));
+        let other = Front2Error::Shell("command exited with status 1".into()).to_string();
+        assert!(!is_absent(&other));
+        assert!(!is_absent(""));
     }
 }
