@@ -140,7 +140,8 @@ fn assemble(request: &GsiCandidateRequest<'_>, manifest: &BackupManifest) -> Res
         manifest.verified_partition(&stock_name(toss_front2::CHAINED_VBMETA_BASE))?;
     let original_chained =
         manifest.verified_partition(&target_name(toss_front2::CHAINED_VBMETA_BASE))?;
-    require_stock_front2_top(&VbmetaSource::read(&stock_top.path)?)?;
+    require_stock_front2_top(&VbmetaSource::read(&stock_top.path)?)?
+        .require_accepted(request.accepted_untested_build)?;
 
     let original_super = manifest.partition(SUPER_PARTITION)?;
     let (gsi_bytes, gsi_sha256) = sha256_file(request.gsi_image)?;

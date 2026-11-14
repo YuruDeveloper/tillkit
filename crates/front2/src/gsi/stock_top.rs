@@ -1,9 +1,21 @@
 use crate::error::{Front2Error, Result};
+use crate::gsi::backup_manifest::BackupManifest;
+use crate::gsi::gsi_candidate::STOCK_SLOT_SUFFIX;
+use crate::gsi::stock_build::StockBuild;
 use crate::gsi::vbmeta_source::VbmetaSource;
+use crate::profile;
 use crate::profiles::toss_front2;
 use avbtool_rs::info::DescriptorInfo;
+use std::path::Path;
 
-pub fn require_stock_front2_top(stock: &VbmetaSource) -> Result<()> {
+pub fn backup_stock_build(backup_directory: &Path) -> Result<StockBuild> {
+    let manifest = BackupManifest::load(&std::path::absolute(backup_directory)?)?;
+    let name = profile::slot_label(profile::VBMETA_BASE, STOCK_SLOT_SUFFIX);
+    let stock_top = manifest.verified_partition(&name)?;
+    require_stock_front2_top(&VbmetaSource::read(&stock_top.path)?)
+}
+
+pub fn require_stock_front2_top(stock: &VbmetaSource) -> Result<StockBuild> {
     let failure =
         |reason: String| Front2Error::Unsupported(format!("{}: {reason}", stock.path.display()));
     let header = &stock.info.header;
@@ -36,14 +48,7 @@ pub fn require_stock_front2_top(stock: &VbmetaSource) -> Result<()> {
         .iter()
         .filter_map(|descriptor| boot_fingerprint(&descriptor.info))
         .collect();
-    if fingerprints != [toss_front2::VENDOR_BUILD_FINGERPRINT.as_bytes()] {
-        return Err(failure(format!(
-            "property {} is not exactly one {}",
-            toss_front2::BOOT_FINGERPRINT_PROPERTY,
-            toss_front2::VENDOR_BUILD_FINGERPRINT
-        )));
-    }
-    Ok(())
+    StockBuild::from_fingerprints(&fingerprints).map_err(failure)
 }
 
 fn hash_partition(descriptor: &DescriptorInfo) -> Option<&str> {

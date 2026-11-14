@@ -251,6 +251,7 @@ impl App {
             Some(Confirmation::Write) => self.stage_plan(),
             Some(Confirmation::Reboot) => self.reboot(),
             Some(Confirmation::RebootTo) => self.reboot_to(),
+            Some(Confirmation::InstallUntestedBuild) => self.install_plan_accepted(),
             Some(Confirmation::InstallWrite) => self.install_write(),
             Some(Confirmation::InstallRestart) => self.install_restart(),
             Some(Confirmation::FullRestoreWrite) => self.full_restore_write(),

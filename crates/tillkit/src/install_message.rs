@@ -1,4 +1,4 @@
-use crate::install_review::InstallReview;
+use crate::prepared_install::PreparedInstall;
 use front2::install::InstallProgress;
 use std::path::PathBuf;
 
@@ -11,7 +11,7 @@ pub enum InstallMessage {
     BackUp,
     BackedUp(Outcome<(PathBuf, Vec<String>)>),
     Plan,
-    Planned(Outcome<Box<InstallReview>>),
+    Planned(Outcome<PreparedInstall>),
     Check,
     Checked(Outcome<Box<InstallProgress>>),
     AskWrite,

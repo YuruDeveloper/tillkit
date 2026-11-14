@@ -41,6 +41,7 @@ fn request<'a>(backup: &'a Path, gsi: &'a Path, output: &'a Path) -> GsiCandidat
         gsi_image: gsi,
         output_directory: output,
         rollback_evidence: &[],
+        accepted_untested_build: None,
     }
 }
 

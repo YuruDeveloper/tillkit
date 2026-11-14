@@ -3,6 +3,8 @@ use crate::device_profile::DeviceProfile;
 pub const ID: &str = "toss-front2";
 pub const VENDOR_BUILD_FINGERPRINT: &str =
     "TOSSPLACE/toss_front2/toss_front2:13/TKQ1.230110.001/475:user/dev-keys";
+pub const BUILD_FINGERPRINT_PREFIX: &str = "TOSSPLACE/toss_front2/toss_front2:13/TKQ1.230110.001/";
+pub const BUILD_FINGERPRINT_SUFFIX: &str = ":user/dev-keys";
 pub const SUPPORTED_SLOT_SUFFIX: &str = "_b";
 pub const TOP_VBMETA_ALGORITHM: &str = "SHA256_RSA4096";
 pub const TOP_VBMETA_KEY_SPEC: &str = "testkey_rsa4096";

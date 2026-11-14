@@ -3,10 +3,12 @@ use crate::data_paths::DataPaths;
 use crate::full_backup_store;
 use crate::gsi_review::GsiReview;
 use crate::install_review::InstallReview;
+use crate::prepared_install::PreparedInstall;
 use front2::digest::sha256_file;
 use front2::gpt::BootSlot;
 use front2::gsi::{
-    GsiCandidate, GsiCandidateRequest, backup_boot_slot, install_inputs, require_slot_a_active,
+    GsiCandidate, GsiCandidateRequest, StockBuild, backup_boot_slot, backup_stock_build,
+    install_inputs, require_slot_a_active,
 };
 use front2::install::{InstallPlan, PLAN_FILE};
 use front2::{DeviceProfile, Front2Error, Result};
@@ -26,14 +28,31 @@ pub fn prepare(
     backup_is_found: bool,
     gsi_image: &Path,
     profile: &DeviceProfile,
-) -> Result<InstallReview> {
+    accepted_build: Option<&str>,
+) -> Result<PreparedInstall> {
     if let Some(stored) = stored(paths, backup, backup_is_found, gsi_image)? {
-        return Ok(stored);
+        let build = backup_stock_build(&stored.plan.backup_directory).ok();
+        return Ok(planned(stored, build.as_ref()));
     }
     require_switchable_slots(backup)?;
-    let review = build_candidate(paths, backup, gsi_image, profile)?;
-    let planned = plan_install(paths, &review, backup, profile);
-    removed_on_failure(&review.directory, planned)
+    let build = backup_stock_build(backup)?;
+    if let Some(fingerprint) = build.unaccepted_fingerprint(accepted_build) {
+        return Ok(PreparedInstall::UntestedBuild(fingerprint.to_string()));
+    }
+    let review = build_candidate(paths, backup, gsi_image, profile, accepted_build)?;
+    let install = plan_install(paths, &review, backup, profile);
+    let install = removed_on_failure(&review.directory, install)?;
+    Ok(planned(install, Some(&build)))
+}
+
+fn planned(review: InstallReview, build: Option<&StockBuild>) -> PreparedInstall {
+    let untested_build = build
+        .and_then(StockBuild::untested_fingerprint)
+        .map(str::to_string);
+    PreparedInstall::Planned(Box::new(InstallReview {
+        untested_build,
+        ..review
+    }))
 }
 
 fn require_switchable_slots(backup: &Path) -> Result<()> {
@@ -137,6 +156,7 @@ fn reviewed(directory: PathBuf, fits: &impl Fn(&InstallPlan) -> bool) -> Option<
         plan: stored.plan().clone(),
         sha256: stored.plan_sha256().to_string(),
         directory,
+        untested_build: None,
     })
 }
 
@@ -149,6 +169,7 @@ fn build_candidate(
     backup: &Path,
     gsi_image: &Path,
     profile: &DeviceProfile,
+    accepted_build: Option<&str>,
 ) -> Result<GsiReview> {
     let root = paths.gsi_candidates();
     std::fs::create_dir_all(&root)?;
@@ -159,6 +180,7 @@ fn build_candidate(
         gsi_image,
         output_directory: &directory,
         rollback_evidence: &[],
+        accepted_untested_build: accepted_build,
     };
     let candidate = GsiCandidate::build(&request)?;
     let review = reviewed_candidate(directory.clone(), &candidate);
@@ -205,6 +227,7 @@ fn plan_install(
         plan: stored.plan().clone(),
         sha256: stored.plan_sha256().to_string(),
         directory,
+        untested_build: None,
     })
 }
 
@@ -236,12 +259,37 @@ mod tests {
                 &backup,
                 false,
                 &image,
-                &front2::profiles::toss_front2::PROFILE
+                &front2::profiles::toss_front2::PROFILE,
+                None
             )
             .is_err()
         );
         let left = std::fs::read_dir(paths.gsi_candidates()).map_or(0, Iterator::count);
         assert_eq!(left, 0);
+    }
+
+    #[test]
+    fn a_plan_shows_the_untested_build_only_when_the_backup_gives_one() {
+        use crate::install_support::InstallFixture;
+
+        let fixture = InstallFixture::standard();
+        let stored = fixture.stored_plan();
+        let review = InstallReview {
+            plan: stored.plan().clone(),
+            sha256: stored.plan_sha256().to_string(),
+            directory: fixture.plan_directory(),
+            untested_build: None,
+        };
+        let other = "TOSSPLACE/toss_front2/toss_front2:13/TKQ1.230110.001/468:user/dev-keys";
+        let untested = StockBuild::Untested(other.to_string());
+        let shown = |build: Option<&StockBuild>| match planned(review.clone(), build) {
+            PreparedInstall::Planned(planned) => planned.untested_build,
+            PreparedInstall::UntestedBuild(asked) => panic!("{asked} is not a plan"),
+        };
+
+        assert_eq!(shown(Some(&untested)).as_deref(), Some(other));
+        assert_eq!(shown(Some(&StockBuild::Tested)), None);
+        assert_eq!(shown(None), None, "a stored plan stays usable");
     }
 
     #[test]

@@ -36,6 +36,7 @@ pub fn layer(app: &App, confirmation: Confirmation) -> Element<'_, Message> {
         Confirmation::Write => write(app),
         Confirmation::Reboot => reboot(palette),
         Confirmation::RebootTo => reboot_to(app),
+        Confirmation::InstallUntestedBuild => install_confirm::untested_build(app),
         Confirmation::InstallWrite => install_confirm::write(app),
         Confirmation::InstallRestart => install_confirm::restart(palette),
         Confirmation::FullRestoreWrite => full_restore_confirm::write(app),

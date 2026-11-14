@@ -3,9 +3,11 @@ use avbtool_rs::crypto::extract_public_key;
 use avbtool_rs::info::DescriptorInfo;
 use front2::digest::sha256_file;
 use front2::gsi::{
-    RawDescriptor, RollbackEvidence, VbmetaSource, VbmetaTemplate, build_system_vbmeta,
-    build_top_vbmeta,
+    GsiCandidate, GsiCandidateRequest, RawDescriptor, RollbackEvidence, StockBuild, VbmetaSource,
+    VbmetaTemplate, backup_stock_build, build_system_vbmeta, build_top_vbmeta,
+    require_stock_front2_top,
 };
+use front2::profiles::toss_front2::PROFILE;
 use front2::top_signature::verify_top_signature;
 use std::path::{Path, PathBuf};
 
@@ -497,6 +499,146 @@ fn letter_1134_system_refuses_an_original_slot_b_with_a_damaged_signature() {
         "{error}"
     );
     assert!(!output.exists());
+}
+
+const TESTED_BUILD: &str = "TOSSPLACE/toss_front2/toss_front2:13/TKQ1.230110.001/475:user/dev-keys";
+const OTHER_BUILD: &str = "TOSSPLACE/toss_front2/toss_front2:13/TKQ1.230110.001/468:user/dev-keys";
+const OTHER_DEVICE: &str = "OTHER/other_device/other_device:13/TKQ1.230110.001/475:user/dev-keys";
+
+fn front2_stock_top(fingerprints: &[&'static str]) -> Source<'static> {
+    Source {
+        key_spec: "testkey_rsa4096",
+        algorithm: "SHA256_RSA4096",
+        rollback_index: STOCK_ROLLBACK,
+        flags: 0,
+        properties: fingerprints
+            .iter()
+            .map(|value| ("com.android.build.boot.fingerprint", *value))
+            .collect(),
+        descriptors: vec![
+            hash("boot", 3),
+            hash("dtbo", 4),
+            hash("init_boot", 5),
+            hash("recovery", 6),
+            hash("vendor_boot", 7),
+        ],
+        chains: vec![("vbmeta_system", 2, OTHER_KEY)],
+    }
+}
+
+fn stock_build(fingerprints: &[&'static str]) -> front2::Result<StockBuild> {
+    let bench = Bench::new();
+    let path = bench.path("stock-top.bin");
+    front2_stock_top(fingerprints).write(&path);
+    require_stock_front2_top(&VbmetaSource::read(&path)?)
+}
+
+#[test]
+fn the_stock_top_gives_the_tested_build_or_an_untested_build_number() {
+    let tested = stock_build(&[TESTED_BUILD]).expect("the tested build");
+    assert_eq!(tested, StockBuild::Tested);
+    let other = stock_build(&[OTHER_BUILD]).expect("another build number");
+    assert_eq!(other, StockBuild::Untested(OTHER_BUILD.to_string()));
+}
+
+#[test]
+fn the_stock_top_refusal_tells_the_fingerprints_of_the_backup() {
+    let cases: [&[&'static str]; 3] = [&[], &[OTHER_DEVICE], &[TESTED_BUILD, OTHER_BUILD]];
+    for fingerprints in cases {
+        let refused = stock_build(fingerprints).expect_err("the stock top is not used");
+        assert!(
+            matches!(refused, front2::Front2Error::Unsupported(_)),
+            "{refused}"
+        );
+        let message = refused.to_string();
+        assert!(message.contains("stock-top.bin"), "{message}");
+        assert!(
+            message.contains(&format!("has the values {fingerprints:?}")),
+            "{message}"
+        );
+    }
+}
+
+fn write_vbmeta_backup(backup: &Path, stock_top: &Source<'_>) {
+    let directory = backup.join("partitions").join("lun4");
+    std::fs::create_dir_all(&directory).expect("create the LUN directory");
+    let mut entries = Vec::new();
+    for (name, source) in [
+        ("vbmeta_a", stock_top),
+        ("vbmeta_b", &original_top()),
+        ("vbmeta_system_a", &stock_system()),
+        ("vbmeta_system_b", &original_system()),
+    ] {
+        let path = directory.join(format!("{name}.bin"));
+        source.write(&path);
+        let (bytes, sha256) = sha256_file(&path).expect("digest of the dump");
+        entries.push(serde_json::json!({
+            "path": format!("partitions\\lun4\\{name}.bin"),
+            "bytes": bytes,
+            "sha256": sha256.to_ascii_uppercase(),
+        }));
+    }
+    let text = serde_json::to_string_pretty(&entries).expect("manifest text");
+    std::fs::write(backup.join("sha256-manifest.json"), text).expect("write the manifest");
+}
+
+#[test]
+fn a_candidate_from_an_untested_build_needs_the_acceptance_of_its_fingerprint() {
+    let bench = Bench::new();
+    let backup = bench.path("backup");
+    write_vbmeta_backup(&backup, &front2_stock_top(&[OTHER_BUILD]));
+    let gsi = bench.path("gsi.img");
+    std::fs::write(&gsi, b"gsi").expect("write the GSI");
+    let output = bench.path("candidate");
+    let build = |accepted| {
+        GsiCandidate::build(&GsiCandidateRequest {
+            profile: &PROFILE,
+            backup_directory: &backup,
+            gsi_image: &gsi,
+            output_directory: &output,
+            rollback_evidence: &[],
+            accepted_untested_build: accepted,
+        })
+        .expect_err("the backup has no super dump")
+        .to_string()
+    };
+
+    let asked = backup_stock_build(&backup).expect("the build of the backup");
+    assert_eq!(asked, StockBuild::Untested(OTHER_BUILD.to_string()));
+    for accepted in [None, Some(TESTED_BUILD)] {
+        let refused = build(accepted);
+        assert!(refused.contains("the user did not accept it"), "{refused}");
+        assert!(refused.contains(OTHER_BUILD), "{refused}");
+        assert!(!output.exists());
+    }
+    let later = build(Some(OTHER_BUILD));
+    assert!(!later.contains("did not accept"), "{later}");
+    assert!(later.contains("partition super"), "{later}");
+    assert!(!output.exists());
+}
+
+#[test]
+fn a_candidate_from_the_tested_build_needs_no_acceptance() {
+    let bench = Bench::new();
+    let backup = bench.path("backup");
+    write_vbmeta_backup(&backup, &front2_stock_top(&[TESTED_BUILD]));
+    let gsi = bench.path("gsi.img");
+    std::fs::write(&gsi, b"gsi").expect("write the GSI");
+    let output = bench.path("candidate");
+    let later = GsiCandidate::build(&GsiCandidateRequest {
+        profile: &PROFILE,
+        backup_directory: &backup,
+        gsi_image: &gsi,
+        output_directory: &output,
+        rollback_evidence: &[],
+        accepted_untested_build: None,
+    })
+    .expect_err("the backup has no super dump")
+    .to_string();
+
+    let asked = backup_stock_build(&backup).expect("the build of the backup");
+    assert_eq!(asked, StockBuild::Tested);
+    assert!(later.contains("partition super"), "{later}");
 }
 
 #[test]

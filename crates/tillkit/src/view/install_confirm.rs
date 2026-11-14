@@ -4,6 +4,7 @@ use crate::message::Message;
 use crate::palette::Palette;
 use crate::view::confirm::{answers, stated};
 use crate::view::{install_resume, parts};
+use front2::profiles::toss_front2;
 use iced::Element;
 use iced::widget::{Column, column};
 use std::path::Path;
@@ -17,7 +18,41 @@ const ROLLBACK_UNKNOWN: &str =
     "기기에 저장된 rollback 값과 기록할 이미지의 값이 맞는지는 TillKit이 확인하지 못했습니다.";
 const BOOT_LUN_UNKNOWN: &str =
     "바꾼 부팅 위치가 다시 시작한 뒤에도 유지되는지는 TillKit이 확인하지 못했습니다.";
+const OTHER_BUILD_WARNING: &str = "이 전체 백업의 순정 빌드는 TillKit이 GSI 설치 절차의 기준으로 삼은 빌드와 빌드 번호가 다릅니다. 그래도 진행하면 이 빌드의 부팅 이미지와 vbmeta로 설치 계획을 만듭니다. 이 빌드에 설치한 GSI가 부팅하는 것은 보장하지 않습니다.";
+const OTHER_BUILD_KEPT: &str = "서명, 파티션 구성, rollback 값의 검사는 그대로 합니다. 이 단계에서는 기기에 기록하지 않으며, 기기에 기록하기 전에 한 번 더 확인을 받습니다.";
+pub const OTHER_BUILD_PLAN: &str = "이 계획은 기준 빌드와 빌드 번호가 다른 순정 빌드의 전체 백업으로 만들었습니다. 이 빌드에 설치한 GSI가 부팅하는 것은 보장하지 않습니다.";
 const RESTART_QUESTION: &str = "기록한 내용을 다시 읽어서 확인했습니다. 기기를 지금 다시 시작하면, 기기는 사용자 데이터를 지운 뒤에 GSI로 부팅을 시도합니다. 부팅에 성공하는지는 TillKit이 확인하지 못합니다. 나중에 하려면 LATER를 눌러 주세요.";
+
+pub fn untested_build(app: &App) -> Element<'_, Message> {
+    let palette = app.palette;
+    let mut content = Column::new()
+        .spacing(12)
+        .push(parts::warned("OTHER STOCK BUILD", palette))
+        .push(parts::body(OTHER_BUILD_WARNING, palette));
+    if let Some(fingerprint) = &app.install.asked_build {
+        content = content.push(builds(fingerprint, palette));
+    }
+    content = content
+        .push(parts::body(OTHER_BUILD_KEPT, palette))
+        .push(answers("CONTINUE ANYWAY", "CANCEL", palette));
+    parts::block(content, palette.tint_warn, palette)
+}
+
+fn builds<'a>(fingerprint: &str, palette: Palette) -> Element<'a, Message> {
+    let rows = vec![
+        stated(
+            "이 백업의 빌드",
+            parts::value(fingerprint.to_string(), palette),
+            palette,
+        ),
+        stated(
+            "기준 빌드",
+            parts::value(toss_front2::VENDOR_BUILD_FINGERPRINT, palette),
+            palette,
+        ),
+    ];
+    parts::ruled(rows, palette)
+}
 
 pub fn write(app: &App) -> Element<'_, Message> {
     let palette = app.palette;
@@ -32,6 +67,16 @@ pub fn write(app: &App) -> Element<'_, Message> {
         content = content.push(facts(review, image.as_deref(), backup, first, palette));
         content = continued(content, app, review, palette);
         content = unknowns(content, review, palette);
+    }
+    let untested = app
+        .install
+        .review
+        .as_ref()
+        .and_then(|review| review.untested_build.as_ref());
+    if let Some(fingerprint) = untested {
+        content = content
+            .push(parts::body(OTHER_BUILD_PLAN, palette))
+            .push(builds(fingerprint, palette));
     }
     content = content
         .push(parts::body(WRITE_KEPT, palette))

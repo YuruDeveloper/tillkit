@@ -45,6 +45,7 @@ mod pair_session;
 mod palette;
 mod plan_review;
 mod plan_source;
+mod prepared_install;
 mod reboot;
 mod reboot_flow;
 mod reboot_message;

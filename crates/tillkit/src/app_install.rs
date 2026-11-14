@@ -5,10 +5,10 @@ use crate::full_backup_store;
 use crate::gsi_worker;
 use crate::install_device::{self, DeviceSlot, with_link};
 use crate::install_message::InstallMessage;
-use crate::install_review::InstallReview;
 use crate::install_stage::InstallStage;
 use crate::install_worker;
 use crate::message::Message;
+use crate::prepared_install::PreparedInstall;
 use crate::worker::run_blocking;
 use crate::write_kind::WriteKind;
 use crate::write_origin::WriteOrigin;
@@ -129,6 +129,17 @@ impl App {
     }
 
     fn install_plan(&mut self) -> Task<Message> {
+        self.run_install_plan(None)
+    }
+
+    pub fn install_plan_accepted(&mut self) -> Task<Message> {
+        match self.install.asked_build.clone() {
+            Some(accepted) => self.run_install_plan(Some(accepted)),
+            None => Task::none(),
+        }
+    }
+
+    fn run_install_plan(&mut self, accepted_build: Option<String>) -> Task<Message> {
         let backup = self.install.backup.clone();
         let image = self.gsi_image();
         let (Some(backup), Some(image), true) =
@@ -140,18 +151,25 @@ impl App {
         let paths = self.paths.clone();
         let found = self.install.backup_is_found;
         let profile = self.device_profile();
-        run_blocking(
-            move || gsi_worker::prepare(&paths, &backup, found, &image, profile),
-            planned,
-        )
+        let prepare = move || {
+            let accepted = accepted_build.as_deref();
+            gsi_worker::prepare(&paths, &backup, found, &image, profile, accepted)
+        };
+        run_blocking(prepare, planned)
     }
 
-    fn install_planned(&mut self, result: Outcome<Box<InstallReview>>) {
+    fn install_planned(&mut self, result: Outcome<PreparedInstall>) {
         self.install.running = None;
         match result {
-            Ok(review) => self.install.use_plan(*review),
+            Ok(PreparedInstall::Planned(review)) => self.install.use_plan(*review),
+            Ok(PreparedInstall::UntestedBuild(fingerprint)) => self.ask_untested_build(fingerprint),
             Err(error) => self.install.stage_failed(InstallStage::Plan, error),
         }
+    }
+
+    fn ask_untested_build(&mut self, fingerprint: String) {
+        self.install.asked_build = Some(fingerprint);
+        self.confirmation = Some(Confirmation::InstallUntestedBuild);
     }
 
     fn install_check(&mut self) -> Task<Message> {
@@ -287,8 +305,8 @@ fn backed_up(result: Outcome<(PathBuf, Vec<String>)>) -> Message {
     Message::Install(InstallMessage::BackedUp(result))
 }
 
-fn planned(result: Outcome<InstallReview>) -> Message {
-    Message::Install(InstallMessage::Planned(result.map(Box::new)))
+fn planned(result: Outcome<PreparedInstall>) -> Message {
+    Message::Install(InstallMessage::Planned(result))
 }
 
 fn checked(result: Outcome<InstallProgress>) -> Message {
@@ -386,6 +404,70 @@ mod tests {
         app.confirmation = Some(Confirmation::InstallWrite);
         let _ = app.update(Message::Confirm);
         assert!(!app.is_busy() && app.install.approved_sha256.is_none());
+    }
+
+    const OTHER_BUILD: &str =
+        "TOSSPLACE/toss_front2/toss_front2:13/TKQ1.230110.001/468:user/dev-keys";
+
+    fn app_before_the_plan() -> (tempfile::TempDir, App) {
+        let (directory, mut app) = app_with_gsi();
+        let _ = app.update(install(InstallMessage::Connected(Ok(()))));
+        app.install.use_backup(directory.path().join("backup"));
+        assert!(app.can_run_install(InstallStage::Plan));
+        (directory, app)
+    }
+
+    fn untested_build_found(app: &mut App) {
+        let _ = app.update(install(InstallMessage::Plan));
+        assert_eq!(app.install.running, Some(InstallStage::Plan));
+        let found = PreparedInstall::UntestedBuild(OTHER_BUILD.into());
+        let _ = app.update(install(InstallMessage::Planned(Ok(found))));
+    }
+
+    #[test]
+    fn an_untested_build_makes_no_plan_before_the_answer_of_the_user() {
+        let (_directory, mut app) = app_before_the_plan();
+        untested_build_found(&mut app);
+        assert_eq!(app.confirmation, Some(Confirmation::InstallUntestedBuild));
+        assert_eq!(app.install.asked_build.as_deref(), Some(OTHER_BUILD));
+        assert!(!app.is_busy(), "nothing starts before the answer");
+        assert!(app.install.review.is_none() && app.install.failure.is_none());
+
+        let _ = app.update(Message::Cancel);
+        assert!(app.confirmation.is_none() && !app.is_busy());
+        assert_eq!(app.install.asked_build.as_deref(), Some(OTHER_BUILD));
+        let _ = app.update(Message::Confirm);
+        assert!(!app.is_busy(), "no question is open");
+        assert!(app.can_run_install(InstallStage::Plan));
+    }
+
+    #[test]
+    fn the_answer_of_the_user_starts_the_plan_of_an_untested_build() {
+        let (_directory, mut app) = app_before_the_plan();
+        untested_build_found(&mut app);
+        let _ = app.update(Message::Confirm);
+        assert_eq!(app.install.running, Some(InstallStage::Plan));
+        assert!(app.confirmation.is_none() && app.install.asked_build.is_none());
+
+        let (_directory, mut app) = app_before_the_plan();
+        app.confirmation = Some(Confirmation::InstallUntestedBuild);
+        let _ = app.update(Message::Confirm);
+        assert!(!app.is_busy(), "no build was asked");
+    }
+
+    #[test]
+    fn a_new_backup_or_a_new_plan_run_drops_the_asked_build() {
+        let (directory, mut app) = app_before_the_plan();
+        untested_build_found(&mut app);
+        let _ = app.update(Message::Cancel);
+        app.install.use_backup(directory.path().join("other"));
+        assert!(app.install.asked_build.is_none());
+
+        untested_build_found(&mut app);
+        let _ = app.update(Message::Cancel);
+        let _ = app.update(install(InstallMessage::Plan));
+        assert_eq!(app.install.running, Some(InstallStage::Plan));
+        assert!(app.install.asked_build.is_none());
     }
 
     #[test]

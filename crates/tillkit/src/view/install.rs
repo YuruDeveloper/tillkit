@@ -6,7 +6,7 @@ use crate::message::Message;
 use crate::palette::Palette;
 use crate::reboot_message::RebootMessage;
 use crate::step_status::StepStatus;
-use crate::view::{flow, full_restore, install_resume, parts};
+use crate::view::{flow, full_restore, install_confirm, install_resume, parts};
 use iced::widget::{Column, Row, Space, column, container, row};
 use iced::{Alignment, Element, Length};
 use std::path::{Path, PathBuf};
@@ -27,6 +27,8 @@ const READY: &str = "기록을 시작할 수 있습니다.";
 const RESTART_SENT: &str = "다시 시작을 요청했습니다. 첫 부팅은 사용자 데이터를 지우느라 오래 걸릴 수 있습니다. 기기가 GSI로 부팅했는지는 TillKit이 확인하지 못하므로, 기기에서 직접 확인해 주세요.";
 const UNFINISHED: &str = "이 기기는 기록이 끝나지 않은 상태입니다. 기기를 다시 시작하거나 끄지 말고, EDL 모드로 연결한 채로 점검부터 다시 진행해 주세요. 점검이 멈춘 단계를 찾으면 그 단계부터 이어서 기록합니다.";
 const UNFINISHED_OPEN: &str = "이 기기는 기록이 끝나지 않은 상태입니다. 기기를 다시 시작하거나 끄지 말고, EDL 모드로 연결한 채로 아래의 WRITE를 눌러서 남은 단계를 기록해 주세요.";
+const OTHER_BUILD: &str = "OTHER STOCK BUILD";
+const OTHER_BUILD_NOT_ACCEPTED: &str = "이 전체 백업의 순정 빌드는 TillKit이 GSI 설치 절차의 기준으로 삼은 빌드와 빌드 번호가 다릅니다. 설치 계획은 아직 만들지 않았습니다. MAKE PLAN을 다시 누르면 이 빌드로 진행할지 다시 묻습니다.";
 const METER_PARTS: u16 = 1000;
 const METER_LEAST: u16 = 4;
 const GIBIBYTE: f64 = 1_073_741_824.0;
@@ -202,15 +204,36 @@ fn resume_line<'a>(line: String, continued: bool, palette: Palette) -> Element<'
 fn plan_details(app: &App) -> Vec<Element<'_, Message>> {
     let palette = app.palette;
     let Some(review) = &app.install.review else {
-        return Vec::new();
+        return asked_build_details(app);
     };
     let writes = review.plan.write_steps().len();
-    vec![
+    let mut details = vec![
         parts::value(
             format!("{writes} writes · SHA-256 {}", review.sha256),
             palette,
         ),
         parts::label(review.directory.display().to_string(), palette),
+    ];
+    if let Some(fingerprint) = &review.untested_build {
+        details.push(parts::caution(
+            OTHER_BUILD,
+            install_confirm::OTHER_BUILD_PLAN,
+            palette,
+        ));
+        details.push(parts::value(fingerprint.clone(), palette));
+    }
+    details
+}
+
+fn asked_build_details(app: &App) -> Vec<Element<'_, Message>> {
+    let palette = app.palette;
+    let asked = app.install.asked_build.as_ref();
+    let Some(fingerprint) = asked.filter(|_| app.install.running.is_none()) else {
+        return Vec::new();
+    };
+    vec![
+        parts::caution(OTHER_BUILD, OTHER_BUILD_NOT_ACCEPTED, palette),
+        parts::value(fingerprint.clone(), palette),
     ]
 }
 

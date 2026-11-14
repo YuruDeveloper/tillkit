@@ -14,6 +14,7 @@ pub struct InstallFlow {
     pub backup: Option<PathBuf>,
     pub backup_is_found: bool,
     pub refused_backup: Option<String>,
+    pub asked_build: Option<String>,
     pub review: Option<InstallReview>,
     pub progress: Option<InstallProgress>,
     pub approved_sha256: Option<String>,
@@ -53,6 +54,7 @@ impl InstallFlow {
     pub fn begin(&mut self, stage: InstallStage) {
         self.failure = None;
         self.refused_backup = None;
+        self.asked_build = None;
         self.transferred.store(0, Ordering::Relaxed);
         let expected = self.write_bytes().filter(|_| stage == InstallStage::Write);
         self.expected
@@ -90,6 +92,7 @@ impl InstallFlow {
 
     pub fn forget_the_plan(&mut self) {
         self.review = None;
+        self.asked_build = None;
         self.forget_the_check();
     }
 
@@ -289,6 +292,7 @@ pub mod tests {
             plan: stored.plan().clone(),
             sha256: stored.plan_sha256().to_string(),
             directory: fixture.plan_directory(),
+            untested_build: None,
         };
         let flow = InstallFlow {
             connected: true,
