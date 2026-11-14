@@ -524,6 +524,38 @@ fn letter_1134_system_refuses_an_original_slot_b_with_a_damaged_signature() {
     assert!(!output.exists());
 }
 
+#[test]
+fn letter_1515_a_damaged_signature_is_not_told_as_signed_with_a_known_key() {
+    let bench = Bench::new();
+    let path = bench.path("signed-system.bin");
+    original_system().write(&path);
+    flip_signature_byte(&path);
+    let source = VbmetaSource::read(&path).expect("source");
+
+    let against_its_own_key = source
+        .require_signed_with("testkey_rsa2048", "SHA256_RSA2048")
+        .expect_err("the damaged signature fails");
+    assert!(
+        against_its_own_key
+            .to_string()
+            .contains("RSA verification rejected the signature"),
+        "{against_its_own_key}"
+    );
+
+    let against_another_key = source
+        .require_signed_with("testkey_rsa4096", "SHA256_RSA4096")
+        .expect_err("the key does not match")
+        .to_string();
+    assert!(
+        against_another_key.contains("its public key matches the known key testkey_rsa2048"),
+        "{against_another_key}"
+    );
+    assert!(
+        !against_another_key.contains("signed with the known key"),
+        "{against_another_key}"
+    );
+}
+
 const TESTED_BUILD: &str = "TOSSPLACE/toss_front2/toss_front2:13/TKQ1.230110.001/475:user/dev-keys";
 const OTHER_BUILD: &str = "TOSSPLACE/toss_front2/toss_front2:13/TKQ1.230110.001/468:user/dev-keys";
 const OTHER_DEVICE: &str = "OTHER/other_device/other_device:13/TKQ1.230110.001/475:user/dev-keys";

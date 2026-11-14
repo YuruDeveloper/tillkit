@@ -58,8 +58,8 @@ impl VbmetaSource {
 
     fn key_identification(&self) -> String {
         match self.identify_known_key() {
-            Some(known) => format!("it is signed with the known key {known}"),
-            None => "it is signed with no known key".to_string(),
+            Some(known) => format!("its public key matches the known key {known}"),
+            None => "its public key matches no known key".to_string(),
         }
     }
 
