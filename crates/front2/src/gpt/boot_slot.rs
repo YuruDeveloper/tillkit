@@ -1,14 +1,26 @@
 use crate::error::{Front2Error, Result};
 use crate::gpt::gpt_copy::GptCopy;
-use crate::gpt::slot_activation::{ACTIVE_FLAG, BOOT_A_NAME, BOOT_B_NAME};
+use crate::gpt::slot_activation::{
+    ACTIVE_FLAG, BOOT_A_NAME, BOOT_B_NAME, SLOT_A_SUFFIX, SLOT_B_SUFFIX,
+};
+use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
 pub enum BootSlot {
+    #[default]
     A,
     B,
 }
 
 impl BootSlot {
+    pub fn suffix(self) -> &'static str {
+        match self {
+            Self::A => SLOT_A_SUFFIX,
+            Self::B => SLOT_B_SUFFIX,
+        }
+    }
+
     pub fn read(lun: u8, copy: &GptCopy) -> Result<Self> {
         let active_a = is_active(lun, copy, BOOT_A_NAME)?;
         let active_b = is_active(lun, copy, BOOT_B_NAME)?;

@@ -1,6 +1,6 @@
 use crate::error::{Front2Error, Result};
+use crate::gpt::BootSlot;
 use crate::gsi::backup_manifest::BackupManifest;
-use crate::gsi::gsi_candidate::STOCK_SLOT_SUFFIX;
 use crate::gsi::stock_build::StockBuild;
 use crate::gsi::vbmeta_source::VbmetaSource;
 use crate::profile;
@@ -8,9 +8,9 @@ use crate::profiles::toss_front2;
 use avbtool_rs::info::DescriptorInfo;
 use std::path::Path;
 
-pub fn backup_stock_build(backup_directory: &Path) -> Result<StockBuild> {
+pub fn backup_stock_build(backup_directory: &Path, stock_slot: BootSlot) -> Result<StockBuild> {
     let manifest = BackupManifest::load(&std::path::absolute(backup_directory)?)?;
-    let name = profile::slot_label(profile::VBMETA_BASE, STOCK_SLOT_SUFFIX);
+    let name = profile::slot_label(profile::VBMETA_BASE, stock_slot.suffix());
     let stock_top = manifest.verified_partition(&name)?;
     require_stock_front2_top(&VbmetaSource::read(&stock_top.path)?)
 }

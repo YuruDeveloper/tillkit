@@ -32,11 +32,11 @@ pub fn prepare(
     accepted_build: Option<&str>,
 ) -> Result<PreparedInstall> {
     if let Some(stored) = stored(paths, backup, backup_is_found, gsi_image)? {
-        let build = backup_stock_build(&stored.plan.backup_directory);
+        let build = backup_stock_build(&stored.plan.backup_directory, BootSlot::A);
         return Ok(planned(stored, build));
     }
     require_switchable_slots(backup)?;
-    let build = backup_stock_build(backup)?;
+    let build = backup_stock_build(backup, BootSlot::A)?;
     if let Some(fingerprint) = build.unaccepted_fingerprint(accepted_build) {
         return Ok(PreparedInstall::UntestedBuild(fingerprint.to_string()));
     }
@@ -177,6 +177,7 @@ fn build_candidate(
         output_directory: &directory,
         rollback_evidence: &[],
         accepted_untested_build: accepted_build,
+        stock_slot: BootSlot::A,
     };
     let candidate = GsiCandidate::build(&request)?;
     let review = reviewed_candidate(directory.clone(), &candidate);

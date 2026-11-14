@@ -2,6 +2,7 @@ use avbtool_rs::builder::{ChainPartitionSpec, PropertySpec, VbmetaImageArgs, mak
 use avbtool_rs::crypto::extract_public_key;
 use avbtool_rs::info::DescriptorInfo;
 use front2::digest::sha256_file;
+use front2::gpt::BootSlot;
 use front2::gsi::{
     GsiCandidate, GsiCandidateRequest, RawDescriptor, RollbackEvidence, StockBuild, VbmetaSource,
     VbmetaTemplate, backup_stock_build, build_system_vbmeta, build_top_vbmeta,
@@ -598,12 +599,13 @@ fn a_candidate_from_an_untested_build_needs_the_acceptance_of_its_fingerprint() 
             output_directory: &output,
             rollback_evidence: &[],
             accepted_untested_build: accepted,
+            stock_slot: BootSlot::A,
         })
         .expect_err("the backup has no super dump")
         .to_string()
     };
 
-    let asked = backup_stock_build(&backup).expect("the build of the backup");
+    let asked = backup_stock_build(&backup, BootSlot::A).expect("the build of the backup");
     assert_eq!(asked, StockBuild::Untested(OTHER_BUILD.to_string()));
     for accepted in [None, Some(TESTED_BUILD)] {
         let refused = build(accepted);
@@ -632,13 +634,51 @@ fn a_candidate_from_the_tested_build_needs_no_acceptance() {
         output_directory: &output,
         rollback_evidence: &[],
         accepted_untested_build: None,
+        stock_slot: BootSlot::A,
     })
     .expect_err("the backup has no super dump")
     .to_string();
 
-    let asked = backup_stock_build(&backup).expect("the build of the backup");
+    let asked = backup_stock_build(&backup, BootSlot::A).expect("the build of the backup");
     assert_eq!(asked, StockBuild::Tested);
     assert!(later.contains("partition super"), "{later}");
+}
+
+fn write_front2_tops(backup: &Path, slot_a: &Source<'_>, slot_b: &Source<'_>) {
+    let directory = backup.join("partitions").join("lun4");
+    std::fs::create_dir_all(&directory).expect("create the LUN directory");
+    let mut entries = Vec::new();
+    for (name, source) in [("vbmeta_a", slot_a), ("vbmeta_b", slot_b)] {
+        let path = directory.join(format!("{name}.bin"));
+        source.write(&path);
+        let (bytes, sha256) = sha256_file(&path).expect("digest of the dump");
+        entries.push(serde_json::json!({
+            "path": format!("partitions\\lun4\\{name}.bin"),
+            "bytes": bytes,
+            "sha256": sha256.to_ascii_uppercase(),
+        }));
+    }
+    let text = serde_json::to_string_pretty(&entries).expect("manifest text");
+    std::fs::write(backup.join("sha256-manifest.json"), text).expect("write the manifest");
+}
+
+#[test]
+fn backup_stock_build_reads_the_top_vbmeta_of_the_given_slot() {
+    let bench = Bench::new();
+    let backup = bench.path("backup");
+    write_front2_tops(
+        &backup,
+        &front2_stock_top(&[TESTED_BUILD]),
+        &front2_stock_top(&[OTHER_BUILD]),
+    );
+    assert_eq!(
+        backup_stock_build(&backup, BootSlot::A).expect("the build of slot A"),
+        StockBuild::Tested
+    );
+    assert_eq!(
+        backup_stock_build(&backup, BootSlot::B).expect("the build of slot B"),
+        StockBuild::Untested(OTHER_BUILD.to_string())
+    );
 }
 
 #[test]
