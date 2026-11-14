@@ -19,6 +19,9 @@ pub const RETAINED_PRODUCT_PROPERTY_PREFIX: &str = "com.android.build.product.";
 pub const PHYSICAL_BOOT_PARTITIONS: [&str; 5] =
     ["boot", "dtbo", "init_boot", "recovery", "vendor_boot"];
 pub const BOOT_FINGERPRINT_PROPERTY: &str = "com.android.build.boot.fingerprint";
+pub const SYSTEM_FINGERPRINT_PROPERTY: &str = "com.android.build.system.fingerprint";
+pub const STOCK_SYSTEM_FINGERPRINT_PREFIX: &str = "qti/qssi/qssi:13/TKQ1.230110.001/";
+pub const STOCK_SYSTEM_FINGERPRINT_SUFFIX: &str = ":user/dev-keys";
 
 pub static PROFILE: DeviceProfile = DeviceProfile {
     id: ID,

@@ -7,6 +7,7 @@ use crate::gsi::candidate_image::CandidateImage;
 use crate::gsi::gsi_candidate_request::GsiCandidateRequest;
 use crate::gsi::logical_view::extract_logical_view;
 use crate::gsi::signed_vbmeta::SignedVbmeta;
+use crate::gsi::stock_system::require_stock_front2_system;
 use crate::gsi::stock_top::require_stock_front2_top;
 use crate::gsi::system_vbmeta::build_system_vbmeta;
 use crate::gsi::top_vbmeta::build_top_vbmeta;
@@ -148,6 +149,7 @@ fn assemble(request: &GsiCandidateRequest<'_>, manifest: &BackupManifest) -> Res
         manifest.verified_partition(&target_name(toss_front2::CHAINED_VBMETA_BASE))?;
     require_stock_front2_top(&VbmetaSource::read(&stock_top.path)?)?
         .require_accepted(request.accepted_untested_build)?;
+    require_stock_front2_system(&VbmetaSource::read(&stock_chained.path)?)?;
 
     let original_super = manifest.partition(SUPER_PARTITION)?;
     let (gsi_bytes, gsi_sha256) = sha256_file(request.gsi_image)?;

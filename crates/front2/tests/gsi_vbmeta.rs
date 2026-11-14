@@ -6,7 +6,7 @@ use front2::gpt::BootSlot;
 use front2::gsi::{
     GsiCandidate, GsiCandidateRequest, RawDescriptor, RollbackEvidence, StockBuild, VbmetaSource,
     VbmetaTemplate, backup_stock_build, build_system_vbmeta, build_top_vbmeta,
-    require_stock_front2_top,
+    require_stock_front2_system, require_stock_front2_top,
 };
 use front2::profiles::toss_front2::PROFILE;
 use front2::top_signature::verify_top_signature;
@@ -17,6 +17,9 @@ const STOCK_ROLLBACK: u64 = 1_700_000_000;
 const SYSTEM_ROLLBACK: u64 = 1_710_000_000;
 const OTHER_KEY: &str = "testkey_rsa8192";
 const OTHER_ALGORITHM: &str = "SHA256_RSA8192";
+const STOCK_SYSTEM: &str = "qti/qssi/qssi:13/TKQ1.230110.001/475:user/dev-keys";
+const GSI_SYSTEM: &str =
+    "generic/lineage_gsi_arm64_gN/lineage_gsi_arm64:13/TQ3A.230901.001/1:userdebug/test-keys";
 
 struct Source<'a> {
     key_spec: &'a str,
@@ -141,7 +144,7 @@ fn stock_system() -> Source<'static> {
         rollback_index: SYSTEM_ROLLBACK,
         flags: 0,
         properties: vec![
-            ("com.android.build.system.fingerprint", "stock/475"),
+            ("com.android.build.system.fingerprint", STOCK_SYSTEM),
             ("com.android.build.product.fingerprint", "stock/475"),
             ("com.android.build.system_ext.fingerprint", "stock/475"),
         ],
@@ -558,6 +561,73 @@ fn the_stock_top_refusal_tells_the_fingerprints_of_the_backup() {
             "{message}"
         );
     }
+}
+
+fn stock_system_with(fingerprint: &str) -> Source<'_> {
+    Source {
+        key_spec: "testkey_rsa2048",
+        algorithm: "SHA256_RSA2048",
+        rollback_index: SYSTEM_ROLLBACK,
+        flags: 0,
+        properties: vec![("com.android.build.system.fingerprint", fingerprint)],
+        descriptors: vec![hashtree("system", 10)],
+        chains: Vec::new(),
+    }
+}
+
+fn system_without_fingerprint() -> Source<'static> {
+    Source {
+        key_spec: "testkey_rsa2048",
+        algorithm: "SHA256_RSA2048",
+        rollback_index: SYSTEM_ROLLBACK,
+        flags: 0,
+        properties: vec![("com.android.build.product.fingerprint", "stock/475")],
+        descriptors: vec![hashtree("system", 10)],
+        chains: Vec::new(),
+    }
+}
+
+fn read_system(source: &Source<'_>) -> front2::Result<()> {
+    let bench = Bench::new();
+    let path = bench.path("vbmeta_system.bin");
+    source.write(&path);
+    require_stock_front2_system(&VbmetaSource::read(&path)?)
+}
+
+#[test]
+fn the_stock_system_passes_a_qti_fingerprint() {
+    read_system(&stock_system()).expect("the stock system passes");
+    read_system(&stock_system_with(
+        "qti/qssi/qssi:13/TKQ1.230110.001/468:user/dev-keys",
+    ))
+    .expect("another stock build passes");
+}
+
+#[test]
+fn a_gsi_or_a_broken_system_fingerprint_is_refused() {
+    for refused in [
+        GSI_SYSTEM,
+        "qti/qssi/qssi:13/TKQ1.230110.001/:user/dev-keys",
+        "qti/qssi/qssi:13/TKQ1.230110.001/46x:user/dev-keys",
+        "qti/qssi/qssi:13/TKQ1.230110.001/475:user/release-keys",
+    ] {
+        let error = read_system(&stock_system_with(refused)).expect_err(refused);
+        assert!(
+            matches!(error, front2::Front2Error::Unsupported(_)),
+            "{refused}: {error}"
+        );
+        assert!(
+            error.to_string().contains("not the form"),
+            "{refused}: {error}"
+        );
+    }
+    let missing = read_system(&system_without_fingerprint()).expect_err("no system fingerprint");
+    assert!(
+        missing
+            .to_string()
+            .contains("no com.android.build.system.fingerprint"),
+        "{missing}"
+    );
 }
 
 fn write_vbmeta_backup(backup: &Path, stock_top: &Source<'_>) {
