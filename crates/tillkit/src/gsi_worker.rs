@@ -21,7 +21,7 @@ const CANDIDATE_PREFIX: &str = "gsi-";
 const PLAN_PREFIX: &str = "install-";
 const BACKUP_NOT_READ: &str = "이 이미지로 만든 계획이 쓰던 전체 백업을 읽지 못했습니다. 그 폴더를 읽을 수 있게 한 뒤에 MAKE PLAN을 다시 누르거나, USE EXISTING BACKUP으로 쓸 전체 백업을 직접 골라 주세요.";
 const BACKUP_SLOTS_UNSUPPORTED: &str = "이 전체 백업으로는 설치 계획을 만들 수 없습니다. 설치는 부팅 슬롯을 A에서 B로 바꾸는데, 이 백업의 파티션 표는 그 전환을 할 수 있는 상태(슬롯 A만 활성)와 맞지 않습니다. 순정 상태에서 만들어 둔 전체 백업이 있으면 USE EXISTING BACKUP으로 그 폴더를 골라 주세요.";
-const BACKUP_STARTS_FROM_SLOT_B: &str = "이 전체 백업을 만든 기기는 부팅 슬롯이 B로 표시된 상태입니다. TillKit의 GSI 설치는 부팅 슬롯을 A에서 B로 바꾸는 것만 할 수 있어서, 이 상태의 기기에는 아직 설치할 수 없습니다. 이미 GSI를 설치한 기기에서 만든 백업이라면, 순정 상태에서 만들어 둔 전체 백업을 USE EXISTING BACKUP으로 골라 주세요. 순정 기기의 부팅 슬롯이 B인 경우는 TillKit이 아직 지원하지 않습니다.";
+const NOT_STOCK_SLOT_B: &str = "이 전체 백업은 TillKit이 제자리에 GSI를 설치할 수 있는 순정 부팅 슬롯 B 상태가 아닙니다. 뒤에 적힌 이유를 확인해 주세요. 이미 GSI를 설치한 기기에서 만든 백업이라면, 순정 상태에서 만들어 둔 전체 백업을 USE EXISTING BACKUP으로 골라 주세요.";
 
 pub fn prepare(
     paths: &DataPaths,
@@ -32,17 +32,26 @@ pub fn prepare(
     accepted_build: Option<&str>,
 ) -> Result<PreparedInstall> {
     if let Some(stored) = stored(paths, backup, backup_is_found, gsi_image)? {
-        let build = backup_stock_build(&stored.plan.backup_directory, BootSlot::A);
+        let build = backup_stock_build(&stored.plan.backup_directory, stored.plan.stock_slot);
         return Ok(planned(stored, build));
     }
-    require_switchable_slots(backup)?;
-    let build = backup_stock_build(backup, BootSlot::A)?;
+    let stock_slot = require_installable_slot(backup)?;
+    let build = backup_stock_build(backup, stock_slot)?;
     if let Some(fingerprint) = build.unaccepted_fingerprint(accepted_build) {
         return Ok(PreparedInstall::UntestedBuild(fingerprint.to_string()));
     }
-    let review = build_candidate(paths, backup, gsi_image, profile, accepted_build)?;
+    let review = build_candidate(
+        paths,
+        backup,
+        gsi_image,
+        profile,
+        accepted_build,
+        stock_slot,
+    );
+    let review = told_if_not_stock_b(stock_slot, review)?;
     let install = plan_install(paths, &review, backup, profile);
-    let install = removed_on_failure(&review.directory, install)?;
+    let install = removed_on_failure(&review.directory, install);
+    let install = told_if_not_stock_b(stock_slot, install)?;
     Ok(planned(install, Ok(build)))
 }
 
@@ -51,17 +60,12 @@ fn planned(review: InstallReview, build: Result<StockBuild>) -> PreparedInstall 
     PreparedInstall::Planned(Box::new(InstallReview { build, ..review }))
 }
 
-fn require_switchable_slots(backup: &Path) -> Result<()> {
+fn require_installable_slot(backup: &Path) -> Result<BootSlot> {
     let slot = told_as_unsupported_slots(backup_boot_slot(backup))?;
-    require_slot_a(slot)?;
-    told_as_unsupported_slots(require_slot_a_active(backup))
-}
-
-fn require_slot_a(slot: BootSlot) -> Result<()> {
-    match slot {
-        BootSlot::A => Ok(()),
-        BootSlot::B => Err(Front2Error::Plan(BACKUP_STARTS_FROM_SLOT_B.into())),
+    if slot == BootSlot::A {
+        told_as_unsupported_slots(require_slot_a_active(backup))?;
     }
+    Ok(slot)
 }
 
 fn told_as_unsupported_slots<Value>(result: Result<Value>) -> Result<Value> {
@@ -70,6 +74,15 @@ fn told_as_unsupported_slots<Value>(result: Result<Value>) -> Result<Value> {
             "{BACKUP_SLOTS_UNSUPPORTED} ({reason})"
         ))),
         other => other,
+    }
+}
+
+fn told_if_not_stock_b<Value>(stock_slot: BootSlot, result: Result<Value>) -> Result<Value> {
+    match (stock_slot, result) {
+        (BootSlot::B, Err(Front2Error::Unsupported(reason))) => {
+            Err(Front2Error::Plan(format!("{NOT_STOCK_SLOT_B} ({reason})")))
+        }
+        (_, other) => other,
     }
 }
 
@@ -166,6 +179,7 @@ fn build_candidate(
     gsi_image: &Path,
     profile: &DeviceProfile,
     accepted_build: Option<&str>,
+    stock_slot: BootSlot,
 ) -> Result<GsiReview> {
     let root = paths.gsi_candidates();
     std::fs::create_dir_all(&root)?;
@@ -177,7 +191,7 @@ fn build_candidate(
         output_directory: &directory,
         rollback_evidence: &[],
         accepted_untested_build: accepted_build,
-        stock_slot: BootSlot::A,
+        stock_slot,
     };
     let candidate = GsiCandidate::build(&request)?;
     let review = reviewed_candidate(directory.clone(), &candidate);
@@ -294,13 +308,21 @@ mod tests {
     }
 
     #[test]
-    fn a_backup_that_starts_from_slot_b_is_told_apart_from_other_slot_states() {
-        require_slot_a(BootSlot::A).expect("slot A is the slot that the installation starts from");
-        let told = require_slot_a(BootSlot::B).expect_err("slot B is not used");
+    fn a_slot_b_backup_that_is_not_a_stock_slot_b_is_told_in_plain_words() {
+        let reason = "LUN 4: boot_a has the active flag".to_string();
+        let told =
+            told_if_not_stock_b::<()>(BootSlot::B, Err(Front2Error::Unsupported(reason.clone())))
+                .expect_err("a slot B backup that is not a tidy stock slot B is not used");
         assert!(matches!(told, Front2Error::Plan(_)), "{told}");
         let text = told.to_string();
-        assert!(text.contains(BACKUP_STARTS_FROM_SLOT_B), "{text}");
-        assert!(!text.contains(BACKUP_SLOTS_UNSUPPORTED), "{text}");
+        assert!(text.contains(NOT_STOCK_SLOT_B), "{text}");
+        assert!(text.contains(&reason), "{text}");
+
+        let kept =
+            told_if_not_stock_b::<()>(BootSlot::A, Err(Front2Error::Unsupported("other".into())))
+                .expect_err("a slot A failure stays as it is");
+        assert!(matches!(kept, Front2Error::Unsupported(_)), "{kept}");
+        assert!(told_if_not_stock_b(BootSlot::B, Ok(7)).is_ok());
     }
 
     #[test]
