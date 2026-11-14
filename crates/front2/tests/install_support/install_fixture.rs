@@ -102,7 +102,7 @@ impl InstallFixture {
         let directory = TempDir::new().expect("temporary directory");
         let backup_directory = directory.path().join(BACKUP_FOLDER);
         let candidate_directory = directory.path().join(CANDIDATE_FOLDER);
-        let copies = gpt_copies(super_sectors, distinct_boot_lun_tables);
+        let copies = gpt_copies(super_sectors, distinct_boot_lun_tables, stock_slot);
         let mut storage = MockStorage::new(LUN_COUNT, LAST_LBA + 1);
         if stock_slot == BootSlot::B {
             storage.start_with_boot_lun(STOCK_B_BOOT_LUN);
@@ -194,9 +194,20 @@ fn write_file(path: &Path, data: &[u8]) {
     fs::write(path, data).expect("file");
 }
 
-fn tables(distinct_boot_lun_tables: bool) -> Vec<SyntheticGpt> {
-    let boot_lun_table = |name: &str| {
-        let named = SyntheticGpt::empty().with_entry(name, 0);
+fn tables(distinct_boot_lun_tables: bool, stock_slot: BootSlot) -> Vec<SyntheticGpt> {
+    let pair = |active: u64, inactive: u64| match stock_slot {
+        BootSlot::A => (active, inactive),
+        BootSlot::B => (inactive, active),
+    };
+    let (boot_a_flags, boot_b_flags) = pair(0x0077 << 48, 0x00c3 << 48);
+    let (vbmeta_a_flags, vbmeta_b_flags) = pair(ACTIVE_SLOT_FLAGS, INACTIVE_SLOT_FLAGS);
+    let (system_a_flags, system_b_flags) = pair(ACTIVE_SLOT_FLAGS, INACTIVE_SLOT_FLAGS);
+    let xbl_b_flags = match stock_slot {
+        BootSlot::A => 0,
+        BootSlot::B => ACTIVE_SLOT_FLAGS,
+    };
+    let boot_lun_table = |name: &str, flags: u64| {
+        let named = SyntheticGpt::empty().with_entry(name, flags);
         if distinct_boot_lun_tables {
             named
         } else {
@@ -205,20 +216,20 @@ fn tables(distinct_boot_lun_tables: bool) -> Vec<SyntheticGpt> {
     };
     vec![
         SyntheticGpt::empty()
-            .with_entry("vbmeta_system_a", ACTIVE_SLOT_FLAGS)
-            .with_entry("vbmeta_system_b", INACTIVE_SLOT_FLAGS)
+            .with_entry("vbmeta_system_a", system_a_flags)
+            .with_entry("vbmeta_system_b", system_b_flags)
             .with_entry("metadata", 0)
             .with_entry("misc", 0)
             .with_entry("userdata", 0)
             .with_entry("super", 0),
-        boot_lun_table("xbl_a"),
-        boot_lun_table("xbl_b"),
+        boot_lun_table("xbl_a", 0),
+        boot_lun_table("xbl_b", xbl_b_flags),
         SyntheticGpt::empty().with_entry("cdt", 0),
         SyntheticGpt::empty()
-            .with_entry("boot_a", 0x0077 << 48)
-            .with_entry("boot_b", 0x00c3 << 48)
-            .with_entry("vbmeta_a", ACTIVE_SLOT_FLAGS)
-            .with_entry("vbmeta_b", INACTIVE_SLOT_FLAGS)
+            .with_entry("boot_a", boot_a_flags)
+            .with_entry("boot_b", boot_b_flags)
+            .with_entry("vbmeta_a", vbmeta_a_flags)
+            .with_entry("vbmeta_b", vbmeta_b_flags)
             .with_entry("dtbo_b", INACTIVE_SLOT_FLAGS)
             .with_entry("init_boot_b", INACTIVE_SLOT_FLAGS)
             .with_entry("recovery_b", INACTIVE_SLOT_FLAGS)
@@ -227,8 +238,12 @@ fn tables(distinct_boot_lun_tables: bool) -> Vec<SyntheticGpt> {
     ]
 }
 
-fn gpt_copies(super_sectors: u64, distinct_boot_lun_tables: bool) -> Vec<(Vec<u8>, Vec<u8>)> {
-    let mut copies: Vec<(Vec<u8>, Vec<u8>)> = tables(distinct_boot_lun_tables)
+fn gpt_copies(
+    super_sectors: u64,
+    distinct_boot_lun_tables: bool,
+    stock_slot: BootSlot,
+) -> Vec<(Vec<u8>, Vec<u8>)> {
+    let mut copies: Vec<(Vec<u8>, Vec<u8>)> = tables(distinct_boot_lun_tables, stock_slot)
         .iter()
         .map(|table| (table.main(), table.backup()))
         .collect();
