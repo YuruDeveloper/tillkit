@@ -9,8 +9,8 @@ use front2::gsi::{
     gsi_candidate::{CANDIDATE_FILE, SUPER_FILE, VIEW_DIRECTORY},
 };
 use front2::super_image::{
-    SuperCandidateRequest, SuperLayoutPlan, SuperVerificationRequest, build_super_candidate,
-    verify_super_candidate,
+    SuperCandidateRequest, SuperLayoutPlan, SuperSlot, SuperVerificationRequest,
+    build_super_candidate, verify_super_candidate,
 };
 use serde_json::{Value, json};
 use std::path::{Path, PathBuf};
@@ -190,7 +190,8 @@ fn the_logical_view_holds_the_partitions_of_the_verified_candidate() {
     std::fs::write(&gsi, gsi_image(GSI_BYTES)).expect("write the GSI");
     let gsi_sha256 = sha256_file(&gsi).expect("GSI digest").1;
     let candidate = directory.path().join(SUPER_FILE);
-    let plan = SuperLayoutPlan::from_super_file(&original, GSI_BYTES).expect("plan");
+    let plan = SuperLayoutPlan::from_super_file(&original, GSI_BYTES, &SuperSlot::new(BootSlot::B))
+        .expect("plan");
     build_super_candidate(
         &SuperCandidateRequest {
             original_super: &original,

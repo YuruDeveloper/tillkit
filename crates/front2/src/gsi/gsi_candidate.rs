@@ -18,7 +18,7 @@ use crate::image_record::ImageRecord;
 use crate::profile;
 use crate::profiles::toss_front2;
 use crate::super_image::{
-    SuperCandidateRequest, SuperLayoutPlan, SuperVerification, SuperVerificationRequest,
+    SuperCandidateRequest, SuperLayoutPlan, SuperSlot, SuperVerification, SuperVerificationRequest,
     build_super_candidate, verify_super_candidate,
 };
 use serde::{Deserialize, Serialize};
@@ -263,7 +263,8 @@ fn assemble(request: &GsiCandidateRequest<'_>, manifest: &BackupManifest) -> Res
     let (gsi_bytes, gsi_sha256) = sha256_file(request.gsi_image)?;
     let directory = request.output_directory;
     let super_path = directory.join(SUPER_FILE);
-    let plan = SuperLayoutPlan::from_super_file(&original_super.path, gsi_bytes)?;
+    let super_slot = SuperSlot::new(request.target_slot);
+    let plan = SuperLayoutPlan::from_super_file(&original_super.path, gsi_bytes, &super_slot)?;
     build_super_candidate(
         &SuperCandidateRequest {
             original_super: &original_super.path,

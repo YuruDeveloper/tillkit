@@ -2,10 +2,11 @@ mod super_support;
 
 use front2::Front2Error;
 use front2::digest::{sha256_bytes, sha256_file};
+use front2::gpt::BootSlot;
 use front2::super_image::{
     ByteRange, LpGeometry, LpMetadata, PartitionOverlap, PartitionSummary, PlannedExtent,
     RebuiltMetadata, RetainedPartition, SuperCandidateReport, SuperCandidateRequest,
-    SuperLayoutPlan, SuperVerification, SuperVerificationRequest, build_super_candidate,
+    SuperLayoutPlan, SuperSlot, SuperVerification, SuperVerificationRequest, build_super_candidate,
     verify_super_candidate,
 };
 use serde_json::Value;
@@ -23,6 +24,10 @@ const FREE_ALIGNED_SECTORS: u64 = 12928;
 const TARGET_SLOT: u32 = 1;
 const REAL_GSI_BYTES: u64 = 3_102_658_560;
 const BACKUP_GEOMETRY_OFFSET: usize = 8192;
+
+fn slot_b() -> SuperSlot {
+    SuperSlot::new(BootSlot::B)
+}
 
 fn written(synthetic: &SyntheticSuper) -> (TempDir, PathBuf) {
     let directory = tempfile::tempdir().expect("tempdir");
@@ -56,7 +61,7 @@ fn built_candidate() -> (TempDir, PathBuf, PathBuf, SuperCandidateReport, String
     let (_, gsi_sha256) = sha256_file(&gsi).expect("GSI digest");
     let (_, original_sha256) = sha256_file(&original).expect("original digest");
     let candidate = directory.path().join("candidate.img");
-    let plan = SuperLayoutPlan::from_super_file(&original, GSI_BYTES).expect("plan");
+    let plan = SuperLayoutPlan::from_super_file(&original, GSI_BYTES, &slot_b()).expect("plan");
     let request = SuperCandidateRequest {
         original_super: &original,
         original_super_sha256: &original_sha256,
@@ -89,12 +94,14 @@ fn flip(path: &Path, offset: u64) {
 
 fn plan_error(synthetic: &SyntheticSuper, gsi_bytes: u64) -> Front2Error {
     let (_directory, path) = written(synthetic);
-    SuperLayoutPlan::from_super_file(&path, gsi_bytes).expect_err("the plan must be rejected")
+    SuperLayoutPlan::from_super_file(&path, gsi_bytes, &slot_b())
+        .expect_err("the plan must be rejected")
 }
 
 fn image_error(image: &[u8]) -> String {
     let (_directory, path) = written_image(image);
-    let error = SuperLayoutPlan::from_super_file(&path, GSI_BYTES).expect_err("damaged super");
+    let error =
+        SuperLayoutPlan::from_super_file(&path, GSI_BYTES, &slot_b()).expect_err("damaged super");
     assert!(matches!(error, Front2Error::Image(_)), "{error}");
     error.to_string()
 }
@@ -102,7 +109,7 @@ fn image_error(image: &[u8]) -> String {
 #[test]
 fn plan_places_the_gsi_in_the_free_aligned_ranges_of_slot_b() {
     let (_directory, path) = written(&SyntheticSuper::standard());
-    let plan = SuperLayoutPlan::from_super_file(&path, GSI_BYTES).expect("plan");
+    let plan = SuperLayoutPlan::from_super_file(&path, GSI_BYTES, &slot_b()).expect("plan");
     let retained = [
         ("odm_b", 64),
         ("product_b", 384),
@@ -128,7 +135,7 @@ fn plan_places_the_gsi_in_the_free_aligned_ranges_of_slot_b() {
         planned(&[(2176, 1024), (3584, 3072), (7424, 512)])
     );
     assert_eq!(plan.retained, retained);
-    assert_eq!(plan.original_a_overlaps, overlaps);
+    assert_eq!(plan.opposite_overlaps, overlaps);
     assert_eq!(plan.gsi_bytes, GSI_BYTES);
     assert_eq!(plan.super_bytes, SUPER_BYTES);
     assert_eq!(plan.alignment_bytes, ALIGNMENT_BYTES);
@@ -138,10 +145,45 @@ fn plan_places_the_gsi_in_the_free_aligned_ranges_of_slot_b() {
 }
 
 #[test]
+fn plan_places_the_gsi_in_the_free_aligned_ranges_of_slot_a() {
+    let (_directory, path) = written(&SyntheticSuper::standard());
+    let plan = SuperLayoutPlan::from_super_file(&path, GSI_BYTES, &SuperSlot::new(BootSlot::A))
+        .expect("plan");
+    let retained = [
+        ("odm_a", 64),
+        ("product_a", 384),
+        ("system_dlkm_a", 8),
+        ("vendor_a", 512),
+        ("vendor_dlkm_a", 256),
+    ]
+    .map(|(name, sectors)| RetainedPartition {
+        name: name.to_string(),
+        bytes: sectors * SECTOR,
+    });
+    let overlaps = [
+        ("system_b", 1536),
+        ("system_ext_b", 2048),
+        ("system_b-cow", 128),
+    ]
+    .map(|(partition, sectors)| PartitionOverlap {
+        partition: partition.to_string(),
+        overlap_bytes: sectors * SECTOR,
+    });
+    assert_eq!(
+        plan.allocation,
+        planned(&[(2176, 1024), (3584, 3072), (7424, 512)])
+    );
+    assert_eq!(plan.retained, retained);
+    assert_eq!(plan.opposite_overlaps, overlaps);
+    assert_eq!(plan.used_bytes, RETAINED_BYTES + GSI_BYTES);
+    assert_eq!(plan.group_maximum_bytes, GROUP_MAXIMUM_BYTES);
+}
+
+#[test]
 fn plan_accepts_a_gsi_that_exactly_fills_the_group() {
     let (_directory, path) = written(&SyntheticSuper::standard());
     let gsi_bytes = GROUP_MAXIMUM_BYTES - RETAINED_BYTES;
-    let plan = SuperLayoutPlan::from_super_file(&path, gsi_bytes).expect("plan");
+    let plan = SuperLayoutPlan::from_super_file(&path, gsi_bytes, &slot_b()).expect("plan");
     assert_eq!(plan.used_bytes, GROUP_MAXIMUM_BYTES);
     assert_eq!(
         plan.allocation
@@ -300,7 +342,7 @@ fn primary_and_backup_metadata_must_be_identical() {
 #[test]
 fn rebuilt_metadata_keeps_six_partitions_and_replaces_system() {
     let (_directory, path) = written(&SyntheticSuper::standard());
-    let plan = SuperLayoutPlan::from_super_file(&path, GSI_BYTES).expect("plan");
+    let plan = SuperLayoutPlan::from_super_file(&path, GSI_BYTES, &slot_b()).expect("plan");
     let rebuilt = RebuiltMetadata::from_super_file(&path, &plan).expect("rebuilt");
     let decoded = LpMetadata::decode(&rebuilt.blob).expect("decode the rebuilt metadata");
     let mut file = std::fs::File::open(&path).expect("open");
@@ -384,7 +426,7 @@ fn rebuilt_metadata_keeps_six_partitions_and_replaces_system() {
 #[test]
 fn rebuilt_metadata_rejects_a_plan_for_another_super() {
     let (_directory, path) = written(&SyntheticSuper::standard());
-    let plan = SuperLayoutPlan::from_super_file(&path, GSI_BYTES).expect("plan");
+    let plan = SuperLayoutPlan::from_super_file(&path, GSI_BYTES, &slot_b()).expect("plan");
 
     let mut other_size = plan.clone();
     other_size.super_bytes += 4096;
@@ -489,7 +531,7 @@ fn candidate_refuses_an_existing_output_and_wrong_digests() {
     std::fs::write(&gsi, gsi_image(GSI_BYTES)).expect("write the GSI");
     let (_, gsi_sha256) = sha256_file(&gsi).expect("GSI digest");
     let (_, original_sha256) = sha256_file(&original).expect("original digest");
-    let plan = SuperLayoutPlan::from_super_file(&original, GSI_BYTES).expect("plan");
+    let plan = SuperLayoutPlan::from_super_file(&original, GSI_BYTES, &slot_b()).expect("plan");
     let wrong = "0".repeat(64);
     let output = directory.path().join("candidate.img");
     let request = SuperCandidateRequest {
@@ -514,7 +556,8 @@ fn candidate_refuses_an_existing_output_and_wrong_digests() {
     assert!(build_super_candidate(&wrong_original, &plan).is_err());
     assert!(!output.exists(), "a failed candidate is removed");
 
-    let larger_plan = SuperLayoutPlan::from_super_file(&original, GSI_BYTES + 4096).expect("plan");
+    let larger_plan =
+        SuperLayoutPlan::from_super_file(&original, GSI_BYTES + 4096, &slot_b()).expect("plan");
     assert!(build_super_candidate(&request, &larger_plan).is_err());
     assert!(!output.exists());
 
@@ -593,7 +636,7 @@ fn with_checksum(record: &mut [u8], checksum_offset: usize) {
 fn letter_1130_item_1_a_damaged_backup_geometry_is_rejected_before_the_candidate() {
     let image = SyntheticSuper::standard().image();
     let (_directory, valid) = written_image(&image);
-    let plan = SuperLayoutPlan::from_super_file(&valid, GSI_BYTES).expect("plan");
+    let plan = SuperLayoutPlan::from_super_file(&valid, GSI_BYTES, &slot_b()).expect("plan");
 
     let mut damaged = image.clone();
     damaged[BACKUP_GEOMETRY_OFFSET + 40] ^= 0x01;
@@ -690,7 +733,8 @@ fn real_super_matches_the_recorded_evidence_when_available() {
     let reference = std::fs::read(prepared.join("slot1-metadata-dry-run.bin")).expect("reference");
     assert_eq!(layout["assumed_gsi_bytes"], REAL_GSI_BYTES);
 
-    let plan = SuperLayoutPlan::from_super_file(&super_image, REAL_GSI_BYTES).expect("plan");
+    let plan =
+        SuperLayoutPlan::from_super_file(&super_image, REAL_GSI_BYTES, &slot_b()).expect("plan");
     assert_eq!(
         plan.allocation,
         parsed::<Vec<PlannedExtent>>(&layout["allocation"])
@@ -700,7 +744,7 @@ fn real_super_matches_the_recorded_evidence_when_available() {
         parsed::<Vec<RetainedPartition>>(&layout["retained"])
     );
     assert_eq!(
-        plan.original_a_overlaps,
+        plan.opposite_overlaps,
         parsed::<Vec<PartitionOverlap>>(&layout["original_a_overlaps"])
     );
     assert_eq!(layout["super_bytes"], plan.super_bytes);
@@ -715,7 +759,7 @@ fn real_super_matches_the_recorded_evidence_when_available() {
         "plan equals proposed-super-layout.json: {} extents, {} retained, {} overlaps",
         plan.allocation.len(),
         plan.retained.len(),
-        plan.original_a_overlaps.len()
+        plan.opposite_overlaps.len()
     );
 
     let rebuilt = RebuiltMetadata::from_super_file(&super_image, &plan).expect("rebuilt");
