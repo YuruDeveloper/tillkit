@@ -9,7 +9,7 @@ use front2::digest::sha256_file;
 use front2::gpt::BootSlot;
 use front2::gsi::{
     GsiCandidate, GsiCandidateRequest, StockBuild, backup_boot_slot, backup_stock_build,
-    install_inputs, require_slot_a_active,
+    find_testkey_slot, install_inputs, install_source_slot, require_slot_a_active,
 };
 use front2::install::{InstallPlan, PLAN_FILE};
 use front2::{DeviceProfile, Front2Error, Result};
@@ -32,11 +32,13 @@ pub fn prepare(
     accepted_build: Option<&str>,
 ) -> Result<PreparedInstall> {
     if let Some(stored) = stored(paths, backup, backup_is_found, gsi_image)? {
-        let build = backup_stock_build(&stored.plan.backup_directory, stored.plan.stock_slot);
+        let source_slot = install_source_slot(stored.plan.stock_slot, stored.plan.target_slot)?;
+        let build = backup_stock_build(&stored.plan.backup_directory, source_slot);
         return Ok(planned(stored, build));
     }
-    let stock_slot = require_installable_slot(backup)?;
-    let build = backup_stock_build(backup, stock_slot)?;
+    let (stock_slot, target_slot) = installable_slots(backup)?;
+    let source_slot = install_source_slot(stock_slot, target_slot)?;
+    let build = backup_stock_build(backup, source_slot)?;
     if let Some(fingerprint) = build.unaccepted_fingerprint(accepted_build) {
         return Ok(PreparedInstall::UntestedBuild(fingerprint.to_string()));
     }
@@ -47,11 +49,12 @@ pub fn prepare(
         profile,
         accepted_build,
         stock_slot,
+        target_slot,
     );
-    let review = told_if_not_stock_b(stock_slot, review)?;
+    let review = told_if_not_stock_b(stock_slot, target_slot, review)?;
     let install = plan_install(paths, &review, backup, profile);
     let install = removed_on_failure(&review.directory, install);
-    let install = told_if_not_stock_b(stock_slot, install)?;
+    let install = told_if_not_stock_b(stock_slot, target_slot, install)?;
     Ok(planned(install, Ok(build)))
 }
 
@@ -60,12 +63,24 @@ fn planned(review: InstallReview, build: Result<StockBuild>) -> PreparedInstall 
     PreparedInstall::Planned(Box::new(InstallReview { build, ..review }))
 }
 
-fn require_installable_slot(backup: &Path) -> Result<BootSlot> {
-    let slot = told_as_unsupported_slots(backup_boot_slot(backup))?;
-    if slot == BootSlot::A {
+fn installable_slots(backup: &Path) -> Result<(BootSlot, BootSlot)> {
+    let stock_slot = told_as_unsupported_slots(backup_boot_slot(backup))?;
+    let target_slot = install_target_slot(backup)?;
+    if stock_slot == BootSlot::A && target_slot == BootSlot::B {
         told_as_unsupported_slots(require_slot_a_active(backup))?;
     }
-    Ok(slot)
+    Ok((stock_slot, target_slot))
+}
+
+// The install target is the slot that holds a test key signature, because the
+// tool can only reproduce the test key. The kk device holds the test key on
+// slot A. A stock backup holds no test key slot, so the target is slot B.
+fn install_target_slot(backup: &Path) -> Result<BootSlot> {
+    match find_testkey_slot(backup) {
+        Ok(slot) => Ok(slot),
+        Err(Front2Error::Unsupported(_)) => Ok(BootSlot::B),
+        Err(other) => Err(other),
+    }
 }
 
 fn told_as_unsupported_slots<Value>(result: Result<Value>) -> Result<Value> {
@@ -77,12 +92,16 @@ fn told_as_unsupported_slots<Value>(result: Result<Value>) -> Result<Value> {
     }
 }
 
-fn told_if_not_stock_b<Value>(stock_slot: BootSlot, result: Result<Value>) -> Result<Value> {
-    match (stock_slot, result) {
-        (BootSlot::B, Err(Front2Error::Unsupported(reason))) => {
+fn told_if_not_stock_b<Value>(
+    stock_slot: BootSlot,
+    target_slot: BootSlot,
+    result: Result<Value>,
+) -> Result<Value> {
+    match (stock_slot, target_slot, result) {
+        (BootSlot::B, BootSlot::B, Err(Front2Error::Unsupported(reason))) => {
             Err(Front2Error::Plan(format!("{NOT_STOCK_SLOT_B} ({reason})")))
         }
-        (_, other) => other,
+        (_, _, other) => other,
     }
 }
 
@@ -180,6 +199,7 @@ fn build_candidate(
     profile: &DeviceProfile,
     accepted_build: Option<&str>,
     stock_slot: BootSlot,
+    target_slot: BootSlot,
 ) -> Result<GsiReview> {
     let root = paths.gsi_candidates();
     std::fs::create_dir_all(&root)?;
@@ -192,7 +212,7 @@ fn build_candidate(
         rollback_evidence: &[],
         accepted_untested_build: accepted_build,
         stock_slot,
-        target_slot: BootSlot::B,
+        target_slot,
     };
     let candidate = GsiCandidate::build(&request)?;
     let review = reviewed_candidate(directory.clone(), &candidate);
@@ -311,19 +331,34 @@ mod tests {
     #[test]
     fn a_slot_b_backup_that_is_not_a_stock_slot_b_is_told_in_plain_words() {
         let reason = "LUN 4: boot_a has the active flag".to_string();
-        let told =
-            told_if_not_stock_b::<()>(BootSlot::B, Err(Front2Error::Unsupported(reason.clone())))
-                .expect_err("a slot B backup that is not a tidy stock slot B is not used");
+        let told = told_if_not_stock_b::<()>(
+            BootSlot::B,
+            BootSlot::B,
+            Err(Front2Error::Unsupported(reason.clone())),
+        )
+        .expect_err("a slot B backup that is not a tidy stock slot B is not used");
         assert!(matches!(told, Front2Error::Plan(_)), "{told}");
         let text = told.to_string();
         assert!(text.contains(NOT_STOCK_SLOT_B), "{text}");
         assert!(text.contains(&reason), "{text}");
 
-        let kept =
-            told_if_not_stock_b::<()>(BootSlot::A, Err(Front2Error::Unsupported("other".into())))
-                .expect_err("a slot A failure stays as it is");
+        let kept = told_if_not_stock_b::<()>(
+            BootSlot::A,
+            BootSlot::B,
+            Err(Front2Error::Unsupported("other".into())),
+        )
+        .expect_err("a slot A failure stays as it is");
         assert!(matches!(kept, Front2Error::Unsupported(_)), "{kept}");
-        assert!(told_if_not_stock_b(BootSlot::B, Ok(7)).is_ok());
+
+        let switch = told_if_not_stock_b::<()>(
+            BootSlot::B,
+            BootSlot::A,
+            Err(Front2Error::Unsupported("other".into())),
+        )
+        .expect_err("a slot B to slot A failure stays as it is");
+        assert!(matches!(switch, Front2Error::Unsupported(_)), "{switch}");
+
+        assert!(told_if_not_stock_b(BootSlot::B, BootSlot::B, Ok(7)).is_ok());
     }
 
     #[test]
