@@ -139,6 +139,14 @@ fn the_target_b_plan_omits_the_target_slot_field_and_a_target_a_plan_records_it(
 }
 
 #[test]
+fn an_install_plan_for_target_slot_a_is_rejected_at_validation() {
+    let fixture = InstallFixture::standard();
+    let mut plan = InstallPlan::build(&fixture.inputs).expect("plan");
+    plan.target_slot = BootSlot::A;
+    rejection(plan.validate(), "target slot A");
+}
+
+#[test]
 fn a_stock_b_first_install_writes_five_regions_and_sends_no_boot_lun_command() {
     let mut fixture = InstallFixture::stock_b();
     let plan = fixture.stored_plan();

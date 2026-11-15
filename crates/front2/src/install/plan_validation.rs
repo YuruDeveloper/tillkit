@@ -6,15 +6,16 @@ use crate::install::install_plan::InstallPlan;
 use crate::install::install_step::InstallStep;
 use crate::install::layout::{
     BOOT_WLUN, GPT_LUN_COUNT, GPT_STEP_ORDER, KEEP_BOOT_LUN_STEP_NAME, METADATA_PARTITION,
-    MISC_PARTITION, NEW_BOOT_LUN, ORIGINAL_BOOT_LUN, PLAN_SCHEMA, SET_BOOT_LUN_STEP_NAME,
-    USERDATA_PARTITION, gpt_step_name, require_plain_file_name, require_relative_file,
-    sectors_to_bytes, write_step_names,
+    MISC_PARTITION, PLAN_SCHEMA, SET_BOOT_LUN_STEP_NAME, USERDATA_PARTITION, boot_lun_pair,
+    gpt_step_name, require_plain_file_name, require_relative_file, sectors_to_bytes,
+    write_step_names,
 };
 use crate::install::restore_entry::RestoreEntry;
 use crate::install::step_source::StepSource;
 use crate::install::write_step::WriteStep;
 
 pub fn validate(plan: &InstallPlan) -> Result<()> {
+    require_supported_target(plan)?;
     require_fixed_facts(plan)?;
     require_gpt_copies(plan)?;
     require_step_order(plan)?;
@@ -27,7 +28,17 @@ pub fn validate(plan: &InstallPlan) -> Result<()> {
     require_data_restore(plan)
 }
 
+fn require_supported_target(plan: &InstallPlan) -> Result<()> {
+    if plan.target_slot == BootSlot::A {
+        return Err(Front2Error::Unsupported(
+            "the install target slot A is not supported until the boot switch and the super rebuild are complete".into(),
+        ));
+    }
+    Ok(())
+}
+
 fn require_fixed_facts(plan: &InstallPlan) -> Result<()> {
+    let (expected_original, expected_new) = boot_lun_pair(plan.target_slot);
     let wrong: Vec<&str> = [
         (plan.schema == PLAN_SCHEMA, "schema"),
         (plan.sector_bytes == SECTOR_BYTES as u64, "sector_bytes"),
@@ -44,10 +55,10 @@ fn require_fixed_facts(plan: &InstallPlan) -> Result<()> {
             "boot_lun_persistence_confirmed",
         ),
         (
-            plan.original_boot_lun == ORIGINAL_BOOT_LUN,
+            plan.original_boot_lun == expected_original,
             "original_boot_lun",
         ),
-        (plan.new_boot_lun == NEW_BOOT_LUN, "new_boot_lun"),
+        (plan.new_boot_lun == expected_new, "new_boot_lun"),
         (plan.boot_wlun == BOOT_WLUN, "boot_wlun"),
         (
             plan.candidate_directory.is_absolute(),
@@ -116,7 +127,7 @@ fn require_valid_gpt_record(record: &GptCopyRecord) -> Result<()> {
 
 fn require_step_order(plan: &InstallPlan) -> Result<()> {
     let actual: Vec<String> = plan.steps.iter().map(InstallStep::label).collect();
-    let expected = expected_step_labels(plan.stock_slot, plan.new_boot_lun);
+    let expected = expected_step_labels(plan.stock_slot, plan.target_slot, plan.new_boot_lun);
     if actual != expected {
         return Err(Front2Error::Plan(format!(
             "the plan steps are {actual:?}, the fixed order is {expected:?}"
@@ -125,11 +136,15 @@ fn require_step_order(plan: &InstallPlan) -> Result<()> {
     Ok(())
 }
 
-fn expected_step_labels(stock_slot: BootSlot, new_boot_lun: u8) -> Vec<String> {
+fn expected_step_labels(
+    boot_slot: BootSlot,
+    target_slot: BootSlot,
+    new_boot_lun: u8,
+) -> Vec<String> {
     let mut labels = Vec::new();
-    for name in write_step_names(stock_slot) {
+    for name in write_step_names(boot_slot, target_slot) {
         if name == MISC_PARTITION {
-            labels.push(boot_lun_label(stock_slot, new_boot_lun));
+            labels.push(boot_lun_label(boot_slot, target_slot, new_boot_lun));
         }
         labels.push(format!("write:{name}"));
     }
@@ -137,10 +152,11 @@ fn expected_step_labels(stock_slot: BootSlot, new_boot_lun: u8) -> Vec<String> {
     labels
 }
 
-fn boot_lun_label(stock_slot: BootSlot, new_boot_lun: u8) -> String {
-    match stock_slot {
-        BootSlot::A => format!("{SET_BOOT_LUN_STEP_NAME}:{new_boot_lun}"),
-        BootSlot::B => format!("{KEEP_BOOT_LUN_STEP_NAME}:{new_boot_lun}"),
+fn boot_lun_label(boot_slot: BootSlot, target_slot: BootSlot, new_boot_lun: u8) -> String {
+    if boot_slot != target_slot {
+        format!("{SET_BOOT_LUN_STEP_NAME}:{new_boot_lun}")
+    } else {
+        format!("{KEEP_BOOT_LUN_STEP_NAME}:{new_boot_lun}")
     }
 }
 
@@ -216,7 +232,7 @@ fn require_no_overlap(first: &WriteStep, later: &[&WriteStep]) -> Result<()> {
 }
 
 fn require_gpt_steps(plan: &InstallPlan) -> Result<()> {
-    if plan.stock_slot != BootSlot::A {
+    if plan.stock_slot == plan.target_slot {
         return Ok(());
     }
     for (kind, lun) in GPT_STEP_ORDER {
@@ -297,4 +313,41 @@ fn require_restore_entry(step: &WriteStep, restore: &RestoreEntry) -> Result<()>
         )));
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_step_labels_of_a_switch_to_slot_a_set_the_boot_lun_and_hold_the_gpt_steps() {
+        let labels = expected_step_labels(BootSlot::B, BootSlot::A, 1);
+        assert!(labels.contains(&"write:boot_a".to_string()));
+        assert!(labels.contains(&"set_boot_lun:1".to_string()));
+        assert!(labels.iter().any(|label| label.starts_with("write:gpt_")));
+        assert_eq!(labels.last().map(String::as_str), Some("restart"));
+    }
+
+    #[test]
+    fn the_step_labels_of_a_stock_slot_b_install_keep_the_boot_lun_and_omit_the_gpt_steps() {
+        let labels = expected_step_labels(BootSlot::B, BootSlot::B, 2);
+        assert!(labels.contains(&"keep_boot_lun:2".to_string()));
+        assert!(!labels.iter().any(|label| label.starts_with("write:gpt_")));
+    }
+
+    #[test]
+    fn the_boot_lun_label_sets_on_a_transition_and_keeps_without_one() {
+        assert_eq!(
+            boot_lun_label(BootSlot::A, BootSlot::B, 2),
+            "set_boot_lun:2"
+        );
+        assert_eq!(
+            boot_lun_label(BootSlot::B, BootSlot::A, 1),
+            "set_boot_lun:1"
+        );
+        assert_eq!(
+            boot_lun_label(BootSlot::B, BootSlot::B, 2),
+            "keep_boot_lun:2"
+        );
+    }
 }

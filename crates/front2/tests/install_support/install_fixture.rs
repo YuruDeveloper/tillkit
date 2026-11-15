@@ -6,7 +6,7 @@ use front2::gpt::{
     BootSlot, GptCopyKind, PartitionLocation, PartitionMap, SlotActivation, misc_wipe_sector,
 };
 use front2::install::{
-    GptBackup, IMAGE_PARTITIONS, InstallImage, InstallInputs, InstallPlan, StoredInstallPlan,
+    GptBackup, InstallImage, InstallInputs, InstallPlan, StoredInstallPlan, image_partitions,
 };
 use std::cell::RefCell;
 use std::fs;
@@ -110,12 +110,12 @@ impl InstallFixture {
         let gpt_backups = store_gpt_copies(&backup_directory, &mut storage, &copies);
         let partition_map = partition_map_of(&copies);
         let mut images = Vec::new();
-        for name in IMAGE_PARTITIONS {
-            let location = partition_map.locate(name).expect("image partition");
-            let original = store_original(&backup_directory, &mut storage, name, location);
+        for name in image_partitions(BootSlot::B) {
+            let location = partition_map.locate(&name).expect("image partition");
+            let original = store_original(&backup_directory, &mut storage, &name, location);
             images.push(install_image(
                 &candidate_directory,
-                name,
+                &name,
                 original,
                 stock_slot,
             ));

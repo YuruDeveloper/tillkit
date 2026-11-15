@@ -46,8 +46,8 @@ pub use install_plan::InstallPlan;
 pub use install_progress::InstallProgress;
 pub use install_step::InstallStep;
 pub use layout::{
-    BOOT_WLUN, CHUNK_SECTORS, IMAGE_PARTITIONS, NEW_BOOT_LUN, ORIGINAL_BOOT_LUN, PLAN_FILE,
-    PLAN_SCHEMA,
+    BOOT_WLUN, CHUNK_SECTORS, NEW_BOOT_LUN, ORIGINAL_BOOT_LUN, PLAN_FILE, PLAN_SCHEMA,
+    image_partitions,
 };
 pub use preflight_record::PreflightRecord;
 pub use restart_approval::RestartApproval;
