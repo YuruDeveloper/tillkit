@@ -204,12 +204,15 @@ fn the_logical_view_holds_the_partitions_of_the_verified_candidate() {
         &SuperSlot::new(BootSlot::B),
     )
     .expect("candidate");
-    let verification = verify_super_candidate(&SuperVerificationRequest {
-        candidate: &candidate,
-        original_super: &original,
-        gsi_bytes: GSI_BYTES,
-        gsi_sha256: &gsi_sha256,
-    })
+    let verification = verify_super_candidate(
+        &SuperVerificationRequest {
+            candidate: &candidate,
+            original_super: &original,
+            gsi_bytes: GSI_BYTES,
+            gsi_sha256: &gsi_sha256,
+        },
+        &SuperSlot::new(BootSlot::B),
+    )
     .expect("verification");
 
     let view = directory.path().join(VIEW_DIRECTORY);

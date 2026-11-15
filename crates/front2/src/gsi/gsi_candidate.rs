@@ -276,12 +276,15 @@ fn assemble(request: &GsiCandidateRequest<'_>, manifest: &BackupManifest) -> Res
         &plan,
         &super_slot,
     )?;
-    let super_verification = verify_super_candidate(&SuperVerificationRequest {
-        candidate: &super_path,
-        original_super: &original_super.path,
-        gsi_bytes,
-        gsi_sha256: &gsi_sha256,
-    })?;
+    let super_verification = verify_super_candidate(
+        &SuperVerificationRequest {
+            candidate: &super_path,
+            original_super: &original_super.path,
+            gsi_bytes,
+            gsi_sha256: &gsi_sha256,
+        },
+        &super_slot,
+    )?;
 
     let view = directory.join(VIEW_DIRECTORY);
     fs::create_dir(&view)?;

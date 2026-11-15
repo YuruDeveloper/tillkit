@@ -78,12 +78,15 @@ fn verified(
     original: &Path,
     gsi_sha256: &str,
 ) -> front2::Result<SuperVerification> {
-    verify_super_candidate(&SuperVerificationRequest {
-        candidate,
-        original_super: original,
-        gsi_bytes: GSI_BYTES,
-        gsi_sha256,
-    })
+    verify_super_candidate(
+        &SuperVerificationRequest {
+            candidate,
+            original_super: original,
+            gsi_bytes: GSI_BYTES,
+            gsi_sha256,
+        },
+        &slot_b(),
+    )
 }
 
 fn flip(path: &Path, offset: u64) {
@@ -568,6 +571,60 @@ fn candidate_is_built_and_passes_the_independent_verification() {
     assert!(report_json["metadata"].get("blob").is_none());
     assert_eq!(report_json["candidate_sha256"], report.candidate_sha256);
     serde_json::to_string(&verification).expect("serialize the verification");
+}
+
+#[test]
+fn a_slot_a_candidate_passes_the_slot_a_verification() {
+    let (directory, original) = written(&SyntheticSuper::standard());
+    let slot_a = SuperSlot::new(BootSlot::A);
+    let gsi = directory.path().join("gsi.img");
+    std::fs::write(&gsi, gsi_image(GSI_BYTES)).expect("write the GSI");
+    let (_, gsi_sha256) = sha256_file(&gsi).expect("GSI digest");
+    let (_, original_sha256) = sha256_file(&original).expect("original digest");
+    let candidate = directory.path().join("candidate.img");
+    let plan = SuperLayoutPlan::from_super_file(&original, GSI_BYTES, &slot_a).expect("plan");
+    let request = SuperCandidateRequest {
+        original_super: &original,
+        original_super_sha256: &original_sha256,
+        gsi_image: &gsi,
+        gsi_sha256: &gsi_sha256,
+        output: &candidate,
+    };
+    let report = build_super_candidate(&request, &plan, &slot_a).expect("candidate");
+    assert_eq!(
+        report.metadata.primary_offset,
+        SyntheticSuper::primary_offset(0)
+    );
+    let verification = verify_super_candidate(
+        &SuperVerificationRequest {
+            candidate: &candidate,
+            original_super: &original,
+            gsi_bytes: GSI_BYTES,
+            gsi_sha256: &gsi_sha256,
+        },
+        &slot_a,
+    )
+    .expect("verification");
+    let names: Vec<&str> = verification
+        .logical_partitions
+        .iter()
+        .map(|record| record.partition.as_str())
+        .collect();
+    assert_eq!(
+        names,
+        [
+            "odm_a",
+            "product_a",
+            "system_a",
+            "system_dlkm_a",
+            "vendor_a",
+            "vendor_dlkm_a"
+        ]
+    );
+    let system = &verification.logical_partitions[2];
+    assert_eq!(system.bytes, GSI_BYTES);
+    assert_eq!(system.sha256, gsi_sha256);
+    assert!(!system.original_preserved);
 }
 
 #[test]
