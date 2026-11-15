@@ -105,8 +105,11 @@ mod tests {
     use super::*;
     use crate::confirmation::Confirmation;
     use crate::data_paths::DataPaths;
+    use crate::diagnosis::tests::{OTHER_BUILD, OTHER_DEVICE_BUILD, front2_with_fingerprint};
     use crate::write_flow::tests::review;
+    use front2::RootAccess;
     use front2::magisk::MagiskPackage;
+    use front2::profiles::toss_front2;
 
     fn app() -> (tempfile::TempDir, App) {
         let directory = tempfile::tempdir().expect("tempdir");
@@ -179,6 +182,44 @@ mod tests {
         assert!(app.can_start_root());
         assert!(!app.other_work_is_open(WriteOrigin::Image));
         assert!(app.flow_of(WriteOrigin::Image).is_none());
+    }
+
+    #[test]
+    fn a_root_start_opens_after_the_user_accepts_another_build_number() {
+        let (_directory, mut app) = app();
+        app.diagnosis = Some(front2_with_fingerprint(OTHER_BUILD, Some(RootAccess::Su)));
+        assert!(!app.can_start_root());
+        let _ = app.update(Message::AskForce);
+        assert_eq!(app.confirmation, Some(Confirmation::ForceSupport));
+        let _ = app.update(Message::Confirm);
+        assert!(app.forced && app.can_start_root());
+        let accepted = app.support_override();
+        let ids: Vec<&str> = accepted
+            .accepted
+            .iter()
+            .map(|check| check.id.as_str())
+            .collect();
+        assert_eq!(ids, [toss_front2::VENDOR_BUILD_FINGERPRINT_PROPERTY]);
+        let report = &app.diagnosis.as_ref().expect("diagnosis").report;
+        report
+            .require_allowed_with(&accepted)
+            .expect("the root preparation accepts the build number");
+    }
+
+    #[test]
+    fn a_root_start_stays_closed_for_another_device_or_a_device_without_root() {
+        for diagnosis in [
+            front2_with_fingerprint(OTHER_DEVICE_BUILD, Some(RootAccess::Su)),
+            front2_with_fingerprint(OTHER_BUILD, None),
+        ] {
+            let (_directory, mut app) = app();
+            app.diagnosis = Some(diagnosis);
+            let _ = app.update(Message::AskForce);
+            assert!(app.confirmation.is_none());
+            let _ = app.update(Message::Confirm);
+            assert!(!app.forced && !app.can_start_root());
+            assert!(app.support_override().is_empty());
+        }
     }
 
     #[test]

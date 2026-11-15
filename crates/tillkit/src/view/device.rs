@@ -2,8 +2,7 @@ use crate::app::App;
 use crate::diagnosis::Diagnosis;
 use crate::message::Message;
 use crate::palette::Palette;
-use crate::support_words;
-use crate::view::{parts, support_rows};
+use crate::view::{parts, support_verdict};
 use front2::{DeviceState, SupportCheck, Verdict};
 use iced::widget::{column, container, row};
 use iced::{Alignment, Element, Length};
@@ -12,11 +11,6 @@ const INTRODUCTION: &str = "기기를 USB로 연결한 뒤에 확인을 누르�
 const READ_FAILED: &str = "기기를 읽지 못했습니다. USB 연결과 USB 디버깅 허용을 확인한 뒤에 다시 눌러 주세요. GSI를 설치하려고 EDL 모드로 연결한 기기는 이 화면에서 읽지 않으니 WRITE 화면에서 시작해 주세요.";
 const EDL_FOUND: &str = "EDL 모드로 연결된 기기를 찾았습니다. 이 화면은 EDL 모드의 기기에서 정보를 읽지 않으므로, 지원하는 기기인지는 여기에서 알려 드리지 못합니다. GSI 설치와 전체 백업 복원은 WRITE 화면에서 시작해 주세요.";
 const SUPPORTED: &str = "지원하는 기기입니다. 백업과 기록을 진행할 수 있습니다.";
-const UNSUPPORTED: &str = "지원하는 조건과 맞지 않는 항목이 있어서, 이 기기에는 기록하지 않습니다.";
-const ROOT_MISSING: &str = "루트 권한이 없어서 이 기기에는 기록할 수 없습니다.";
-const BOOT_UNFINISHED: &str =
-    "기기가 아직 부팅을 끝내지 않았습니다. 부팅이 끝난 뒤에 다시 확인해 주세요.";
-const FORCED: &str = "맞지 않는 항목을 확인하고 강제로 진행하는 중입니다. 파일 대조와 기록 뒤의 확인은 그대로 합니다.";
 const DETAIL_KEYS: [(&str, &str); 6] = [
     ("ANDROID RELEASE", "ro.build.version.release"),
     ("SDK", "ro.build.version.sdk"),
@@ -73,26 +67,7 @@ fn verdict<'a>(app: &App, diagnosis: &Diagnosis) -> Element<'a, Message> {
         ];
         return parts::panel(content.spacing(8), palette);
     }
-    let unmet = support_rows::unmet(report, palette);
-    if app.forced {
-        return column![parts::caution("FORCED", FORCED, palette), unmet]
-            .spacing(10)
-            .into();
-    }
-    let sentence = if support_words::root_is_missing(report) {
-        ROOT_MISSING
-    } else if support_words::boot_is_unfinished(report) {
-        BOOT_UNFINISHED
-    } else {
-        UNSUPPORTED
-    };
-    let mut block =
-        column![parts::fault("NOT SUPPORTED", sentence, "", palette), unmet].spacing(10);
-    if support_words::can_be_forced(report) {
-        let ask = (!app.is_busy()).then_some(Message::AskForce);
-        block = block.push(parts::bracket("CONTINUE ANYWAY", ask, palette));
-    }
-    block.into()
+    support_verdict::block(app, report)
 }
 
 fn summary<'a>(state: &DeviceState, palette: Palette) -> Element<'a, Message> {
