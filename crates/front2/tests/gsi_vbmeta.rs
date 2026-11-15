@@ -347,7 +347,7 @@ const BOOT_SLOT_FLOOR: u64 = 1_675_555_200;
 
 #[test]
 fn top_signs_at_the_rollback_floor_above_the_source_value() {
-    // kk: the source top vbmeta declares rollback index 0, below the floor of the
+    // The source top vbmeta declares rollback index 0, below the floor of the
     // boot slot. An in-place slot A install signs the target top vbmeta at exactly
     // the floor so the boot switch passes the rollback check without raising it.
     let bench = Bench::new();
@@ -938,7 +938,7 @@ const GSI_BYTES: u64 = 4608 * 512;
 // persistent digest and does not compare it against the image, so verify_view
 // passes without a full consistent hash tree. The digest arithmetic is checked
 // by the build_top_vbmeta and build_system_vbmeta tests above, so this test can
-// keep the images small and check the kk candidate plumbing instead.
+// keep the images small and check the test key slot A candidate build instead.
 fn hash_persistent(partition: &str) -> DescriptorInfo {
     DescriptorInfo::Hash {
         image_size: 4096,
@@ -969,7 +969,7 @@ fn hashtree_persistent(partition: &str) -> DescriptorInfo {
     }
 }
 
-fn kk_vbmeta_a(fingerprints: &[&'static str]) -> Source<'static> {
+fn testkey_slot_a_top_vbmeta(fingerprints: &[&'static str]) -> Source<'static> {
     Source {
         key_spec: "testkey_rsa4096",
         algorithm: "SHA256_RSA4096",
@@ -990,13 +990,13 @@ fn kk_vbmeta_a(fingerprints: &[&'static str]) -> Source<'static> {
     }
 }
 
-fn kk_vbmeta_b() -> Source<'static> {
+fn stock_slot_b_top_vbmeta() -> Source<'static> {
     let mut source = stock_top();
     source.rollback_index = BOOT_SLOT_FLOOR;
     source
 }
 
-fn kk_vbmeta_system_a() -> Source<'static> {
+fn testkey_slot_a_system_vbmeta() -> Source<'static> {
     Source {
         key_spec: "testkey_rsa2048",
         algorithm: "SHA256_RSA2048",
@@ -1011,7 +1011,7 @@ fn kk_vbmeta_system_a() -> Source<'static> {
     }
 }
 
-fn kk_gsi() -> Source<'static> {
+fn gsi_source() -> Source<'static> {
     Source {
         key_spec: "testkey_rsa4096",
         algorithm: "SHA256_RSA4096",
@@ -1032,7 +1032,7 @@ fn record_entry(entries: &mut Vec<serde_json::Value>, relative: &str, path: &Pat
     }));
 }
 
-fn write_kk_backup(backup: &Path) {
+fn write_testkey_slot_a_backup(backup: &Path) {
     let lun0 = backup.join("partitions").join("lun0");
     let lun4 = backup.join("partitions").join("lun4");
     std::fs::create_dir_all(&lun0).expect("create lun0");
@@ -1060,9 +1060,9 @@ fn write_kk_backup(backup: &Path) {
     }
 
     for (name, source) in [
-        ("vbmeta_a", kk_vbmeta_a(&[TESTED_BUILD])),
-        ("vbmeta_b", kk_vbmeta_b()),
-        ("vbmeta_system_a", kk_vbmeta_system_a()),
+        ("vbmeta_a", testkey_slot_a_top_vbmeta(&[TESTED_BUILD])),
+        ("vbmeta_b", stock_slot_b_top_vbmeta()),
+        ("vbmeta_system_a", testkey_slot_a_system_vbmeta()),
     ] {
         let path = lun4.join(format!("{name}.bin"));
         source.write(&path);
@@ -1077,8 +1077,8 @@ fn write_kk_backup(backup: &Path) {
     std::fs::write(backup.join("sha256-manifest.json"), text).expect("write the manifest");
 }
 
-fn write_kk_gsi(path: &Path) {
-    kk_gsi().write(path);
+fn write_gsi_image(path: &Path) {
+    gsi_source().write(path);
     std::fs::OpenOptions::new()
         .write(true)
         .open(path)
@@ -1091,9 +1091,9 @@ fn write_kk_gsi(path: &Path) {
 fn an_install_to_the_test_key_slot_a_builds_a_candidate_in_place() {
     let bench = Bench::new();
     let backup = bench.path("backup");
-    write_kk_backup(&backup);
+    write_testkey_slot_a_backup(&backup);
     let gsi = bench.path("gsi.img");
-    write_kk_gsi(&gsi);
+    write_gsi_image(&gsi);
     let output = bench.path("candidate");
 
     let candidate = GsiCandidate::build(&GsiCandidateRequest {
@@ -1106,7 +1106,7 @@ fn an_install_to_the_test_key_slot_a_builds_a_candidate_in_place() {
         stock_slot: BootSlot::B,
         target_slot: BootSlot::A,
     })
-    .expect("the kk candidate builds");
+    .expect("the test key slot A candidate builds");
 
     assert_eq!(candidate.stock_slot, BootSlot::B);
     assert_eq!(candidate.target_slot, BootSlot::A);
