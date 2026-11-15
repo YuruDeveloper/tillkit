@@ -120,7 +120,7 @@ pub fn install_inputs_from_images(
         .map(|(lun, bytes)| (lun, bytes.as_slice()))
         .collect();
     let (activation_lun0, activation_lun4) =
-        slot_activations(stock_slot, &main_copies, &backup_copies)?;
+        slot_activations(stock_slot, target_slot, &main_copies, &backup_copies)?;
     let misc = manifest.partition(MISC_PARTITION)?;
     Ok(InstallInputs {
         candidate_directory: std::path::absolute(candidate_directory)?,
@@ -144,33 +144,48 @@ pub fn install_inputs_from_images(
 
 fn slot_activations(
     stock_slot: BootSlot,
+    target_slot: BootSlot,
     main_copies: &[Vec<u8>],
     backup_copies: &[Vec<u8>],
 ) -> Result<(Option<SlotActivation>, Option<SlotActivation>)> {
-    match stock_slot {
-        BootSlot::A => {
+    match (stock_slot, target_slot) {
+        (BootSlot::A, BootSlot::B) | (BootSlot::B, BootSlot::A) => {
             let [first_lun, second_lun] = ACTIVATION_LUNS;
             Ok((
-                Some(prepare_activation(first_lun, main_copies, backup_copies)?),
-                Some(prepare_activation(second_lun, main_copies, backup_copies)?),
+                Some(prepare_activation(
+                    first_lun,
+                    target_slot,
+                    main_copies,
+                    backup_copies,
+                )?),
+                Some(prepare_activation(
+                    second_lun,
+                    target_slot,
+                    main_copies,
+                    backup_copies,
+                )?),
             ))
         }
-        BootSlot::B => {
+        (BootSlot::B, BootSlot::B) => {
             require_tidy_stock_b(main_copies, backup_copies)?;
             Ok((None, None))
         }
+        (BootSlot::A, BootSlot::A) => Err(Front2Error::Unsupported(
+            "the install from the stock slot A to the target slot A is not supported".into(),
+        )),
     }
 }
 
 fn prepare_activation(
     lun: u8,
+    target_slot: BootSlot,
     main_copies: &[Vec<u8>],
     backup_copies: &[Vec<u8>],
 ) -> Result<SlotActivation> {
     let position = usize::from(lun);
     SlotActivation::prepare(
         lun,
-        BootSlot::B,
+        target_slot,
         &main_copies[position],
         &backup_copies[position],
     )
