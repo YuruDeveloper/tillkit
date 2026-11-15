@@ -20,7 +20,7 @@ use std::path::{Path, PathBuf};
 const CANDIDATE_PREFIX: &str = "gsi-";
 const PLAN_PREFIX: &str = "install-";
 const BACKUP_NOT_READ: &str = "이 이미지로 만든 계획이 쓰던 전체 백업을 읽지 못했습니다. 그 폴더를 읽을 수 있게 한 뒤에 MAKE PLAN을 다시 누르거나, USE EXISTING BACKUP으로 쓸 전체 백업을 직접 골라 주세요.";
-const BACKUP_SLOTS_UNSUPPORTED: &str = "이 전체 백업으로는 설치 계획을 만들 수 없습니다. 설치는 부팅 슬롯을 A에서 B로 바꾸는데, 이 백업의 파티션 표는 그 전환을 할 수 있는 상태(슬롯 A만 활성)와 맞지 않습니다. 순정 상태에서 만들어 둔 전체 백업이 있으면 USE EXISTING BACKUP으로 그 폴더를 골라 주세요.";
+const BACKUP_SLOTS_UNSUPPORTED: &str = "이 전체 백업으로는 설치 계획을 만들 수 없습니다. 백업에 기록된 파티션 표가 설치에 필요한 슬롯 상태와 맞지 않습니다. 자세한 이유는 뒤에 함께 표시됩니다. 순정 상태에서 미리 만들어 둔 전체 백업이 있다면, USE EXISTING BACKUP으로 그 폴더를 선택해 주세요.";
 const NOT_STOCK_SLOT_B: &str = "이 전체 백업은 TillKit이 제자리에 GSI를 설치할 수 있는 순정 부팅 슬롯 B 상태가 아닙니다. 뒤에 적힌 이유를 확인해 주세요. 이미 GSI를 설치한 기기에서 만든 백업이라면, 순정 상태에서 만들어 둔 전체 백업을 USE EXISTING BACKUP으로 골라 주세요.";
 
 pub fn prepare(
@@ -72,9 +72,10 @@ fn installable_slots(backup: &Path) -> Result<(BootSlot, BootSlot)> {
     Ok((stock_slot, target_slot))
 }
 
-// The install target is the slot that holds a test key signature, because the
-// tool can only reproduce the test key. The kk device holds the test key on
-// slot A. A stock backup holds no test key slot, so the target is slot B.
+// The install target is the test key slot, because the tool can only reproduce
+// the test key. The kk device holds the test key on slot A. find_testkey_slot
+// returns a slot only when one slot holds the test key. For no test key slot or
+// two test key slots, the target is slot B.
 fn install_target_slot(backup: &Path) -> Result<BootSlot> {
     match find_testkey_slot(backup) {
         Ok(slot) => Ok(slot),
@@ -384,8 +385,8 @@ mod tests {
             .expect_err("the backup is not used");
         let text = told.to_string();
         assert!(text.contains(&reason), "{text}");
-        assert!(text.contains("슬롯 A만 활성"), "{text}");
-        assert!(!text.contains("슬롯 A로 부팅하는 상태가 아니"), "{text}");
+        assert!(text.contains(BACKUP_SLOTS_UNSUPPORTED), "{text}");
+        assert!(!text.contains("A에서 B로"), "{text}");
     }
 
     #[test]
