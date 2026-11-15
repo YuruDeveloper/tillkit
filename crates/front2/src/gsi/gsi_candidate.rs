@@ -33,12 +33,12 @@ pub const VIEW_DIRECTORY: &str = "view";
 pub const SUPER_PARTITION: &str = "super";
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(from = "GsiCandidateRecord", into = "GsiCandidateRecord")]
 pub struct GsiCandidate {
     pub schema: u32,
-    #[serde(default, skip_serializing_if = "is_slot_a")]
     pub stock_slot: BootSlot,
-    #[serde(default = "default_target_slot", skip_serializing_if = "is_slot_b")]
     pub target_slot: BootSlot,
+    pub source_slot: BootSlot,
     pub gsi_bytes: u64,
     pub gsi_sha256: String,
     pub original_super: BackupPartition,
@@ -53,6 +53,88 @@ pub struct GsiCandidate {
     pub fec_recomputed: bool,
     pub device_boot_verified: bool,
     pub stored_rollback_verified: bool,
+}
+
+#[derive(Serialize, Deserialize)]
+struct GsiCandidateRecord {
+    schema: u32,
+    #[serde(default, skip_serializing_if = "is_slot_a")]
+    stock_slot: BootSlot,
+    #[serde(default = "default_target_slot", skip_serializing_if = "is_slot_b")]
+    target_slot: BootSlot,
+    #[serde(
+        default,
+        deserialize_with = "deserialize_present_slot",
+        skip_serializing_if = "Option::is_none"
+    )]
+    source_slot: Option<BootSlot>,
+    gsi_bytes: u64,
+    gsi_sha256: String,
+    original_super: BackupPartition,
+    super_image: ImageRecord,
+    super_verification: SuperVerification,
+    logical_view: Vec<ImageRecord>,
+    physical_images: Vec<CandidateImage>,
+    chained_vbmeta: SignedVbmeta,
+    top_vbmeta: SignedVbmeta,
+    avb_verification: Vec<String>,
+    first_conversion_only: bool,
+    fec_recomputed: bool,
+    device_boot_verified: bool,
+    stored_rollback_verified: bool,
+}
+
+impl From<GsiCandidateRecord> for GsiCandidate {
+    fn from(record: GsiCandidateRecord) -> Self {
+        let source_slot = record.source_slot.unwrap_or(record.stock_slot);
+        Self {
+            schema: record.schema,
+            stock_slot: record.stock_slot,
+            target_slot: record.target_slot,
+            source_slot,
+            gsi_bytes: record.gsi_bytes,
+            gsi_sha256: record.gsi_sha256,
+            original_super: record.original_super,
+            super_image: record.super_image,
+            super_verification: record.super_verification,
+            logical_view: record.logical_view,
+            physical_images: record.physical_images,
+            chained_vbmeta: record.chained_vbmeta,
+            top_vbmeta: record.top_vbmeta,
+            avb_verification: record.avb_verification,
+            first_conversion_only: record.first_conversion_only,
+            fec_recomputed: record.fec_recomputed,
+            device_boot_verified: record.device_boot_verified,
+            stored_rollback_verified: record.stored_rollback_verified,
+        }
+    }
+}
+
+impl From<GsiCandidate> for GsiCandidateRecord {
+    fn from(candidate: GsiCandidate) -> Self {
+        let source_slot =
+            (candidate.source_slot != candidate.stock_slot).then_some(candidate.source_slot);
+        Self {
+            schema: candidate.schema,
+            stock_slot: candidate.stock_slot,
+            target_slot: candidate.target_slot,
+            source_slot,
+            gsi_bytes: candidate.gsi_bytes,
+            gsi_sha256: candidate.gsi_sha256,
+            original_super: candidate.original_super,
+            super_image: candidate.super_image,
+            super_verification: candidate.super_verification,
+            logical_view: candidate.logical_view,
+            physical_images: candidate.physical_images,
+            chained_vbmeta: candidate.chained_vbmeta,
+            top_vbmeta: candidate.top_vbmeta,
+            avb_verification: candidate.avb_verification,
+            first_conversion_only: candidate.first_conversion_only,
+            fec_recomputed: candidate.fec_recomputed,
+            device_boot_verified: candidate.device_boot_verified,
+            stored_rollback_verified: candidate.stored_rollback_verified,
+        }
+    }
 }
 
 impl GsiCandidate {
@@ -134,6 +216,15 @@ impl GsiCandidate {
     }
 }
 
+fn deserialize_present_slot<'de, D>(
+    deserializer: D,
+) -> std::result::Result<Option<BootSlot>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    BootSlot::deserialize(deserializer).map(Some)
+}
+
 fn is_slot_a(slot: &BootSlot) -> bool {
     matches!(slot, BootSlot::A)
 }
@@ -154,12 +245,13 @@ fn in_view(image: &ImageRecord) -> ImageRecord {
 }
 
 fn assemble(request: &GsiCandidateRequest<'_>, manifest: &BackupManifest) -> Result<GsiCandidate> {
-    let stock_name = |base: &str| profile::slot_label(base, request.stock_slot.suffix());
+    let source_slot = request.stock_slot;
+    let source_name = |base: &str| profile::slot_label(base, source_slot.suffix());
     let target_name = |base: &str| profile::slot_label(base, request.target_slot.suffix());
-    let stock_top = manifest.verified_partition(&stock_name(profile::VBMETA_BASE))?;
+    let stock_top = manifest.verified_partition(&source_name(profile::VBMETA_BASE))?;
     let original_top = manifest.verified_partition(&target_name(profile::VBMETA_BASE))?;
     let stock_chained =
-        manifest.verified_partition(&stock_name(toss_front2::CHAINED_VBMETA_BASE))?;
+        manifest.verified_partition(&source_name(toss_front2::CHAINED_VBMETA_BASE))?;
     let original_chained =
         manifest.verified_partition(&target_name(toss_front2::CHAINED_VBMETA_BASE))?;
     require_stock_front2_top(&VbmetaSource::read(&stock_top.path)?)?
@@ -194,7 +286,7 @@ fn assemble(request: &GsiCandidateRequest<'_>, manifest: &BackupManifest) -> Res
     require_view_matches(&logical_view, &super_verification)?;
     let mut physical_images = Vec::new();
     for base in toss_front2::PHYSICAL_BOOT_PARTITIONS {
-        let source = manifest.partition(&stock_name(base))?;
+        let source = manifest.partition(&source_name(base))?;
         physical_images.push(CandidateImage {
             partition: target_name(base),
             image: source.copy_to(&view, &view_file(base))?,
@@ -222,6 +314,7 @@ fn assemble(request: &GsiCandidateRequest<'_>, manifest: &BackupManifest) -> Res
         schema: CANDIDATE_SCHEMA,
         stock_slot: request.stock_slot,
         target_slot: request.target_slot,
+        source_slot,
         gsi_bytes,
         gsi_sha256,
         original_super,
@@ -304,6 +397,7 @@ mod tests {
             schema: CANDIDATE_SCHEMA,
             stock_slot: BootSlot::A,
             target_slot,
+            source_slot: BootSlot::A,
             gsi_bytes: 1,
             gsi_sha256: "00".to_string(),
             original_super: backup_partition(),
@@ -334,6 +428,49 @@ mod tests {
     fn the_target_slot_is_recorded_for_slot_a() {
         let value = serde_json::to_value(sample(BootSlot::A)).expect("slot A value");
         assert_eq!(value["target_slot"], serde_json::Value::from("a"));
+    }
+
+    fn omits_and_recovers_the_source_slot(stock: BootSlot) {
+        let candidate = GsiCandidate {
+            stock_slot: stock,
+            source_slot: stock,
+            ..sample(BootSlot::B)
+        };
+        let value = serde_json::to_value(&candidate).expect("the candidate value");
+        assert_eq!(value.get("source_slot"), None, "{value}");
+        let loaded: GsiCandidate = serde_json::from_value(value).expect("read the candidate back");
+        assert_eq!(loaded.source_slot, stock);
+    }
+
+    #[test]
+    fn the_source_slot_is_omitted_when_it_matches_the_stock_slot_and_recovers_from_it() {
+        omits_and_recovers_the_source_slot(BootSlot::A);
+        omits_and_recovers_the_source_slot(BootSlot::B);
+    }
+
+    #[test]
+    fn the_source_slot_is_recorded_when_it_is_not_the_stock_slot() {
+        let candidate = GsiCandidate {
+            stock_slot: BootSlot::B,
+            source_slot: BootSlot::A,
+            ..sample(BootSlot::B)
+        };
+        let value = serde_json::to_value(&candidate).expect("the candidate value");
+        assert_eq!(value["source_slot"], serde_json::Value::from("a"));
+        let loaded: GsiCandidate = serde_json::from_value(value).expect("read the candidate back");
+        assert_eq!(loaded.source_slot, BootSlot::A);
+        assert_eq!(loaded.stock_slot, BootSlot::B);
+    }
+
+    #[test]
+    fn an_explicit_null_source_slot_is_rejected() {
+        let mut value = serde_json::to_value(sample(BootSlot::B)).expect("the candidate value");
+        value
+            .as_object_mut()
+            .expect("a JSON object")
+            .insert("source_slot".to_string(), serde_json::Value::Null);
+        let loaded: std::result::Result<GsiCandidate, _> = serde_json::from_value(value);
+        assert!(loaded.is_err(), "{loaded:?}");
     }
 
     #[test]

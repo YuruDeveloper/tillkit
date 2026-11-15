@@ -35,6 +35,7 @@ pub fn install_inputs(
         backup_directory,
     )?;
     require_matching_stock_slot(candidate.stock_slot, inputs.stock_slot)?;
+    require_source_matches_boot(candidate.source_slot, inputs.stock_slot)?;
     Ok(inputs)
 }
 
@@ -42,6 +43,15 @@ fn require_matching_stock_slot(candidate: BootSlot, backup: BootSlot) -> Result<
     if candidate != backup {
         return Err(Front2Error::Plan(format!(
             "the candidate was made for stock slot {candidate:?}, the backup boots slot {backup:?}"
+        )));
+    }
+    Ok(())
+}
+
+fn require_source_matches_boot(source: BootSlot, boot: BootSlot) -> Result<()> {
+    if source != boot {
+        return Err(Front2Error::Unsupported(format!(
+            "the candidate reads the stock images from the source slot {source:?}, the device boots slot {boot:?}; the install supports a source slot that is the same as the boot slot until the kk gate is complete"
         )));
     }
     Ok(())
@@ -267,5 +277,21 @@ mod tests {
             .expect_err("a slot B candidate on a slot A backup");
         assert!(matches!(error, Front2Error::Plan(_)), "{error}");
         assert!(error.to_string().contains("stock slot"), "{error}");
+    }
+
+    #[test]
+    fn a_candidate_source_that_matches_the_boot_slot_is_accepted() {
+        require_source_matches_boot(BootSlot::A, BootSlot::A)
+            .expect("a slot A source on a slot A boot");
+        require_source_matches_boot(BootSlot::B, BootSlot::B)
+            .expect("a slot B source on a slot B boot");
+    }
+
+    #[test]
+    fn a_candidate_source_that_is_not_the_boot_slot_is_rejected() {
+        let error = require_source_matches_boot(BootSlot::A, BootSlot::B)
+            .expect_err("a slot A source on a slot B boot");
+        assert!(matches!(error, Front2Error::Unsupported(_)), "{error}");
+        assert!(error.to_string().contains("source slot"), "{error}");
     }
 }
