@@ -13,6 +13,7 @@ use std::path::Path;
 pub fn build_top_vbmeta(
     template: &VbmetaTemplate<'_>,
     evidence: &[RollbackEvidence],
+    rollback_floor: Option<u64>,
     output: &Path,
 ) -> Result<SignedVbmeta> {
     let stock = VbmetaSource::read(template.stock_slot_a)?;
@@ -23,7 +24,7 @@ pub fn build_top_vbmeta(
     )?;
     original.require_no_public_key_metadata()?;
     require_supported_headers(&stock, &original)?;
-    let rollback_index = stock.info.header.rollback_index;
+    let rollback_index = select_rollback_index(&stock, rollback_floor)?;
     require_no_higher_evidence(rollback_index, &original, evidence)?;
 
     let chained_key =
@@ -78,6 +79,17 @@ pub fn build_top_vbmeta(
     SignedVbmeta::write(output, original.file_bytes, &parameters, &descriptors)
 }
 
+fn select_rollback_index(stock: &VbmetaSource, floor: Option<u64>) -> Result<u64> {
+    let native = stock.info.header.rollback_index;
+    match floor {
+        Some(floor) if floor < native => Err(Front2Error::Unsupported(format!(
+            "the rollback floor {floor} is below the source top vbmeta rollback index {native}, the installation must not lower it"
+        ))),
+        Some(floor) => Ok(floor),
+        None => Ok(native),
+    }
+}
+
 fn require_supported_headers(stock: &VbmetaSource, original: &VbmetaSource) -> Result<()> {
     let stock_header = &stock.info.header;
     let original_header = &original.info.header;
@@ -104,12 +116,12 @@ fn require_no_higher_evidence(
     let original_value = original.info.header.rollback_index;
     if original_value > selected {
         return Err(Front2Error::Unsupported(format!(
-            "slot B top vbmeta has rollback index {original_value}, slot A has {selected}; the tested conversion used the slot A value and it must not be lower"
+            "the original top vbmeta has rollback index {original_value}, the signed top vbmeta rollback index is {selected}; it must not be lower"
         )));
     }
     if let Some(higher) = evidence.iter().find(|item| item.value > selected) {
         return Err(Front2Error::Unsupported(format!(
-            "{} gives rollback index {}, slot A top vbmeta gives {selected}; the values do not agree",
+            "{} gives rollback index {}, the signed top vbmeta rollback index is {selected}; the values do not agree",
             higher.source, higher.value
         )));
     }

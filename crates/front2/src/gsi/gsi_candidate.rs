@@ -307,6 +307,7 @@ fn assemble(request: &GsiCandidateRequest<'_>, manifest: &BackupManifest) -> Res
             original_slot_b: &original_top.path,
         },
         request.rollback_evidence,
+        None,
         &view.join(view_file(profile::VBMETA_BASE)),
     )?;
     let avb_verification = verify_view(&view)?;

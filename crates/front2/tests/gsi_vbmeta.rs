@@ -206,6 +206,25 @@ impl Bench {
         original: &Source<'_>,
         evidence: &[RollbackEvidence],
     ) -> front2::Result<PathBuf> {
+        self.top_full(stock, original, evidence, None)
+    }
+
+    fn top_with_floor(
+        &self,
+        stock: &Source<'_>,
+        original: &Source<'_>,
+        floor: Option<u64>,
+    ) -> front2::Result<PathBuf> {
+        self.top_full(stock, original, &[], floor)
+    }
+
+    fn top_full(
+        &self,
+        stock: &Source<'_>,
+        original: &Source<'_>,
+        evidence: &[RollbackEvidence],
+        floor: Option<u64>,
+    ) -> front2::Result<PathBuf> {
         let stock_path = self.path("stock-top.bin");
         let original_path = self.path("original-top.bin");
         stock.write(&stock_path);
@@ -215,7 +234,7 @@ impl Bench {
             stock_slot_a: &stock_path,
             original_slot_b: &original_path,
         };
-        build_top_vbmeta(&template, evidence, &output).map(|_| output)
+        build_top_vbmeta(&template, evidence, floor, &output).map(|_| output)
     }
 
     fn system(
@@ -319,6 +338,53 @@ fn top_refuses_rollback_evidence_above_the_stock_value() {
     bench
         .top_with_evidence(&stock_top(), &original_top(), &evidence)
         .expect("equal evidence is accepted");
+}
+
+const BOOT_SLOT_FLOOR: u64 = 1_675_555_200;
+
+#[test]
+fn top_signs_at_the_rollback_floor_above_the_source_value() {
+    // kk: the source top vbmeta declares rollback index 0, below the floor of the
+    // boot slot. An in-place slot A install signs the target top vbmeta at exactly
+    // the floor so the boot switch passes the rollback check without raising it.
+    let bench = Bench::new();
+    let output = bench
+        .top_with_floor(&original_top(), &original_top(), Some(BOOT_SLOT_FLOOR))
+        .expect("the floor is signed");
+    let built = VbmetaSource::read(&output).expect("built");
+    assert_eq!(built.info.header.rollback_index, BOOT_SLOT_FLOOR);
+    assert_eq!(built.info.header.rollback_index_location, 0);
+    verify_top_signature(&output, "testkey_rsa4096").expect("signature");
+}
+
+#[test]
+fn top_refuses_a_rollback_floor_below_the_source_value() {
+    let bench = Bench::new();
+    let floor = Some(STOCK_ROLLBACK - 1);
+    let message = refusal(bench.top_with_floor(&stock_top(), &original_top(), floor));
+    assert!(
+        message.contains("below the source top vbmeta rollback index"),
+        "{message}"
+    );
+    assert!(!bench.path("vbmeta.img").exists());
+}
+
+#[test]
+fn top_refuses_rollback_evidence_above_the_floor() {
+    let bench = Bench::new();
+    let evidence = [RollbackEvidence {
+        source: "devinfo candidate".to_string(),
+        value: BOOT_SLOT_FLOOR + 1,
+    }];
+    let result = bench.top_full(
+        &original_top(),
+        &original_top(),
+        &evidence,
+        Some(BOOT_SLOT_FLOOR),
+    );
+    let message = refusal(result);
+    assert!(message.contains("do not agree"), "{message}");
+    assert!(!bench.path("vbmeta.img").exists());
 }
 
 #[test]
@@ -480,7 +546,7 @@ fn letter_1134_top_refuses_an_original_slot_b_with_a_damaged_signature() {
         stock_slot_a: &stock,
         original_slot_b: &original,
     };
-    let error = build_top_vbmeta(&template, &[], &output).expect_err("damaged signature");
+    let error = build_top_vbmeta(&template, &[], None, &output).expect_err("damaged signature");
     assert!(
         matches!(error, front2::Front2Error::Verification(_)),
         "{error}"
@@ -820,7 +886,7 @@ fn real_images_give_the_bytes_that_started_the_device_when_available() {
         original_slot_b: &original_top,
     };
     let output = directory.path().join("vbmeta.img");
-    let built = build_top_vbmeta(&template, &[], &output).expect("top");
+    let built = build_top_vbmeta(&template, &[], None, &output).expect("top");
     let reference = evidence
         .join("root-preparation")
         .join("current-vbmeta_b.img");
