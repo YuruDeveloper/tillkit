@@ -20,7 +20,7 @@ This file shows examples of the screens. The paths and the numbers on these scre
 > [!WARNING]
 > A change to firmware can make your device unbootable or erase your data. This tool comes without warranty. You use it at your risk.
 
-- The tests of TillKit on a device used only one Front 2. The GSI installation completed the write and the removal of the user data only after a full restore of stock firmware 1.609.5. Many functions have no test on a device. Read "No test on a device" below.
+- The tests of TillKit used more than one Front 2. On 2026-11-15 the first user installed a GSI on stock slot B and kept the boot slot. The device then started from the GSI. A different user also completed a GSI installation. Many functions have no test on a device. Read "No test on a device" below.
 - A write changes some partitions, one after the other. If the device or the connection stops during the writes, the device can become unbootable.
 - The usual recovery from that condition is an EDL restore from a full backup. TillKit makes a full backup as a step of the GSI installation. The `WRITE` screen can write that full backup to the device again. Read "Full restore" below.
 - The GSI installation erases the user data of the device.
@@ -178,7 +178,9 @@ If the device does not start with a kernel that you wrote, TillKit cannot write 
 
 ## No test on a device
 
-The TillKit screens operated on only one device. Only these three functions operated on it:
+User devices completed a GSI installation. On 2026-11-15 the first user installed a GSI on stock slot B and kept the boot slot. The device then started from the GSI. A different user also completed a GSI installation. We did not get the steps of that installation.
+
+On one Front 2, these three functions also operated through the TillKit screens:
 
 - The full backup: the EDL connection and the full backup. At that time, the data on the device was different from stock firmware 1.609.5.
 - The full restore of stock firmware 1.609.5: the check, the write with the user data and the selection of the boot LUN.
@@ -189,10 +191,9 @@ The checks for these items used a simulated device and a local shell only.
 
 Write functions:
 
-- The restart step of the GSI installation, and the start of the device from a GSI that TillKit wrote. We did not see the screen of the device after the write.
+- The restart step of the GSI installation. The first user device started from the GSI. We do not know if the restart used this step.
 - A full backup of a device with stock firmware, and a GSI installation that uses that full backup.
 - A GSI installation on a device with firmware that is not 1.609.5. After you select CONTINUE ANYWAY, the tool makes a plan for a stock build with a different build number. No installation used a plan of that type.
-- A GSI installation in place on a stock device that shows slot B as the boot slot. The tool writes the GSI to slot B and keeps the boot slot.
 - A GSI installation on a device with a partition pair that has no active flag on A and no active flag on B.
 - A GSI installation that stopped and that the tool continues from the step that stopped.
 - The full restore without the user data. The restart after the full restore, and the start of the stock firmware after that restart.
