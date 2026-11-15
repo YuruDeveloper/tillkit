@@ -33,25 +33,46 @@ pub struct InstallFixture {
     pub calls: Rc<RefCell<Vec<MockCall>>>,
 }
 
+pub struct InstallFixtureBuilder {
+    super_sectors: u64,
+    distinct_boot_lun_tables: bool,
+    stock_slot: BootSlot,
+    target_slot: BootSlot,
+}
+
+impl InstallFixtureBuilder {
+    pub fn with_super_sectors(mut self, super_sectors: u64) -> Self {
+        self.super_sectors = super_sectors;
+        self
+    }
+
+    pub fn with_identical_boot_lun_tables(mut self) -> Self {
+        self.distinct_boot_lun_tables = false;
+        self
+    }
+
+    pub fn build(self) -> InstallFixture {
+        InstallFixture::assemble(
+            self.super_sectors,
+            self.distinct_boot_lun_tables,
+            self.stock_slot,
+            self.target_slot,
+        )
+    }
+}
+
 impl InstallFixture {
-    pub fn standard() -> Self {
-        Self::build(PARTITION_SECTORS, true, BootSlot::A, BootSlot::B)
+    pub fn new(stock_slot: BootSlot, target_slot: BootSlot) -> Self {
+        Self::assemble(PARTITION_SECTORS, true, stock_slot, target_slot)
     }
 
-    pub fn with_super_sectors(super_sectors: u64) -> Self {
-        Self::build(super_sectors, true, BootSlot::A, BootSlot::B)
-    }
-
-    pub fn with_identical_boot_lun_tables() -> Self {
-        Self::build(PARTITION_SECTORS, false, BootSlot::A, BootSlot::B)
-    }
-
-    pub fn stock_b() -> Self {
-        Self::build(PARTITION_SECTORS, true, BootSlot::B, BootSlot::B)
-    }
-
-    pub fn target_slot_a() -> Self {
-        Self::build(PARTITION_SECTORS, true, BootSlot::B, BootSlot::A)
+    pub fn builder(stock_slot: BootSlot, target_slot: BootSlot) -> InstallFixtureBuilder {
+        InstallFixtureBuilder {
+            super_sectors: PARTITION_SECTORS,
+            distinct_boot_lun_tables: true,
+            stock_slot,
+            target_slot,
+        }
     }
 
     pub fn plan_directory(&self) -> PathBuf {
@@ -98,7 +119,7 @@ impl InstallFixture {
         fs::write(path, data).expect("candidate file");
     }
 
-    fn build(
+    fn assemble(
         super_sectors: u64,
         distinct_boot_lun_tables: bool,
         stock_slot: BootSlot,

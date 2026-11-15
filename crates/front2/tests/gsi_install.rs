@@ -96,14 +96,14 @@ fn inputs_of(fixture: &InstallFixture) -> Result<InstallInputs> {
 }
 
 fn prepared_fixture() -> InstallFixture {
-    let fixture = InstallFixture::standard();
+    let fixture = InstallFixture::new(BootSlot::A, BootSlot::B);
     let backup = &fixture.inputs.backup_directory;
     write_manifest(backup, &manifest_entries(backup));
     fixture
 }
 
 fn prepared_b_fixture() -> InstallFixture {
-    let fixture = InstallFixture::stock_b();
+    let fixture = InstallFixture::new(BootSlot::B, BootSlot::B);
     let backup = &fixture.inputs.backup_directory;
     write_manifest(backup, &manifest_entries(backup));
     fixture

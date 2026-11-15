@@ -284,7 +284,7 @@ mod tests {
     fn letter_1462_a_plan_keeps_the_build_or_the_failure_of_its_read() {
         use crate::install_support::InstallFixture;
 
-        let fixture = InstallFixture::standard();
+        let fixture = InstallFixture::new(BootSlot::A, BootSlot::B);
         let stored = fixture.stored_plan();
         let review = InstallReview {
             plan: stored.plan().clone(),
@@ -401,7 +401,7 @@ mod tests {
     fn the_newest_stored_plan_that_fits_is_used_again() {
         use crate::install_support::InstallFixture;
 
-        let fixture = InstallFixture::standard();
+        let fixture = InstallFixture::new(BootSlot::A, BootSlot::B);
         let paths = DataPaths::new(fixture.directory.path().join("data"));
         let plans = paths.install_plans();
         let plan = InstallPlan::build(&fixture.inputs).expect("plan");
@@ -427,7 +427,7 @@ mod tests {
     fn letter_1348_a_found_backup_gives_the_newest_plan_of_the_image_and_its_backup() {
         use crate::install_support::InstallFixture;
 
-        let fixture = InstallFixture::standard();
+        let fixture = InstallFixture::new(BootSlot::A, BootSlot::B);
         let paths = DataPaths::new(fixture.directory.path().join("data"));
         let plans = paths.install_plans();
         let first = InstallPlan::build(&fixture.inputs).expect("plan");

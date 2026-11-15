@@ -90,7 +90,7 @@ fn rejection<Outcome: Debug>(result: Result<Outcome>, fragment: &str) {
 
 #[test]
 fn the_stock_b_plan_keeps_the_boot_lun_and_omits_the_gpt_steps() {
-    let fixture = InstallFixture::stock_b();
+    let fixture = InstallFixture::new(BootSlot::B, BootSlot::B);
     let stored = fixture.stored_plan();
     let labels: Vec<String> = stored.plan().steps.iter().map(InstallStep::label).collect();
     assert_eq!(labels, STOCK_B_LABELS);
@@ -110,12 +110,12 @@ fn the_stock_b_plan_keeps_the_boot_lun_and_omits_the_gpt_steps() {
 
 #[test]
 fn the_stock_a_plan_omits_the_stock_slot_field_and_the_stock_b_plan_records_it() {
-    let slot_a = InstallFixture::standard();
+    let slot_a = InstallFixture::new(BootSlot::A, BootSlot::B);
     let plan_a = InstallPlan::build(&slot_a.inputs).expect("slot A plan");
     let value_a = serde_json::to_value(&plan_a).expect("slot A value");
     assert_eq!(value_a.get("stock_slot"), None);
 
-    let slot_b = InstallFixture::stock_b();
+    let slot_b = InstallFixture::new(BootSlot::B, BootSlot::B);
     let plan_b = InstallPlan::build(&slot_b.inputs).expect("slot B plan");
     let value_b = serde_json::to_value(&plan_b).expect("slot B value");
     assert_eq!(value_b["stock_slot"], Value::from("b"));
@@ -123,7 +123,7 @@ fn the_stock_a_plan_omits_the_stock_slot_field_and_the_stock_b_plan_records_it()
 
 #[test]
 fn the_target_b_plan_omits_the_target_slot_field_and_a_target_a_plan_records_it() {
-    let fixture = InstallFixture::standard();
+    let fixture = InstallFixture::new(BootSlot::A, BootSlot::B);
     let mut plan = InstallPlan::build(&fixture.inputs).expect("plan");
 
     let value_b = serde_json::to_value(&plan).expect("target B value");
@@ -140,7 +140,7 @@ fn the_target_b_plan_omits_the_target_slot_field_and_a_target_a_plan_records_it(
 
 #[test]
 fn an_install_plan_for_target_slot_a_switches_the_boot_lun_and_validates() {
-    let fixture = InstallFixture::target_slot_a();
+    let fixture = InstallFixture::new(BootSlot::B, BootSlot::A);
     let plan = InstallPlan::build(&fixture.inputs).expect("kk plan");
     plan.validate().expect("the kk plan validates");
     assert_eq!(plan.stock_slot, BootSlot::B);
@@ -157,7 +157,7 @@ fn an_install_plan_for_target_slot_a_switches_the_boot_lun_and_validates() {
 
 #[test]
 fn an_install_plan_file_for_target_slot_a_round_trips_through_a_save_and_load() {
-    let fixture = InstallFixture::target_slot_a();
+    let fixture = InstallFixture::new(BootSlot::B, BootSlot::A);
     let stored = fixture.stored_plan();
     assert_eq!(stored.plan().stock_slot, BootSlot::B);
     assert_eq!(stored.plan().target_slot, BootSlot::A);
@@ -176,7 +176,7 @@ fn an_install_plan_file_for_target_slot_a_round_trips_through_a_save_and_load() 
 
 #[test]
 fn a_stock_b_first_install_writes_five_regions_and_sends_no_boot_lun_command() {
-    let mut fixture = InstallFixture::stock_b();
+    let mut fixture = InstallFixture::new(BootSlot::B, BootSlot::B);
     let plan = fixture.stored_plan();
     let (write, data_wipe, restart) = approvals(plan.plan_sha256());
     let mut executor = InstallExecutor::new(&plan, &mut fixture.storage);
@@ -223,7 +223,7 @@ fn a_stock_b_first_install_writes_five_regions_and_sends_no_boot_lun_command() {
 
 #[test]
 fn a_stock_b_preflight_stops_when_the_boot_wlun_gives_the_original_lun() {
-    let mut fixture = InstallFixture::stock_b();
+    let mut fixture = InstallFixture::new(BootSlot::B, BootSlot::B);
     let plan = fixture.stored_plan();
     fixture.storage.start_with_boot_lun(1);
     let mut executor = InstallExecutor::new(&plan, &mut fixture.storage);
@@ -244,7 +244,7 @@ fn a_stock_b_preflight_stops_when_the_boot_wlun_gives_the_original_lun() {
 
 #[test]
 fn a_stock_b_resume_after_the_first_region_keeps_the_boot_lun_neutral() {
-    let mut fixture = InstallFixture::stock_b();
+    let mut fixture = InstallFixture::new(BootSlot::B, BootSlot::B);
     let plan = fixture.stored_plan();
     let first = step_named(&plan, "vbmeta_system_b");
     let data = candidate_bytes(&plan, &first);
@@ -266,7 +266,7 @@ fn a_stock_b_resume_after_the_first_region_keeps_the_boot_lun_neutral() {
 
 #[test]
 fn a_stock_b_preflight_checks_every_gpt_copy_against_the_backup() {
-    let mut fixture = InstallFixture::stock_b();
+    let mut fixture = InstallFixture::new(BootSlot::B, BootSlot::B);
     let plan = fixture.stored_plan();
     let mut header = fixture.storage.content(4, 1, 1);
     header[200] ^= 0x01;

@@ -87,13 +87,14 @@ where
 mod tests {
     use super::*;
     use crate::install_support::{InstallFixture, MockCall, MockStorage};
+    use front2::gpt::BootSlot;
     use std::cell::RefCell;
     use std::rc::Rc;
 
     type Calls = Rc<RefCell<Vec<MockCall>>>;
 
     fn planned() -> (InstallFixture, PathBuf, String) {
-        let fixture = InstallFixture::standard();
+        let fixture = InstallFixture::new(BootSlot::A, BootSlot::B);
         let plan = fixture.stored_plan();
         let plan_directory = fixture.plan_directory();
         (fixture, plan_directory, plan.plan_sha256().to_string())

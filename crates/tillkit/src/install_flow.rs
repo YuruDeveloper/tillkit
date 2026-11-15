@@ -284,9 +284,10 @@ pub mod tests {
     use crate::edl_link::EdlLink;
     use crate::install_support::{InstallFixture, MockStorage};
     use crate::install_worker;
+    use front2::gpt::BootSlot;
 
     pub fn planned() -> (InstallFixture, InstallFlow) {
-        let fixture = InstallFixture::standard();
+        let fixture = InstallFixture::new(BootSlot::A, BootSlot::B);
         let stored = fixture.stored_plan();
         let review = InstallReview {
             plan: stored.plan().clone(),

@@ -1,6 +1,7 @@
 mod gpt_support;
 mod install_support;
 
+use front2::gpt::BootSlot;
 use front2::install::{
     CHUNK_SECTORS, DataWipeApproval, InstallExecutor, InstallStep, PreflightRecord,
     RestartApproval, StepJudgment, StepSource, StepState, StoredInstallPlan, WriteApproval,
@@ -247,7 +248,7 @@ fn prepare(
 
 fn resume_case(index: usize, interruption: Interruption) {
     let case = format!("step {index}, {interruption:?}");
-    let mut fixture = InstallFixture::standard();
+    let mut fixture = InstallFixture::new(BootSlot::A, BootSlot::B);
     let plan = fixture.stored_plan();
     prepare(&mut fixture, &plan, index, interruption);
     let step_complete = interruption == Interruption::After
@@ -288,7 +289,7 @@ fn resume_case(index: usize, interruption: Interruption) {
 
 #[test]
 fn an_install_that_stopped_before_within_or_after_any_step_continues_to_the_restart() {
-    let plan = InstallFixture::standard().stored_plan();
+    let plan = InstallFixture::new(BootSlot::A, BootSlot::B).stored_plan();
     for (index, step) in plan.plan().steps.iter().enumerate() {
         if matches!(step, InstallStep::Restart) {
             continue;
@@ -303,7 +304,9 @@ fn an_install_that_stopped_before_within_or_after_any_step_continues_to_the_rest
 
 #[test]
 fn a_super_write_that_stopped_after_its_first_chunk_is_of_unknown_content_and_is_written_again() {
-    let mut fixture = InstallFixture::with_super_sectors(LARGE_SUPER_SECTORS);
+    let mut fixture = InstallFixture::builder(BootSlot::A, BootSlot::B)
+        .with_super_sectors(LARGE_SUPER_SECTORS)
+        .build();
     let plan = fixture.stored_plan();
     let index = step_index(&plan, "super");
     let super_step = plan.plan().write_step("super").expect("super").clone();
@@ -330,7 +333,7 @@ fn a_super_write_that_stopped_after_its_first_chunk_is_of_unknown_content_and_is
 
 #[test]
 fn a_done_step_after_a_step_that_is_not_done_fails_the_preflight() {
-    let mut fixture = InstallFixture::standard();
+    let mut fixture = InstallFixture::new(BootSlot::A, BootSlot::B);
     let plan = fixture.stored_plan();
     let super_index = step_index(&plan, "super");
     apply_step(&mut fixture.storage, &plan, &plan.plan().steps[super_index]);
@@ -344,7 +347,7 @@ fn a_done_step_after_a_step_that_is_not_done_fails_the_preflight() {
 
 #[test]
 fn a_second_step_of_unknown_content_fails_the_preflight() {
-    let mut fixture = InstallFixture::standard();
+    let mut fixture = InstallFixture::new(BootSlot::A, BootSlot::B);
     let plan = fixture.stored_plan();
     let first = step_index(&plan, "init_boot_b");
     apply_steps_before(&mut fixture.storage, &plan, first);
@@ -362,7 +365,7 @@ fn a_second_step_of_unknown_content_fails_the_preflight() {
 
 #[test]
 fn a_boot_wlun_that_gives_neither_boot_lun_fails_the_preflight() {
-    let mut fixture = InstallFixture::standard();
+    let mut fixture = InstallFixture::new(BootSlot::A, BootSlot::B);
     let plan = fixture.stored_plan();
     apply_steps_before(&mut fixture.storage, &plan, boot_lun_index(&plan));
     fixture.storage.start_with_boot_lun(3);
@@ -377,7 +380,7 @@ fn a_boot_wlun_that_gives_neither_boot_lun_fails_the_preflight() {
 
 #[test]
 fn a_read_error_fails_the_preflight_and_is_not_judged_as_unknown_content() {
-    let mut fixture = InstallFixture::standard();
+    let mut fixture = InstallFixture::new(BootSlot::A, BootSlot::B);
     let plan = fixture.stored_plan();
     let index = step_index(&plan, "recovery_b");
     apply_steps_before(&mut fixture.storage, &plan, index);
@@ -395,7 +398,7 @@ fn a_read_error_fails_the_preflight_and_is_not_judged_as_unknown_content() {
 
 #[test]
 fn a_changed_gpt_copy_that_no_step_writes_fails_the_preflight_of_a_resume() {
-    let mut fixture = InstallFixture::standard();
+    let mut fixture = InstallFixture::new(BootSlot::A, BootSlot::B);
     let plan = fixture.stored_plan();
     apply_steps_before(&mut fixture.storage, &plan, boot_lun_index(&plan));
     change_one_byte(&mut fixture.storage, 2, LAST_LBA - 4);
@@ -411,7 +414,7 @@ fn a_changed_gpt_copy_that_no_step_writes_fails_the_preflight_of_a_resume() {
 
 #[test]
 fn the_gpt_copies_that_the_plan_writes_are_judged_as_steps_and_not_against_the_backup() {
-    let mut fixture = InstallFixture::standard();
+    let mut fixture = InstallFixture::new(BootSlot::A, BootSlot::B);
     let plan = fixture.stored_plan();
     apply_steps_before(&mut fixture.storage, &plan, boot_lun_index(&plan));
     let mut executor = InstallExecutor::new(&plan, &mut fixture.storage);
@@ -433,7 +436,7 @@ fn the_gpt_copies_that_the_plan_writes_are_judged_as_steps_and_not_against_the_b
 }
 
 fn fixture_with_the_backup_content_as_the_dtbo_candidate() -> InstallFixture {
-    let mut fixture = InstallFixture::standard();
+    let mut fixture = InstallFixture::new(BootSlot::A, BootSlot::B);
     let original = pattern("dtbo_b-original", PARTITION_SECTORS as usize * SECTOR);
     fixture.replace_candidate("dtbo_b", &original);
     fixture

@@ -42,6 +42,7 @@ fn continued(done: usize, name: &str) -> String {
 mod tests {
     use super::*;
     use crate::install_support::InstallFixture;
+    use front2::gpt::BootSlot;
 
     fn point(first_install: bool, next_index: usize, unknown: Option<&str>) -> ResumePoint {
         ResumePoint {
@@ -54,7 +55,7 @@ mod tests {
 
     #[test]
     fn the_lines_tell_where_the_write_starts() {
-        let fixture = InstallFixture::standard();
+        let fixture = InstallFixture::new(BootSlot::A, BootSlot::B);
         let plan = InstallPlan::build(&fixture.inputs).expect("plan");
         let writes = plan.write_steps();
         let (second, step) = writes[1];

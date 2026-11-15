@@ -213,13 +213,15 @@ mod tests {
 
     #[test]
     fn a_slot_a_plan_moves_the_boot_lun_and_a_slot_b_plan_keeps_it() {
-        let slot_a = InstallPlan::build(&InstallFixture::standard().inputs).expect("slot A plan");
+        let slot_a = InstallPlan::build(&InstallFixture::new(BootSlot::A, BootSlot::B).inputs)
+            .expect("slot A plan");
         assert_eq!(slot_a.stock_slot, BootSlot::A);
         assert_eq!(boot_lun_text(&slot_a), "LUN 1 → LUN 2");
         assert!(shows_boot_lun_unknown(&slot_a));
         assert!(!shows_slot_b_not_tested(&slot_a));
 
-        let slot_b = InstallPlan::build(&InstallFixture::stock_b().inputs).expect("slot B plan");
+        let slot_b = InstallPlan::build(&InstallFixture::new(BootSlot::B, BootSlot::B).inputs)
+            .expect("slot B plan");
         assert_eq!(slot_b.stock_slot, BootSlot::B);
         assert_eq!(boot_lun_text(&slot_b), format!("LUN 2, {BOOT_LUN_KEPT}"));
         assert!(!shows_boot_lun_unknown(&slot_b));

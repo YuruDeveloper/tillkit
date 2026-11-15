@@ -2,7 +2,7 @@ mod gpt_support;
 mod install_support;
 
 use front2::digest::sha256_bytes;
-use front2::gpt::{GptCopy, GptCopyKind, PartitionMap};
+use front2::gpt::{BootSlot, GptCopy, GptCopyKind, PartitionMap};
 use front2::install::{
     CHUNK_SECTORS, DataWipeApproval, DigestCheck, InstallExecutor, InstallPlan, InstallStep,
     PLAN_FILE, RestartApproval, StepSource, StepState, StoredInstallPlan, WriteApproval, WriteStep,
@@ -100,7 +100,9 @@ fn assert_refuses_everything(
 
 #[test]
 fn the_whole_flow_writes_every_step_and_restarts_only_with_the_restart_approval() {
-    let mut fixture = InstallFixture::with_super_sectors(LARGE_SUPER_SECTORS);
+    let mut fixture = InstallFixture::builder(BootSlot::A, BootSlot::B)
+        .with_super_sectors(LARGE_SUPER_SECTORS)
+        .build();
     let plan = fixture.stored_plan();
     let (write, data_wipe, restart) = approvals(plan.plan_sha256());
     let misc = step_named(&plan, "misc");
@@ -168,7 +170,7 @@ fn the_whole_flow_writes_every_step_and_restarts_only_with_the_restart_approval(
 
 #[test]
 fn a_new_executor_continues_with_the_progress_record_of_the_one_before() {
-    let mut fixture = InstallFixture::standard();
+    let mut fixture = InstallFixture::new(BootSlot::A, BootSlot::B);
     let plan = fixture.stored_plan();
     let (write, data_wipe, restart) = approvals(plan.plan_sha256());
 
@@ -198,7 +200,7 @@ fn a_new_executor_continues_with_the_progress_record_of_the_one_before() {
 
 #[test]
 fn a_progress_record_of_another_plan_is_refused() {
-    let mut fixture = InstallFixture::standard();
+    let mut fixture = InstallFixture::new(BootSlot::A, BootSlot::B);
     let plan = fixture.stored_plan();
     let mut other = InstallExecutor::new(&plan, &mut fixture.storage)
         .progress()
@@ -216,7 +218,7 @@ fn a_progress_record_of_another_plan_is_refused() {
 
 #[test]
 fn the_misc_step_changes_only_the_first_sector() {
-    let mut fixture = InstallFixture::standard();
+    let mut fixture = InstallFixture::new(BootSlot::A, BootSlot::B);
     let plan = fixture.stored_plan();
     let (write, data_wipe, _) = approvals(plan.plan_sha256());
     let location = fixture.location("misc");
@@ -240,7 +242,7 @@ fn the_misc_step_changes_only_the_first_sector() {
 
 #[test]
 fn the_plan_holds_the_fixed_steps_and_facts_and_loads_again() {
-    let fixture = InstallFixture::standard();
+    let fixture = InstallFixture::new(BootSlot::A, BootSlot::B);
     let directory = fixture.plan_directory();
     let plan = InstallPlan::build(&fixture.inputs).expect("plan");
     let sha256 = plan.save(&directory).expect("save");
@@ -294,7 +296,7 @@ fn the_plan_holds_the_fixed_steps_and_facts_and_loads_again() {
 
 #[test]
 fn the_plan_takes_positions_from_the_partition_map_and_records_the_restore_set() {
-    let fixture = InstallFixture::standard();
+    let fixture = InstallFixture::new(BootSlot::A, BootSlot::B);
     let stored = fixture.stored_plan();
     for name in ["boot_b", "vbmeta_system_b", "super", "metadata"] {
         let step = step_named(&stored, name);
@@ -333,7 +335,7 @@ fn the_plan_takes_positions_from_the_partition_map_and_records_the_restore_set()
 
 #[test]
 fn a_saved_plan_is_never_written_over() {
-    let fixture = InstallFixture::standard();
+    let fixture = InstallFixture::new(BootSlot::A, BootSlot::B);
     let directory = fixture.plan_directory();
     let plan = InstallPlan::build(&fixture.inputs).expect("plan");
     plan.save(&directory).expect("first save");
@@ -346,7 +348,7 @@ fn a_saved_plan_is_never_written_over() {
 
 #[test]
 fn an_image_larger_than_its_partition_is_rejected() {
-    let mut fixture = InstallFixture::standard();
+    let mut fixture = InstallFixture::new(BootSlot::A, BootSlot::B);
     let bytes = (PARTITION_SECTORS as usize + 1) * SECTOR;
     fixture.replace_candidate("dtbo_b", &pattern("larger", bytes));
     let err = rejection(
@@ -358,7 +360,7 @@ fn an_image_larger_than_its_partition_is_rejected() {
 
 #[test]
 fn an_image_smaller_than_its_partition_is_rejected() {
-    let mut fixture = InstallFixture::standard();
+    let mut fixture = InstallFixture::new(BootSlot::A, BootSlot::B);
     let bytes = (PARTITION_SECTORS as usize - 1) * SECTOR;
     fixture.replace_candidate("vbmeta_b", &pattern("smaller", bytes));
     let err = rejection(
@@ -370,7 +372,7 @@ fn an_image_smaller_than_its_partition_is_rejected() {
 
 #[test]
 fn steps_that_cover_the_same_sectors_are_rejected() {
-    let fixture = InstallFixture::standard();
+    let fixture = InstallFixture::new(BootSlot::A, BootSlot::B);
     fixture.stored_plan();
     let directory = fixture.plan_directory();
     change_plan_file(&directory, |plan| {
@@ -385,7 +387,7 @@ fn steps_that_cover_the_same_sectors_are_rejected() {
 
 #[test]
 fn letter_1144_the_plan_records_the_userdata_backup_that_the_data_wipe_needs() {
-    let fixture = InstallFixture::standard();
+    let fixture = InstallFixture::new(BootSlot::A, BootSlot::B);
     let plan = fixture.stored_plan();
     let restore = &plan.plan().data_restore;
     let location = fixture.location("userdata");
@@ -404,7 +406,7 @@ fn letter_1144_the_plan_records_the_userdata_backup_that_the_data_wipe_needs() {
         |plan| plan["data_restore"]["sectors"] = Value::from(1u64),
     ];
     for change in changes {
-        let fixture = InstallFixture::standard();
+        let fixture = InstallFixture::new(BootSlot::A, BootSlot::B);
         fixture.stored_plan();
         change_plan_file(&fixture.plan_directory(), change);
         rejection(
@@ -413,14 +415,14 @@ fn letter_1144_the_plan_records_the_userdata_backup_that_the_data_wipe_needs() {
         );
     }
 
-    let mut smaller = InstallFixture::standard();
+    let mut smaller = InstallFixture::new(BootSlot::A, BootSlot::B);
     smaller.inputs.userdata_original.bytes -= 1;
     rejection(
         InstallPlan::build(&smaller.inputs),
         "smaller than the partition",
     );
 
-    let missing = InstallFixture::standard();
+    let missing = InstallFixture::new(BootSlot::A, BootSlot::B);
     let file = missing
         .inputs
         .backup_directory
@@ -454,7 +456,7 @@ fn a_changed_plan_file_is_rejected_when_it_is_loaded() {
         ),
     ];
     for (change, fragment) in changes {
-        let fixture = InstallFixture::standard();
+        let fixture = InstallFixture::new(BootSlot::A, BootSlot::B);
         fixture.stored_plan();
         change_plan_file(&fixture.plan_directory(), change);
         rejection(InstallPlan::load(&fixture.plan_directory()), fragment);
@@ -463,7 +465,7 @@ fn a_changed_plan_file_is_rejected_when_it_is_loaded() {
 
 #[test]
 fn a_plan_file_with_an_unknown_field_or_a_changed_payload_is_rejected() {
-    let fixture = InstallFixture::standard();
+    let fixture = InstallFixture::new(BootSlot::A, BootSlot::B);
     fixture.stored_plan();
     let directory = fixture.plan_directory();
     let payload = directory.join("gpt_main0-slot-b.bin");
@@ -481,7 +483,7 @@ fn a_plan_file_with_an_unknown_field_or_a_changed_payload_is_rejected() {
         |plan| plan["gpt_copies"][0]["checked"] = Value::Bool(true),
     ];
     for change in changes {
-        let fixture = InstallFixture::standard();
+        let fixture = InstallFixture::new(BootSlot::A, BootSlot::B);
         fixture.stored_plan();
         change_plan_file(&fixture.plan_directory(), change);
         let err = InstallPlan::load(&fixture.plan_directory()).expect_err("unknown field");
@@ -491,7 +493,9 @@ fn a_plan_file_with_an_unknown_field_or_a_changed_payload_is_rejected() {
 
 #[test]
 fn identical_gpt_copies_on_lun_1_and_lun_2_are_rejected_when_the_plan_is_built() {
-    let fixture = InstallFixture::with_identical_boot_lun_tables();
+    let fixture = InstallFixture::builder(BootSlot::A, BootSlot::B)
+        .with_identical_boot_lun_tables()
+        .build();
     let err = rejection(
         InstallPlan::build(&fixture.inputs),
         "the main GPT copies of LUN 1 and LUN 2 are identical",
@@ -501,7 +505,7 @@ fn identical_gpt_copies_on_lun_1_and_lun_2_are_rejected_when_the_plan_is_built()
 
 #[test]
 fn inputs_that_do_not_come_from_the_backup_are_rejected() {
-    let mut fixture = InstallFixture::standard();
+    let mut fixture = InstallFixture::new(BootSlot::A, BootSlot::B);
     let backup = fixture.inputs.backup_directory.clone();
     let main0 = fs::read(backup.join("gpt/gpt_main0.bin")).expect("main 0");
     let main4 = fs::read(backup.join("gpt/gpt_main4.bin")).expect("main 4");
@@ -512,14 +516,14 @@ fn inputs_that_do_not_come_from_the_backup_are_rejected() {
         "the partition map differs",
     );
 
-    let mut fixture = InstallFixture::standard();
+    let mut fixture = InstallFixture::new(BootSlot::A, BootSlot::B);
     fixture.inputs.misc_first_sector[100] ^= 0x01;
     rejection(
         InstallPlan::build(&fixture.inputs),
         "not the data wipe request",
     );
 
-    let mut fixture = InstallFixture::standard();
+    let mut fixture = InstallFixture::new(BootSlot::A, BootSlot::B);
     let inputs = &mut fixture.inputs;
     std::mem::swap(&mut inputs.activation_lun0, &mut inputs.activation_lun4);
     rejection(
@@ -527,21 +531,21 @@ fn inputs_that_do_not_come_from_the_backup_are_rejected() {
         "no slot activation that was prepared for LUN 0",
     );
 
-    let mut fixture = InstallFixture::standard();
+    let mut fixture = InstallFixture::new(BootSlot::A, BootSlot::B);
     fixture.inputs.images.remove(2);
     rejection(
         InstallPlan::build(&fixture.inputs),
         "exactly one image for init_boot_b",
     );
 
-    let mut fixture = InstallFixture::standard();
+    let mut fixture = InstallFixture::new(BootSlot::A, BootSlot::B);
     fixture.inputs.gpt_backups.pop();
     rejection(InstallPlan::build(&fixture.inputs), "GPT backup copies");
 }
 
 #[test]
 fn writes_are_refused_without_a_passed_preflight() {
-    let mut fixture = InstallFixture::standard();
+    let mut fixture = InstallFixture::new(BootSlot::A, BootSlot::B);
     let plan = fixture.stored_plan();
     let (write, data_wipe, restart) = approvals(plan.plan_sha256());
     let mut executor = InstallExecutor::new(&plan, &mut fixture.storage);
@@ -554,7 +558,7 @@ fn writes_are_refused_without_a_passed_preflight() {
 
 #[test]
 fn preflight_stops_on_a_gpt_copy_that_differs_from_the_backup() {
-    let mut fixture = InstallFixture::standard();
+    let mut fixture = InstallFixture::new(BootSlot::A, BootSlot::B);
     let plan = fixture.stored_plan();
     let mut header = fixture.storage.content(3, 1, 1);
     header[200] ^= 0x01;
@@ -571,7 +575,7 @@ fn preflight_stops_on_a_gpt_copy_that_differs_from_the_backup() {
 
 #[test]
 fn preflight_stops_when_a_target_does_not_hold_the_backup_content() {
-    let mut fixture = InstallFixture::standard();
+    let mut fixture = InstallFixture::new(BootSlot::A, BootSlot::B);
     let plan = fixture.stored_plan();
     let location = fixture.location("vbmeta_b");
     let mut sector = fixture
@@ -592,7 +596,7 @@ fn preflight_stops_when_a_target_does_not_hold_the_backup_content() {
 
 #[test]
 fn preflight_stops_when_the_boot_wlun_does_not_give_the_gpt_of_lun_1() {
-    let mut fixture = InstallFixture::standard();
+    let mut fixture = InstallFixture::new(BootSlot::A, BootSlot::B);
     let plan = fixture.stored_plan();
     fixture.storage.start_with_boot_lun(2);
     let mut executor = InstallExecutor::new(&plan, &mut fixture.storage);
@@ -606,7 +610,7 @@ fn preflight_stops_when_the_boot_wlun_does_not_give_the_gpt_of_lun_1() {
 
 #[test]
 fn preflight_stops_on_a_candidate_file_that_changed_after_the_plan() {
-    let mut fixture = InstallFixture::standard();
+    let mut fixture = InstallFixture::new(BootSlot::A, BootSlot::B);
     let plan = fixture.stored_plan();
     let bytes = PARTITION_SECTORS as usize * SECTOR;
     fixture.overwrite_candidate_file("boot_b", &pattern("changed", bytes));
@@ -618,7 +622,7 @@ fn preflight_stops_on_a_candidate_file_that_changed_after_the_plan() {
 
 #[test]
 fn letter_1157_a_candidate_changed_after_the_preflight_is_refused_before_its_write() {
-    let mut fixture = InstallFixture::standard();
+    let mut fixture = InstallFixture::new(BootSlot::A, BootSlot::B);
     let plan = fixture.stored_plan();
     let (write, data_wipe, _) = approvals(plan.plan_sha256());
     let unchanged = step_named(&plan, "boot_b");
@@ -650,7 +654,7 @@ fn letter_1157_a_candidate_changed_after_the_preflight_is_refused_before_its_wri
 
 #[test]
 fn letter_1157_preflight_stops_on_a_backup_file_with_a_changed_byte() {
-    let mut fixture = InstallFixture::standard();
+    let mut fixture = InstallFixture::new(BootSlot::A, BootSlot::B);
     let original = &fixture.inputs.images[0].original;
     assert_eq!(fixture.inputs.images[0].partition, "boot_b");
     let path = fixture.inputs.backup_directory.join(&original.file);
@@ -670,7 +674,7 @@ fn letter_1157_preflight_stops_on_a_backup_file_with_a_changed_byte() {
 
 #[test]
 fn letter_1157_preflight_stops_on_a_userdata_backup_file_with_another_length() {
-    let mut fixture = InstallFixture::standard();
+    let mut fixture = InstallFixture::new(BootSlot::A, BootSlot::B);
     let plan = fixture.stored_plan();
     let path = fixture
         .inputs
@@ -690,7 +694,7 @@ fn letter_1157_preflight_stops_on_a_userdata_backup_file_with_another_length() {
 
 #[test]
 fn a_write_that_is_acknowledged_but_ignored_stops_the_install() {
-    let mut fixture = InstallFixture::standard();
+    let mut fixture = InstallFixture::new(BootSlot::A, BootSlot::B);
     let plan = fixture.stored_plan();
     let (write, data_wipe, _) = approvals(plan.plan_sha256());
     let failing = step_named(&plan, "recovery_b");
@@ -720,7 +724,9 @@ fn a_write_that_is_acknowledged_but_ignored_stops_the_install() {
 
 #[test]
 fn a_write_with_one_wrong_byte_stops_the_install() {
-    let mut fixture = InstallFixture::with_super_sectors(LARGE_SUPER_SECTORS);
+    let mut fixture = InstallFixture::builder(BootSlot::A, BootSlot::B)
+        .with_super_sectors(LARGE_SUPER_SECTORS)
+        .build();
     let plan = fixture.stored_plan();
     let (write, data_wipe, _) = approvals(plan.plan_sha256());
     let failing = step_named(&plan, "super");
@@ -750,7 +756,7 @@ fn a_write_with_one_wrong_byte_stops_the_install() {
 
 #[test]
 fn a_short_readback_stops_the_install() {
-    let mut fixture = InstallFixture::standard();
+    let mut fixture = InstallFixture::new(BootSlot::A, BootSlot::B);
     let plan = fixture.stored_plan();
     let (write, data_wipe, _) = approvals(plan.plan_sha256());
     let failing = step_named(&plan, "dtbo_b");
@@ -772,7 +778,7 @@ fn a_short_readback_stops_the_install() {
 
 #[test]
 fn a_read_error_during_the_readback_stops_the_install() {
-    let mut fixture = InstallFixture::standard();
+    let mut fixture = InstallFixture::new(BootSlot::A, BootSlot::B);
     let plan = fixture.stored_plan();
     let (write, data_wipe, _) = approvals(plan.plan_sha256());
     let failing = step_named(&plan, "vbmeta_system_b");
@@ -797,7 +803,7 @@ fn a_read_error_during_the_readback_stops_the_install() {
 
 #[test]
 fn a_boot_wlun_that_still_gives_lun_1_after_the_command_stops_the_install() {
-    let mut fixture = InstallFixture::standard();
+    let mut fixture = InstallFixture::new(BootSlot::A, BootSlot::B);
     let plan = fixture.stored_plan();
     let (write, data_wipe, _) = approvals(plan.plan_sha256());
     let misc = step_named(&plan, "misc");
@@ -823,7 +829,7 @@ fn a_boot_wlun_that_still_gives_lun_1_after_the_command_stops_the_install() {
 
 #[test]
 fn doc_1066_no_write_starts_without_the_data_wipe_approval() {
-    let mut fixture = InstallFixture::standard();
+    let mut fixture = InstallFixture::new(BootSlot::A, BootSlot::B);
     let plan = fixture.stored_plan();
     let (write, data_wipe, _) = approvals(plan.plan_sha256());
     let (_, other_data_wipe, _) = approvals(OTHER_PLAN_SHA256);
@@ -842,7 +848,7 @@ fn doc_1066_no_write_starts_without_the_data_wipe_approval() {
 
 #[test]
 fn the_misc_step_stays_closed_without_the_data_wipe_approval() {
-    let mut fixture = InstallFixture::standard();
+    let mut fixture = InstallFixture::new(BootSlot::A, BootSlot::B);
     let plan = fixture.stored_plan();
     let (write, data_wipe, restart) = approvals(plan.plan_sha256());
     let (_, other_data_wipe, _) = approvals(OTHER_PLAN_SHA256);
@@ -875,7 +881,7 @@ fn the_misc_step_stays_closed_without_the_data_wipe_approval() {
 
 #[test]
 fn the_restart_stays_closed_without_a_restart_approval_for_this_plan() {
-    let mut fixture = InstallFixture::standard();
+    let mut fixture = InstallFixture::new(BootSlot::A, BootSlot::B);
     let plan = fixture.stored_plan();
     let (write, data_wipe, restart) = approvals(plan.plan_sha256());
     let (_, _, other_restart) = approvals(OTHER_PLAN_SHA256);
@@ -902,7 +908,7 @@ fn the_restart_stays_closed_without_a_restart_approval_for_this_plan() {
 
 #[test]
 fn approvals_for_another_plan_are_refused() {
-    let mut fixture = InstallFixture::standard();
+    let mut fixture = InstallFixture::new(BootSlot::A, BootSlot::B);
     let plan = fixture.stored_plan();
     let (write, data_wipe, _) = approvals(plan.plan_sha256());
     let (other_write, _, _) = approvals(OTHER_PLAN_SHA256);
@@ -925,7 +931,7 @@ fn approvals_for_another_plan_are_refused() {
 
 #[test]
 fn a_restart_after_a_failed_step_is_refused() {
-    let mut fixture = InstallFixture::standard();
+    let mut fixture = InstallFixture::new(BootSlot::A, BootSlot::B);
     let plan = fixture.stored_plan();
     let (write, data_wipe, restart) = approvals(plan.plan_sha256());
     let misc = step_named(&plan, "misc");
@@ -948,7 +954,7 @@ fn a_restart_after_a_failed_step_is_refused() {
 
 #[test]
 fn the_executor_sends_no_restart_on_its_own_or_when_it_is_dropped() {
-    let mut fixture = InstallFixture::standard();
+    let mut fixture = InstallFixture::new(BootSlot::A, BootSlot::B);
     let plan = fixture.stored_plan();
     let (write, data_wipe, _) = approvals(plan.plan_sha256());
     let mut executor = InstallExecutor::new(&plan, &mut fixture.storage);
@@ -964,7 +970,7 @@ fn the_executor_sends_no_restart_on_its_own_or_when_it_is_dropped() {
     assert_eq!(*fixture.calls.borrow(), before);
     assert_eq!(count(&fixture.calls, MockCall::is_reset), 0);
 
-    let mut fixture = InstallFixture::standard();
+    let mut fixture = InstallFixture::new(BootSlot::A, BootSlot::B);
     let plan = fixture.stored_plan();
     let (write, data_wipe, _) = approvals(plan.plan_sha256());
     let failing = step_named(&plan, "boot_b");
@@ -986,7 +992,7 @@ fn the_executor_sends_no_restart_on_its_own_or_when_it_is_dropped() {
 
 #[test]
 fn a_failed_restart_command_is_recorded_and_not_sent_again() {
-    let mut fixture = InstallFixture::standard();
+    let mut fixture = InstallFixture::new(BootSlot::A, BootSlot::B);
     let plan = fixture.stored_plan();
     let (write, data_wipe, restart) = approvals(plan.plan_sha256());
     fixture.storage.fail_the_reset_command();

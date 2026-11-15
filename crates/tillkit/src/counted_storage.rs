@@ -51,10 +51,11 @@ impl<Storage: SectorStorage> SectorStorage for CountedStorage<Storage> {
 mod tests {
     use super::*;
     use crate::install_support::InstallFixture;
+    use front2::gpt::BootSlot;
 
     #[test]
     fn the_count_holds_the_bytes_that_the_storage_gave_and_took() {
-        let fixture = InstallFixture::standard();
+        let fixture = InstallFixture::new(BootSlot::A, BootSlot::B);
         let misc = fixture.location("misc");
         let transferred = Arc::new(AtomicU64::new(0));
         let mut storage = CountedStorage::new(fixture.storage, transferred.clone());
