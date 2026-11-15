@@ -5,6 +5,7 @@ use crate::gsi::backup_manifest::BackupManifest;
 use crate::gsi::backup_partition::BackupPartition;
 use crate::gsi::candidate_image::CandidateImage;
 use crate::gsi::gsi_candidate_request::GsiCandidateRequest;
+use crate::gsi::install_source::install_source_slot;
 use crate::gsi::logical_view::extract_logical_view;
 use crate::gsi::signed_vbmeta::SignedVbmeta;
 use crate::gsi::stock_system::require_stock_front2_system;
@@ -245,7 +246,7 @@ fn in_view(image: &ImageRecord) -> ImageRecord {
 }
 
 fn assemble(request: &GsiCandidateRequest<'_>, manifest: &BackupManifest) -> Result<GsiCandidate> {
-    let source_slot = request.stock_slot;
+    let source_slot = install_source_slot(request.stock_slot, request.target_slot)?;
     let source_name = |base: &str| profile::slot_label(base, source_slot.suffix());
     let target_name = |base: &str| profile::slot_label(base, request.target_slot.suffix());
     let stock_top = manifest.verified_partition(&source_name(profile::VBMETA_BASE))?;

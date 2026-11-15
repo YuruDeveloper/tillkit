@@ -5,6 +5,7 @@ pub mod candidate_image;
 pub mod candidate_install;
 pub mod gsi_candidate;
 pub mod gsi_candidate_request;
+pub mod install_source;
 pub mod logical_view;
 pub mod raw_descriptor;
 pub mod rollback_evidence;
@@ -30,6 +31,7 @@ pub use candidate_install::{
 };
 pub use gsi_candidate::GsiCandidate;
 pub use gsi_candidate_request::GsiCandidateRequest;
+pub use install_source::install_source_slot;
 pub use logical_view::extract_logical_view;
 pub use raw_descriptor::RawDescriptor;
 pub use rollback_evidence::RollbackEvidence;

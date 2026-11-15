@@ -9,6 +9,7 @@ use crate::gsi::backup_manifest::BackupManifest;
 use crate::gsi::backup_partition::BackupPartition;
 use crate::gsi::candidate_image::CandidateImage;
 use crate::gsi::gsi_candidate::{GsiCandidate, SUPER_PARTITION};
+use crate::gsi::install_source::install_source_slot;
 use crate::install::layout::{ACTIVATION_LUNS, GPT_LUN_COUNT, NEW_BOOT_LUN, ORIGINAL_BOOT_LUN};
 use crate::install::{GptBackup, InstallImage, InstallInputs};
 use std::fs;
@@ -35,7 +36,11 @@ pub fn install_inputs(
         backup_directory,
     )?;
     require_matching_stock_slot(candidate.stock_slot, inputs.stock_slot)?;
-    require_source_matches_boot(candidate.source_slot, inputs.stock_slot)?;
+    require_expected_source(
+        candidate.source_slot,
+        inputs.stock_slot,
+        candidate.target_slot,
+    )?;
     Ok(inputs)
 }
 
@@ -48,10 +53,11 @@ fn require_matching_stock_slot(candidate: BootSlot, backup: BootSlot) -> Result<
     Ok(())
 }
 
-fn require_source_matches_boot(source: BootSlot, boot: BootSlot) -> Result<()> {
-    if source != boot {
-        return Err(Front2Error::Unsupported(format!(
-            "the candidate reads the stock images from the source slot {source:?}, the device boots slot {boot:?}; the install supports a source slot that is the same as the boot slot until the kk gate is complete"
+fn require_expected_source(source: BootSlot, boot: BootSlot, target: BootSlot) -> Result<()> {
+    let expected = install_source_slot(boot, target)?;
+    if source != expected {
+        return Err(Front2Error::Plan(format!(
+            "the candidate reads the stock images from the source slot {source:?}, the install from the boot slot {boot:?} to the target slot {target:?} reads the source slot {expected:?}"
         )));
     }
     Ok(())
@@ -300,18 +306,20 @@ mod tests {
     }
 
     #[test]
-    fn a_candidate_source_that_matches_the_boot_slot_is_accepted() {
-        require_source_matches_boot(BootSlot::A, BootSlot::A)
-            .expect("a slot A source on a slot A boot");
-        require_source_matches_boot(BootSlot::B, BootSlot::B)
-            .expect("a slot B source on a slot B boot");
+    fn a_candidate_source_that_fits_the_boot_and_target_is_accepted() {
+        require_expected_source(BootSlot::A, BootSlot::A, BootSlot::B)
+            .expect("a slot A source for a slot A boot to the target slot B");
+        require_expected_source(BootSlot::B, BootSlot::B, BootSlot::B)
+            .expect("a slot B source for a slot B boot to the target slot B");
+        require_expected_source(BootSlot::A, BootSlot::B, BootSlot::A)
+            .expect("a slot A source for a slot B boot to the target slot A");
     }
 
     #[test]
-    fn a_candidate_source_that_is_not_the_boot_slot_is_rejected() {
-        let error = require_source_matches_boot(BootSlot::A, BootSlot::B)
-            .expect_err("a slot A source on a slot B boot");
-        assert!(matches!(error, Front2Error::Unsupported(_)), "{error}");
+    fn a_candidate_source_that_does_not_fit_the_boot_and_target_is_rejected() {
+        let error = require_expected_source(BootSlot::B, BootSlot::B, BootSlot::A)
+            .expect_err("a slot B source for a slot B boot to the target slot A");
+        assert!(matches!(error, Front2Error::Plan(_)), "{error}");
         assert!(error.to_string().contains("source slot"), "{error}");
     }
 }
