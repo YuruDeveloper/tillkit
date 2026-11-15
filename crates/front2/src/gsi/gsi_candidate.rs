@@ -254,7 +254,8 @@ fn assemble(request: &GsiCandidateRequest<'_>, manifest: &BackupManifest) -> Res
         manifest.verified_partition(&source_name(toss_front2::CHAINED_VBMETA_BASE))?;
     let original_chained =
         manifest.verified_partition(&target_name(toss_front2::CHAINED_VBMETA_BASE))?;
-    require_stock_front2_top(&VbmetaSource::read(&stock_top.path)?)?
+    let stock_top_vbmeta = VbmetaSource::read(&stock_top.path)?;
+    require_stock_front2_top(&stock_top_vbmeta)?
         .require_accepted(request.accepted_untested_build)?;
     require_stock_front2_system(&VbmetaSource::read(&stock_chained.path)?)?;
 
@@ -301,13 +302,19 @@ fn assemble(request: &GsiCandidateRequest<'_>, manifest: &BackupManifest) -> Res
         &view.join(view_file(toss_front2::GSI_SYSTEM_PARTITION)),
         &view.join(view_file(toss_front2::CHAINED_VBMETA_BASE)),
     )?;
+    let floor = rollback_floor(
+        manifest,
+        request.stock_slot,
+        source_slot,
+        stock_top_vbmeta.info.header.rollback_index,
+    )?;
     let top_vbmeta = build_top_vbmeta(
         &VbmetaTemplate {
             stock_slot_a: &stock_top.path,
             original_slot_b: &original_top.path,
         },
         request.rollback_evidence,
-        None,
+        floor,
         &view.join(view_file(profile::VBMETA_BASE)),
     )?;
     let avb_verification = verify_view(&view)?;
@@ -345,6 +352,30 @@ fn require_view_matches(view: &[ImageRecord], verification: &SuperVerification) 
         ));
     }
     Ok(())
+}
+
+fn rollback_floor(
+    manifest: &BackupManifest,
+    boot_slot: BootSlot,
+    source_slot: BootSlot,
+    source_rollback_index: u64,
+) -> Result<Option<u64>> {
+    if boot_slot == source_slot {
+        return Ok(None);
+    }
+    let boot_vbmeta = manifest.verified_partition(&profile::slot_label(
+        profile::VBMETA_BASE,
+        boot_slot.suffix(),
+    ))?;
+    let boot_rollback_index = VbmetaSource::read(&boot_vbmeta.path)?
+        .info
+        .header
+        .rollback_index;
+    Ok(raised_floor(boot_rollback_index, source_rollback_index))
+}
+
+fn raised_floor(boot_rollback_index: u64, source_rollback_index: u64) -> Option<u64> {
+    (boot_rollback_index > source_rollback_index).then_some(boot_rollback_index)
 }
 
 #[cfg(test)]
@@ -461,6 +492,13 @@ mod tests {
         let loaded: GsiCandidate = serde_json::from_value(value).expect("read the candidate back");
         assert_eq!(loaded.source_slot, BootSlot::A);
         assert_eq!(loaded.stock_slot, BootSlot::B);
+    }
+
+    #[test]
+    fn the_floor_raises_the_signed_index_only_above_the_source_value() {
+        assert_eq!(raised_floor(1675555200, 0), Some(1675555200));
+        assert_eq!(raised_floor(0, 0), None);
+        assert_eq!(raised_floor(0, 1675555200), None);
     }
 
     #[test]
