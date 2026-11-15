@@ -14,6 +14,7 @@ pub mod rabbit;
 pub mod rail;
 pub mod root;
 pub mod support_rows;
+pub mod support_verdict;
 pub mod write;
 
 use crate::app::App;

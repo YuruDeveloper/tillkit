@@ -1,7 +1,7 @@
 use crate::app::App;
 use crate::message::Message;
 use crate::root_message::RootMessage;
-use crate::view::{flow, parts};
+use crate::view::{flow, parts, support_verdict};
 use crate::write_flow::WriteFlow;
 use crate::write_message::WriteMessage;
 use crate::write_origin::WriteOrigin;
@@ -30,8 +30,8 @@ pub fn view(app: &App) -> Element<'_, Message> {
     if app.other_work_is_open(WriteOrigin::Magisk) {
         page = page.push(flow::other_work(app.write.origin, palette));
     }
-    if app.support_stops_writes() {
-        page = page.push(flow::device_stops(palette));
+    if let Some(report) = support_verdict::unmet_report(app) {
+        page = page.push(support_verdict::block(app, report));
     }
     page = page
         .push(parts::label("STEPS", palette))
