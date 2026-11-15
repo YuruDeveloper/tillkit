@@ -4,8 +4,8 @@ mod install_support;
 use front2::Result;
 use front2::gpt::BootSlot;
 use front2::install::{
-    DataWipeApproval, InstallExecutor, InstallPlan, InstallStep, RestartApproval, StepSource,
-    StoredInstallPlan, WriteApproval, WriteStep,
+    DataWipeApproval, InstallExecutor, InstallPlan, InstallStep, PLAN_FILE, RestartApproval,
+    StepSource, StoredInstallPlan, WriteApproval, WriteStep,
 };
 use install_support::{InstallFixture, MockCall};
 use serde_json::Value;
@@ -144,6 +144,26 @@ fn an_install_plan_for_target_slot_a_is_rejected_at_validation() {
     let mut plan = InstallPlan::build(&fixture.inputs).expect("plan");
     plan.target_slot = BootSlot::A;
     rejection(plan.validate(), "target slot A");
+}
+
+#[test]
+fn an_install_plan_file_for_target_slot_a_is_rejected_at_load() {
+    let fixture = InstallFixture::standard();
+    let _ = fixture.stored_plan();
+    let directory = fixture.plan_directory();
+    let path = directory.join(PLAN_FILE);
+    let mut value: Value =
+        serde_json::from_slice(&fs::read(&path).expect("read the plan file")).expect("parse");
+    value
+        .as_object_mut()
+        .expect("a JSON object")
+        .insert("target_slot".to_string(), Value::from("a"));
+    fs::write(
+        &path,
+        serde_json::to_vec(&value).expect("serialize the plan"),
+    )
+    .expect("write");
+    rejection(InstallPlan::load(&directory), "target slot A");
 }
 
 #[test]
