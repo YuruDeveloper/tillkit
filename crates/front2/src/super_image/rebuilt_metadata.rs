@@ -12,10 +12,7 @@ use super::lp_partition::LpPartition;
 use super::lp_table::LpTable;
 use super::partition_summary::PartitionSummary;
 use super::super_layout_plan::SuperLayoutPlan;
-use super::{
-    DEFAULT_GROUP, DYNAMIC_GROUP, REBUILT_GROUP_INDEX, SYSTEM_ATTRIBUTES, SYSTEM_PARTITION,
-    TARGET_SLOT,
-};
+use super::{DEFAULT_GROUP, REBUILT_GROUP_INDEX, SYSTEM_ATTRIBUTES, SuperSlot};
 use crate::digest::sha256_bytes;
 use crate::error::{Front2Error, Result};
 use serde::Serialize;
@@ -41,34 +38,40 @@ pub struct RebuiltMetadata {
 }
 
 impl RebuiltMetadata {
-    pub fn from_super_file(super_image: &Path, plan: &SuperLayoutPlan) -> Result<Self> {
+    pub fn from_super_file(
+        super_image: &Path,
+        plan: &SuperLayoutPlan,
+        slot: &SuperSlot,
+    ) -> Result<Self> {
         let mut file = File::open(super_image)?;
         let geometry = LpGeometry::read(&mut file)?;
-        let original = LpMetadata::read_slot(&mut file, &geometry, TARGET_SLOT)?;
-        Self::build(&geometry, &original, plan)
+        let original = LpMetadata::read_slot(&mut file, &geometry, slot.target_index())?;
+        Self::build(&geometry, &original, plan, slot)
     }
 
     pub fn build(
         geometry: &LpGeometry,
         original: &LpMetadata,
         plan: &SuperLayoutPlan,
+        slot: &SuperSlot,
     ) -> Result<Self> {
         require_plan_matches_device(original, plan)?;
-        let selected = selected_names(plan)?;
-        let (group_index, dynamic_group) = original.group(DYNAMIC_GROUP)?;
+        let selected = selected_names(plan, slot)?;
+        let (group_index, dynamic_group) = original.group(slot.dynamic_group())?;
         let groups = vec![default_group(original)?.clone(), dynamic_group.clone()];
-        let (partitions, extents) = select_partitions(original, plan, &selected, group_index)?;
+        let (partitions, extents) =
+            select_partitions(original, plan, &selected, group_index, slot)?;
         let tables = encode_tables(original, &partitions, &extents, &groups);
         let blob = assemble(original, &tables, geometry.maximum_size as usize)?;
         let decoded = LpMetadata::decode(&blob)?;
-        let summaries = verify(original, plan, &groups, &decoded)?;
+        let summaries = verify(original, plan, &groups, &decoded, slot)?;
         let used_bytes = require_used_bytes(&summaries, plan, dynamic_group.maximum_size)?;
         Ok(Self {
             source_metadata_sha256: original.sha256.clone(),
             candidate_bytes: blob.len() as u64,
             candidate_sha256: sha256_bytes(&blob),
-            primary_offset: geometry.primary_offset(TARGET_SLOT)?,
-            backup_offset: geometry.backup_offset(TARGET_SLOT)?,
+            primary_offset: geometry.primary_offset(slot.target_index())?,
+            backup_offset: geometry.backup_offset(slot.target_index())?,
             partitions: summaries,
             used_bytes,
             group_maximum_bytes: dynamic_group.maximum_size,
@@ -96,13 +99,13 @@ fn require_plan_matches_device(original: &LpMetadata, plan: &SuperLayoutPlan) ->
     Ok(())
 }
 
-fn selected_names(plan: &SuperLayoutPlan) -> Result<BTreeSet<String>> {
+fn selected_names(plan: &SuperLayoutPlan, slot: &SuperSlot) -> Result<BTreeSet<String>> {
     let mut selected: BTreeSet<String> = plan
         .retained
         .iter()
         .map(|partition| partition.name.clone())
         .collect();
-    selected.insert(SYSTEM_PARTITION.to_string());
+    selected.insert(slot.system().to_string());
     if selected.len() != SELECTED_PARTITION_COUNT {
         return Err(Front2Error::Plan(format!(
             "the plan selects {selected:?}, expected {SELECTED_PARTITION_COUNT} partitions"
@@ -128,6 +131,7 @@ fn select_partitions(
     plan: &SuperLayoutPlan,
     selected: &BTreeSet<String>,
     group_index: usize,
+    slot: &SuperSlot,
 ) -> Result<(Vec<LpPartition>, Vec<LpExtent>)> {
     let mut partitions = Vec::new();
     let mut extents: Vec<LpExtent> = Vec::new();
@@ -143,7 +147,7 @@ fn select_partitions(
             )));
         }
         let first_extent_index = extents.len();
-        let attributes = append_extents(original, plan, record, &mut extents)?;
+        let attributes = append_extents(original, plan, record, &mut extents, slot)?;
         partitions.push(LpPartition {
             name: record.name.clone(),
             attributes,
@@ -158,7 +162,7 @@ fn select_partitions(
         .collect();
     if names != *selected || partitions.len() != SELECTED_PARTITION_COUNT {
         return Err(Front2Error::Plan(format!(
-            "slot B holds {names:?} in {} records, the plan selects {selected:?}",
+            "the target slot holds {names:?} in {} records, the plan selects {selected:?}",
             partitions.len()
         )));
     }
@@ -170,8 +174,9 @@ fn append_extents(
     plan: &SuperLayoutPlan,
     record: &LpPartition,
     extents: &mut Vec<LpExtent>,
+    slot: &SuperSlot,
 ) -> Result<u32> {
-    if record.name.as_str() != SYSTEM_PARTITION {
+    if record.name.as_str() != slot.system() {
         extents.extend_from_slice(original.extents_of(record)?);
         return Ok(record.attributes);
     }
@@ -250,6 +255,7 @@ fn verify(
     plan: &SuperLayoutPlan,
     groups: &[LpGroup],
     decoded: &LpMetadata,
+    slot: &SuperSlot,
 ) -> Result<Vec<PartitionSummary>> {
     let preserved = decoded.block_devices == original.block_devices
         && decoded.groups == groups
@@ -271,6 +277,7 @@ fn verify(
             decoded,
             partition,
             &mut ranges,
+            slot,
         )?);
     }
     ranges.sort();
@@ -306,11 +313,12 @@ fn verify_partition(
     decoded: &LpMetadata,
     partition: &LpPartition,
     ranges: &mut Vec<(u64, u64)>,
+    slot: &SuperSlot,
 ) -> Result<PartitionSummary> {
     let name = partition.name.as_str();
-    let is_system = name == SYSTEM_PARTITION;
-    let bytes = verify_extents(decoded, partition, is_system, ranges)?;
-    let expected_bytes = expected_bytes(plan, name)?;
+    let is_system = name == slot.system();
+    let bytes = verify_extents(decoded, partition, is_system, ranges, slot)?;
+    let expected_bytes = expected_bytes(plan, name, slot)?;
     if partition.group_index != REBUILT_GROUP_INDEX || bytes != expected_bytes {
         return Err(failure(format!(
             "partition {name} is in group {} with {bytes} bytes, expected group {REBUILT_GROUP_INDEX} with {expected_bytes} bytes",
@@ -333,6 +341,7 @@ fn verify_extents(
     partition: &LpPartition,
     is_system: bool,
     ranges: &mut Vec<(u64, u64)>,
+    slot: &SuperSlot,
 ) -> Result<u64> {
     let device = decoded.single_block_device()?;
     let alignment_sectors = device.alignment_sectors()?;
@@ -341,7 +350,8 @@ fn verify_extents(
         extent.require_data_extent(device.first_logical_sector, device.last_sector())?;
         if is_system && !extent.target_sector.is_multiple_of(alignment_sectors) {
             return Err(failure(format!(
-                "{extent:?} of {SYSTEM_PARTITION} does not start on a multiple of {alignment_sectors} sectors"
+                "{extent:?} of {} does not start on a multiple of {alignment_sectors} sectors",
+                slot.system()
             )));
         }
         bytes = checked_sum(bytes, extent.bytes()?)?;
@@ -350,8 +360,8 @@ fn verify_extents(
     Ok(bytes)
 }
 
-fn expected_bytes(plan: &SuperLayoutPlan, name: &str) -> Result<u64> {
-    if name == SYSTEM_PARTITION {
+fn expected_bytes(plan: &SuperLayoutPlan, name: &str, slot: &SuperSlot) -> Result<u64> {
+    if name == slot.system() {
         return Ok(plan.gsi_bytes);
     }
     plan.retained

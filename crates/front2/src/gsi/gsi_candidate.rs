@@ -274,6 +274,7 @@ fn assemble(request: &GsiCandidateRequest<'_>, manifest: &BackupManifest) -> Res
             output: &super_path,
         },
         &plan,
+        &super_slot,
     )?;
     let super_verification = verify_super_candidate(&SuperVerificationRequest {
         candidate: &super_path,

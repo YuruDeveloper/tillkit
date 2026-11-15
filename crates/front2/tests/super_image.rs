@@ -69,7 +69,7 @@ fn built_candidate() -> (TempDir, PathBuf, PathBuf, SuperCandidateReport, String
         gsi_sha256: &gsi_sha256,
         output: &candidate,
     };
-    let report = build_super_candidate(&request, &plan).expect("candidate");
+    let report = build_super_candidate(&request, &plan, &slot_b()).expect("candidate");
     (directory, original, candidate, report, gsi_sha256)
 }
 
@@ -343,7 +343,7 @@ fn primary_and_backup_metadata_must_be_identical() {
 fn rebuilt_metadata_keeps_six_partitions_and_replaces_system() {
     let (_directory, path) = written(&SyntheticSuper::standard());
     let plan = SuperLayoutPlan::from_super_file(&path, GSI_BYTES, &slot_b()).expect("plan");
-    let rebuilt = RebuiltMetadata::from_super_file(&path, &plan).expect("rebuilt");
+    let rebuilt = RebuiltMetadata::from_super_file(&path, &plan, &slot_b()).expect("rebuilt");
     let decoded = LpMetadata::decode(&rebuilt.blob).expect("decode the rebuilt metadata");
     let mut file = std::fs::File::open(&path).expect("open");
     let geometry = LpGeometry::read(&mut file).expect("geometry");
@@ -424,25 +424,71 @@ fn rebuilt_metadata_keeps_six_partitions_and_replaces_system() {
 }
 
 #[test]
+fn rebuilt_metadata_rebuilds_the_slot_a_metadata_at_the_slot_a_offsets() {
+    let (_directory, path) = written(&SyntheticSuper::standard());
+    let slot_a = SuperSlot::new(BootSlot::A);
+    let plan = SuperLayoutPlan::from_super_file(&path, GSI_BYTES, &slot_a).expect("plan");
+    let rebuilt = RebuiltMetadata::from_super_file(&path, &plan, &slot_a).expect("rebuilt");
+    let decoded = LpMetadata::decode(&rebuilt.blob).expect("decode the rebuilt metadata");
+    let partition_names: Vec<&str> = rebuilt
+        .partitions
+        .iter()
+        .map(|partition| partition.name.as_str())
+        .collect();
+    assert_eq!(
+        partition_names,
+        [
+            "odm_a",
+            "product_a",
+            "system_a",
+            "system_dlkm_a",
+            "vendor_a",
+            "vendor_dlkm_a"
+        ]
+    );
+    assert_eq!(rebuilt.primary_offset, SyntheticSuper::primary_offset(0));
+    assert_eq!(rebuilt.backup_offset, SyntheticSuper::backup_offset(0));
+    let group_names: Vec<&str> = decoded
+        .groups
+        .iter()
+        .map(|group| group.name.as_str())
+        .collect();
+    assert_eq!(group_names, ["default", "qti_dynamic_partitions_a"]);
+    assert_eq!(rebuilt.used_bytes, RETAINED_BYTES + GSI_BYTES);
+
+    let mut file = std::fs::File::open(&path).expect("open");
+    let geometry = LpGeometry::read(&mut file).expect("geometry");
+    let original = LpMetadata::read_slot(&mut file, &geometry, 0).expect("slot A");
+    let product = decoded.partition("product_a").expect("product_a");
+    let original_product = original.partition("product_a").expect("original product_a");
+    assert_eq!(
+        decoded.extents_of(product).expect("product extents"),
+        original
+            .extents_of(original_product)
+            .expect("original product extents")
+    );
+}
+
+#[test]
 fn rebuilt_metadata_rejects_a_plan_for_another_super() {
     let (_directory, path) = written(&SyntheticSuper::standard());
     let plan = SuperLayoutPlan::from_super_file(&path, GSI_BYTES, &slot_b()).expect("plan");
 
     let mut other_size = plan.clone();
     other_size.super_bytes += 4096;
-    assert!(RebuiltMetadata::from_super_file(&path, &other_size).is_err());
+    assert!(RebuiltMetadata::from_super_file(&path, &other_size, &slot_b()).is_err());
 
     let mut overlapping = plan.clone();
     overlapping.allocation[0].target_sector = 2048;
-    assert!(RebuiltMetadata::from_super_file(&path, &overlapping).is_err());
+    assert!(RebuiltMetadata::from_super_file(&path, &overlapping, &slot_b()).is_err());
 
     let mut unaligned = plan.clone();
     unaligned.allocation[0].target_sector += 8;
-    assert!(RebuiltMetadata::from_super_file(&path, &unaligned).is_err());
+    assert!(RebuiltMetadata::from_super_file(&path, &unaligned, &slot_b()).is_err());
 
     let mut shorter = plan;
     shorter.allocation.pop();
-    assert!(RebuiltMetadata::from_super_file(&path, &shorter).is_err());
+    assert!(RebuiltMetadata::from_super_file(&path, &shorter, &slot_b()).is_err());
 }
 
 #[test]
@@ -546,23 +592,23 @@ fn candidate_refuses_an_existing_output_and_wrong_digests() {
         gsi_sha256: &wrong,
         ..request
     };
-    assert!(build_super_candidate(&wrong_gsi, &plan).is_err());
+    assert!(build_super_candidate(&wrong_gsi, &plan, &slot_b()).is_err());
     assert!(!output.exists());
 
     let wrong_original = SuperCandidateRequest {
         original_super_sha256: &wrong,
         ..request
     };
-    assert!(build_super_candidate(&wrong_original, &plan).is_err());
+    assert!(build_super_candidate(&wrong_original, &plan, &slot_b()).is_err());
     assert!(!output.exists(), "a failed candidate is removed");
 
     let larger_plan =
         SuperLayoutPlan::from_super_file(&original, GSI_BYTES + 4096, &slot_b()).expect("plan");
-    assert!(build_super_candidate(&request, &larger_plan).is_err());
+    assert!(build_super_candidate(&request, &larger_plan, &slot_b()).is_err());
     assert!(!output.exists());
 
     std::fs::write(&output, b"keep").expect("write an existing output");
-    assert!(build_super_candidate(&request, &plan).is_err());
+    assert!(build_super_candidate(&request, &plan, &slot_b()).is_err());
     assert_eq!(std::fs::read(&output).expect("existing output"), b"keep");
     assert_eq!(
         sha256_file(&original).expect("original digest").1,
@@ -650,7 +696,8 @@ fn letter_1130_item_1_a_damaged_backup_geometry_is_rejected_before_the_candidate
     for source in [damaged, other_size, changed_padding] {
         assert!(image_error(&source).contains("primary and backup copies differ"));
         let (directory, original) = written_image(&source);
-        let error = RebuiltMetadata::from_super_file(&original, &plan).expect_err("metadata");
+        let error =
+            RebuiltMetadata::from_super_file(&original, &plan, &slot_b()).expect_err("metadata");
         assert!(matches!(error, Front2Error::Image(_)), "{error}");
         let gsi = directory.path().join("gsi.img");
         std::fs::write(&gsi, gsi_image(GSI_BYTES)).expect("write the GSI");
@@ -662,7 +709,7 @@ fn letter_1130_item_1_a_damaged_backup_geometry_is_rejected_before_the_candidate
             gsi_sha256: &sha256_file(&gsi).expect("GSI digest").1,
             output: &candidate,
         };
-        let error = build_super_candidate(&request, &plan).expect_err("candidate");
+        let error = build_super_candidate(&request, &plan, &slot_b()).expect_err("candidate");
         assert!(error.to_string().contains("geometry"), "{error}");
         assert!(!candidate.exists());
     }
@@ -762,7 +809,8 @@ fn real_super_matches_the_recorded_evidence_when_available() {
         plan.opposite_overlaps.len()
     );
 
-    let rebuilt = RebuiltMetadata::from_super_file(&super_image, &plan).expect("rebuilt");
+    let rebuilt =
+        RebuiltMetadata::from_super_file(&super_image, &plan, &slot_b()).expect("rebuilt");
     assert_eq!(verification["candidate_sha256"], rebuilt.candidate_sha256);
     assert_eq!(sha256_bytes(&rebuilt.blob), rebuilt.candidate_sha256);
     assert!(rebuilt.blob == reference, "blob equals the reference file");

@@ -201,6 +201,7 @@ fn the_logical_view_holds_the_partitions_of_the_verified_candidate() {
             output: &candidate,
         },
         &plan,
+        &SuperSlot::new(BootSlot::B),
     )
     .expect("candidate");
     let verification = verify_super_candidate(&SuperVerificationRequest {

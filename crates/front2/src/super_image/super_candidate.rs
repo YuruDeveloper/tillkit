@@ -4,6 +4,7 @@ use super::rebuilt_metadata::RebuiltMetadata;
 use super::super_candidate_report::SuperCandidateReport;
 use super::super_candidate_request::SuperCandidateRequest;
 use super::super_layout_plan::SuperLayoutPlan;
+use super::super_slot::SuperSlot;
 use crate::digest::{hex, sha256_file};
 use crate::error::{Front2Error, Result};
 use sha2::{Digest, Sha256};
@@ -13,8 +14,9 @@ use std::io::{Read, Seek, SeekFrom, Write};
 pub fn build_super_candidate(
     request: &SuperCandidateRequest<'_>,
     plan: &SuperLayoutPlan,
+    slot: &SuperSlot,
 ) -> Result<SuperCandidateReport> {
-    let metadata = RebuiltMetadata::from_super_file(request.original_super, plan)?;
+    let metadata = RebuiltMetadata::from_super_file(request.original_super, plan, slot)?;
     let allowed = allowed_ranges(plan, &metadata)?;
     let (gsi_bytes, gsi_sha256) = sha256_file(request.gsi_image)?;
     if gsi_bytes != plan.gsi_bytes || gsi_sha256 != request.gsi_sha256 {
