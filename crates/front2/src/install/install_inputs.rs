@@ -9,6 +9,7 @@ pub struct InstallInputs {
     pub candidate_directory: PathBuf,
     pub backup_directory: PathBuf,
     pub stock_slot: BootSlot,
+    pub target_slot: BootSlot,
     pub partition_map: PartitionMap,
     pub images: Vec<InstallImage>,
     pub metadata_original: ImageRecord,

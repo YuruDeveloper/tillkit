@@ -141,6 +141,7 @@ impl InstallFixture {
             candidate_directory,
             backup_directory,
             stock_slot,
+            target_slot: BootSlot::B,
             partition_map,
             images,
             metadata_original,

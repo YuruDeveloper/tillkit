@@ -32,6 +32,8 @@ pub struct InstallPlan {
     pub boot_lun_persistence_confirmed: bool,
     #[serde(default, skip_serializing_if = "is_slot_a")]
     pub stock_slot: BootSlot,
+    #[serde(default = "default_target_slot", skip_serializing_if = "is_slot_b")]
+    pub target_slot: BootSlot,
     pub original_boot_lun: u8,
     pub new_boot_lun: u8,
     pub boot_wlun: u8,
@@ -60,6 +62,7 @@ impl InstallPlan {
             stored_rollback_source_confirmed: false,
             boot_lun_persistence_confirmed: false,
             stock_slot: inputs.stock_slot,
+            target_slot: inputs.target_slot,
             original_boot_lun: ORIGINAL_BOOT_LUN,
             new_boot_lun: NEW_BOOT_LUN,
             boot_wlun: BOOT_WLUN,
@@ -188,6 +191,14 @@ fn boot_lun_step(stock_slot: BootSlot, lun: u8) -> InstallStep {
 
 fn is_slot_a(slot: &BootSlot) -> bool {
     matches!(slot, BootSlot::A)
+}
+
+fn is_slot_b(slot: &BootSlot) -> bool {
+    matches!(slot, BootSlot::B)
+}
+
+fn default_target_slot() -> BootSlot {
+    BootSlot::B
 }
 
 fn plan_file_of(step: &WriteStep) -> Option<&str> {

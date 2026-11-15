@@ -2,6 +2,7 @@ mod gpt_support;
 mod install_support;
 
 use front2::Result;
+use front2::gpt::BootSlot;
 use front2::install::{
     DataWipeApproval, InstallExecutor, InstallPlan, InstallStep, RestartApproval, StepSource,
     StoredInstallPlan, WriteApproval, WriteStep,
@@ -118,6 +119,23 @@ fn the_stock_a_plan_omits_the_stock_slot_field_and_the_stock_b_plan_records_it()
     let plan_b = InstallPlan::build(&slot_b.inputs).expect("slot B plan");
     let value_b = serde_json::to_value(&plan_b).expect("slot B value");
     assert_eq!(value_b["stock_slot"], Value::from("b"));
+}
+
+#[test]
+fn the_target_b_plan_omits_the_target_slot_field_and_a_target_a_plan_records_it() {
+    let fixture = InstallFixture::standard();
+    let mut plan = InstallPlan::build(&fixture.inputs).expect("plan");
+
+    let value_b = serde_json::to_value(&plan).expect("target B value");
+    assert_eq!(value_b.get("target_slot"), None);
+    let loaded_b: InstallPlan = serde_json::from_value(value_b).expect("target B loads");
+    assert_eq!(loaded_b.target_slot, BootSlot::B);
+
+    plan.target_slot = BootSlot::A;
+    let value_a = serde_json::to_value(&plan).expect("target A value");
+    assert_eq!(value_a["target_slot"], Value::from("a"));
+    let loaded_a: InstallPlan = serde_json::from_value(value_a).expect("target A loads");
+    assert_eq!(loaded_a.target_slot, BootSlot::A);
 }
 
 #[test]

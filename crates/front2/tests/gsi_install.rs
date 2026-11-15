@@ -89,6 +89,7 @@ fn inputs_of(fixture: &InstallFixture) -> Result<InstallInputs> {
     install_inputs_from_images(
         &candidate_images(fixture),
         &original_super_sha256(fixture),
+        fixture.inputs.target_slot,
         &fixture.inputs.candidate_directory,
         &fixture.inputs.backup_directory,
     )
@@ -134,6 +135,7 @@ fn a_candidate_from_another_backup_is_rejected() {
     let error = install_inputs_from_images(
         &candidate_images(&fixture),
         &"0f".repeat(32),
+        fixture.inputs.target_slot,
         &fixture.inputs.candidate_directory,
         &fixture.inputs.backup_directory,
     )

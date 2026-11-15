@@ -30,6 +30,7 @@ pub fn install_inputs(
     let inputs = install_inputs_from_images(
         &candidate.images(),
         &candidate.original_super.sha256,
+        candidate.target_slot,
         candidate_directory,
         backup_directory,
     )?;
@@ -80,6 +81,7 @@ pub fn require_slot_a_active(backup_directory: &Path) -> Result<()> {
 pub fn install_inputs_from_images(
     images: &[CandidateImage],
     original_super_sha256: &str,
+    target_slot: BootSlot,
     candidate_directory: &Path,
     backup_directory: &Path,
 ) -> Result<InstallInputs> {
@@ -113,6 +115,7 @@ pub fn install_inputs_from_images(
     Ok(InstallInputs {
         candidate_directory: std::path::absolute(candidate_directory)?,
         stock_slot,
+        target_slot,
         partition_map: PartitionMap::from_main_copies(&borrowed)?,
         images: images
             .iter()
