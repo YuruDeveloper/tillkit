@@ -1,12 +1,13 @@
 use avbtool_rs::builder::{VbmetaImageArgs, make_vbmeta_image};
 use front2::digest::sha256_file;
 use front2::gpt::BootSlot;
-use front2::gsi::find_testkey_slot;
+use front2::gsi::{VbmetaSource, find_testkey_slot};
 use std::path::Path;
 
 const TESTKEY_TOP: (&str, &str) = ("testkey_rsa4096", "SHA256_RSA4096");
 const TESTKEY_CHAINED: (&str, &str) = ("testkey_rsa2048", "SHA256_RSA2048");
 const VENDOR_KEY: (&str, &str) = ("testkey_rsa8192", "SHA256_RSA8192");
+const TESTKEY_TOP_SHA512: (&str, &str) = ("testkey_rsa4096", "SHA512_RSA4096");
 
 fn write_vbmeta(path: &Path, key: (&str, &str)) {
     let args = VbmetaImageArgs {
@@ -39,25 +40,39 @@ impl Backup {
         top_b: (&str, &str),
         chained_b: (&str, &str),
     ) -> Self {
+        Self::build(top_a, chained_a, top_b, chained_b, None)
+    }
+
+    fn with_damaged_signature(
+        top_a: (&str, &str),
+        chained_a: (&str, &str),
+        top_b: (&str, &str),
+        chained_b: (&str, &str),
+        damaged: &str,
+    ) -> Self {
+        Self::build(top_a, chained_a, top_b, chained_b, Some(damaged))
+    }
+
+    fn build(
+        top_a: (&str, &str),
+        chained_a: (&str, &str),
+        top_b: (&str, &str),
+        chained_b: (&str, &str),
+        damaged: Option<&str>,
+    ) -> Self {
         let directory = tempfile::tempdir().expect("tempdir");
         let lun = directory.path().join("partitions").join("lun4");
         std::fs::create_dir_all(&lun).expect("lun directory");
-        let mut entries = Vec::new();
-        for (name, key) in [
+        let parts = [
             ("vbmeta_a", top_a),
             ("vbmeta_b", top_b),
             ("vbmeta_system_a", chained_a),
             ("vbmeta_system_b", chained_b),
-        ] {
-            let path = lun.join(format!("{name}.bin"));
-            write_vbmeta(&path, key);
-            let (bytes, sha256) = sha256_file(&path).expect("digest");
-            entries.push(serde_json::json!({
-                "path": format!("partitions\\lun4\\{name}.bin"),
-                "bytes": bytes,
-                "sha256": sha256.to_ascii_uppercase(),
-            }));
-        }
+        ];
+        let entries: Vec<serde_json::Value> = parts
+            .iter()
+            .map(|(name, key)| manifest_entry(&lun, name, *key, damaged))
+            .collect();
         let text = serde_json::to_string_pretty(&entries).expect("manifest text");
         std::fs::write(directory.path().join("sha256-manifest.json"), text).expect("manifest");
         Self { directory }
@@ -66,6 +81,33 @@ impl Backup {
     fn path(&self) -> &Path {
         self.directory.path()
     }
+}
+
+fn manifest_entry(
+    lun: &Path,
+    name: &str,
+    key: (&str, &str),
+    damaged: Option<&str>,
+) -> serde_json::Value {
+    let path = lun.join(format!("{name}.bin"));
+    write_vbmeta(&path, key);
+    if damaged == Some(name) {
+        flip_signature_byte(&path);
+    }
+    let (bytes, sha256) = sha256_file(&path).expect("digest");
+    serde_json::json!({
+        "path": format!("partitions\\lun4\\{name}.bin"),
+        "bytes": bytes,
+        "sha256": sha256.to_ascii_uppercase(),
+    })
+}
+
+fn flip_signature_byte(path: &Path) {
+    let source = VbmetaSource::read(path).expect("source");
+    let offset = 256 + source.info.header.signature_offset as usize;
+    let mut bytes = std::fs::read(path).expect("read source");
+    bytes[offset] ^= 1;
+    std::fs::write(path, bytes).expect("write source");
 }
 
 #[test]
@@ -111,4 +153,36 @@ fn a_slot_needs_both_the_top_and_the_chained_vbmeta_signed_with_the_test_key() {
         .expect_err("the chained vbmeta is not the test key")
         .to_string();
     assert!(message.contains("neither slot"), "{message}");
+}
+
+// Clara doc #1106: a damaged signature on the test key slot must propagate,
+// not become a "neither slot" result that hides the damage.
+#[test]
+fn clara_1106_a_damaged_signature_on_the_test_key_slot_propagates() {
+    let backup = Backup::with_damaged_signature(
+        TESTKEY_TOP,
+        TESTKEY_CHAINED,
+        VENDOR_KEY,
+        VENDOR_KEY,
+        "vbmeta_a",
+    );
+    let message = find_testkey_slot(backup.path())
+        .expect_err("the damaged signature fails the investigation")
+        .to_string();
+    assert!(
+        message.contains("RSA verification rejected the signature"),
+        "{message}"
+    );
+    assert!(!message.contains("neither slot"), "{message}");
+}
+
+// Clara doc #1106: a slot that uses the test key with an unsupported
+// algorithm is refused, and the message names the algorithm condition.
+#[test]
+fn clara_1106_an_unsupported_algorithm_names_the_algorithm_in_the_refusal() {
+    let backup = Backup::new(TESTKEY_TOP_SHA512, TESTKEY_CHAINED, VENDOR_KEY, VENDOR_KEY);
+    let message = find_testkey_slot(backup.path())
+        .expect_err("the unsupported algorithm is not the install target")
+        .to_string();
+    assert!(message.contains("algorithm"), "{message}");
 }

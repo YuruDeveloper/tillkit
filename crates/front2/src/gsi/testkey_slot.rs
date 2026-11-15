@@ -22,10 +22,10 @@ pub fn find_testkey_slot(backup_directory: &Path) -> Result<BootSlot> {
     match testkey_slots.as_slice() {
         [slot] => Ok(*slot),
         [] => Err(Front2Error::Unsupported(
-            "neither slot has a top and chained vbmeta that is signed with the test key".into(),
+            "neither slot has a top and chained vbmeta that uses the test key and the supported algorithm".into(),
         )),
         _ => Err(Front2Error::Unsupported(
-            "both slots are signed with the test key, so the install target is not clear".into(),
+            "both slots use the test key and the supported algorithm, so the install target is not clear".into(),
         )),
     }
 }
@@ -35,17 +35,27 @@ fn slot_signed_with_test_key(manifest: &BackupManifest, slot: BootSlot) -> Resul
     let chained_name = profile::slot_label(toss_front2::CHAINED_VBMETA_BASE, slot.suffix());
     let top = VbmetaSource::read(&manifest.verified_partition(&top_name)?.path)?;
     let chained = VbmetaSource::read(&manifest.verified_partition(&chained_name)?.path)?;
-    let top_test_key = top
-        .require_signed_with(
-            toss_front2::TOP_VBMETA_KEY_SPEC,
-            toss_front2::TOP_VBMETA_ALGORITHM,
-        )
-        .is_ok();
-    let chained_test_key = chained
-        .require_signed_with(
-            toss_front2::CHAINED_VBMETA_KEY_SPEC,
-            toss_front2::CHAINED_VBMETA_ALGORITHM,
-        )
-        .is_ok();
-    Ok(top_test_key && chained_test_key)
+    Ok(signed_with(
+        &top,
+        toss_front2::TOP_VBMETA_KEY_SPEC,
+        toss_front2::TOP_VBMETA_ALGORITHM,
+    )? && signed_with(
+        &chained,
+        toss_front2::CHAINED_VBMETA_KEY_SPEC,
+        toss_front2::CHAINED_VBMETA_ALGORITHM,
+    )?)
+}
+
+/// Report whether the vbmeta uses the key and the algorithm.
+///
+/// A key or algorithm mismatch (Unsupported) means the slot is not the
+/// target, so the result is false. Any other error, such as a damaged
+/// signature or a read failure, propagates. The investigation does not hide
+/// it behind a "neither slot" result.
+fn signed_with(source: &VbmetaSource, key_spec: &str, algorithm_name: &str) -> Result<bool> {
+    match source.require_signed_with(key_spec, algorithm_name) {
+        Ok(()) => Ok(true),
+        Err(Front2Error::Unsupported(_)) => Ok(false),
+        Err(other) => Err(other),
+    }
 }
