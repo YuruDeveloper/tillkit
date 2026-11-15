@@ -96,22 +96,6 @@ fn a_profile_without_the_gsi_install_is_refused_before_any_work() {
 }
 
 #[test]
-fn a_request_for_install_target_slot_a_is_refused_before_any_work() {
-    let directory = tempfile::tempdir().expect("tempdir");
-    let output = directory.path().join("candidate");
-    let gsi = directory.path().join("gsi.img");
-    let refused = GsiCandidate::build(&GsiCandidateRequest {
-        target_slot: BootSlot::A,
-        ..request(directory.path(), &gsi, &output)
-    });
-    assert!(
-        matches!(refused, Err(Front2Error::Unsupported(_))),
-        "{refused:?}"
-    );
-    assert!(!output.exists());
-}
-
-#[test]
 fn the_manifest_gives_one_dump_for_each_partition_name() {
     let directory = tempfile::tempdir().expect("tempdir");
     let backup = directory.path();

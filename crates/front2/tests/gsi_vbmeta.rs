@@ -12,6 +12,9 @@ use front2::profiles::toss_front2::PROFILE;
 use front2::top_signature::verify_top_signature;
 use std::path::{Path, PathBuf};
 
+mod super_support;
+use super_support::SyntheticSuper;
+
 const PARTITION_BYTES: u64 = 65536;
 const STOCK_ROLLBACK: u64 = 1_700_000_000;
 const SYSTEM_ROLLBACK: u64 = 1_710_000_000;
@@ -927,4 +930,230 @@ fn real_images_give_the_bytes_that_started_the_device_when_available() {
     println!("vbmeta_system: built {built:?}");
     println!("vbmeta_system: reference {reference_sha256}");
     assert_eq!(built.image.sha256, reference_sha256);
+}
+
+const GSI_BYTES: u64 = 4608 * 512;
+
+// The descriptors below carry empty digests. libavb treats an empty digest as a
+// persistent digest and does not compare it against the image, so verify_view
+// passes without a full consistent hash tree. The digest arithmetic is checked
+// by the build_top_vbmeta and build_system_vbmeta tests above, so this test can
+// keep the images small and check the kk candidate plumbing instead.
+fn hash_persistent(partition: &str) -> DescriptorInfo {
+    DescriptorInfo::Hash {
+        image_size: 4096,
+        hash_algorithm: "sha256".to_string(),
+        partition_name: partition.to_string(),
+        salt: vec![1; 32],
+        digest: Vec::new(),
+        flags: 0,
+    }
+}
+
+fn hashtree_persistent(partition: &str) -> DescriptorInfo {
+    DescriptorInfo::Hashtree {
+        dm_verity_version: 1,
+        image_size: 4096,
+        tree_offset: 0,
+        tree_size: 0,
+        data_block_size: 4096,
+        hash_block_size: 4096,
+        fec_num_roots: 0,
+        fec_offset: 0,
+        fec_size: 0,
+        hash_algorithm: "sha256".to_string(),
+        partition_name: partition.to_string(),
+        salt: vec![2; 32],
+        root_digest: Vec::new(),
+        flags: 0,
+    }
+}
+
+fn kk_vbmeta_a(fingerprints: &[&'static str]) -> Source<'static> {
+    Source {
+        key_spec: "testkey_rsa4096",
+        algorithm: "SHA256_RSA4096",
+        rollback_index: 0,
+        flags: 0,
+        properties: fingerprints
+            .iter()
+            .map(|value| ("com.android.build.boot.fingerprint", *value))
+            .collect(),
+        descriptors: vec![
+            hash_persistent("boot"),
+            hash_persistent("dtbo"),
+            hash_persistent("init_boot"),
+            hash_persistent("recovery"),
+            hash_persistent("vendor_boot"),
+        ],
+        chains: vec![("vbmeta_system", 2, OTHER_KEY)],
+    }
+}
+
+fn kk_vbmeta_b() -> Source<'static> {
+    let mut source = stock_top();
+    source.rollback_index = BOOT_SLOT_FLOOR;
+    source
+}
+
+fn kk_vbmeta_system_a() -> Source<'static> {
+    Source {
+        key_spec: "testkey_rsa2048",
+        algorithm: "SHA256_RSA2048",
+        rollback_index: SYSTEM_ROLLBACK,
+        flags: 0,
+        properties: vec![
+            ("com.android.build.system.fingerprint", STOCK_SYSTEM),
+            ("com.android.build.product.fingerprint", "stock/468"),
+        ],
+        descriptors: vec![hashtree_persistent("product")],
+        chains: Vec::new(),
+    }
+}
+
+fn kk_gsi() -> Source<'static> {
+    Source {
+        key_spec: "testkey_rsa4096",
+        algorithm: "SHA256_RSA4096",
+        rollback_index: 0,
+        flags: 0,
+        properties: vec![("com.android.build.system.fingerprint", "gsi/1")],
+        descriptors: vec![hashtree_persistent("system")],
+        chains: Vec::new(),
+    }
+}
+
+fn record_entry(entries: &mut Vec<serde_json::Value>, relative: &str, path: &Path) {
+    let (bytes, sha256) = sha256_file(path).expect("digest of the dump");
+    entries.push(serde_json::json!({
+        "path": relative,
+        "bytes": bytes,
+        "sha256": sha256.to_ascii_uppercase(),
+    }));
+}
+
+fn write_kk_backup(backup: &Path) {
+    let lun0 = backup.join("partitions").join("lun0");
+    let lun4 = backup.join("partitions").join("lun4");
+    std::fs::create_dir_all(&lun0).expect("create lun0");
+    std::fs::create_dir_all(&lun4).expect("create lun4");
+    let mut entries = Vec::new();
+
+    let super_path = lun0.join("super.bin");
+    std::fs::write(&super_path, SyntheticSuper::standard().image()).expect("write the super");
+    record_entry(&mut entries, "partitions\\lun0\\super.bin", &super_path);
+
+    for name in [
+        "boot_a",
+        "dtbo_a",
+        "init_boot_a",
+        "recovery_a",
+        "vendor_boot_a",
+    ] {
+        let path = lun4.join(format!("{name}.bin"));
+        std::fs::write(&path, vec![0x5A; 4096]).expect("write the physical image");
+        record_entry(
+            &mut entries,
+            &format!("partitions\\lun4\\{name}.bin"),
+            &path,
+        );
+    }
+
+    for (name, source) in [
+        ("vbmeta_a", kk_vbmeta_a(&[TESTED_BUILD])),
+        ("vbmeta_b", kk_vbmeta_b()),
+        ("vbmeta_system_a", kk_vbmeta_system_a()),
+    ] {
+        let path = lun4.join(format!("{name}.bin"));
+        source.write(&path);
+        record_entry(
+            &mut entries,
+            &format!("partitions\\lun4\\{name}.bin"),
+            &path,
+        );
+    }
+
+    let text = serde_json::to_string_pretty(&entries).expect("manifest text");
+    std::fs::write(backup.join("sha256-manifest.json"), text).expect("write the manifest");
+}
+
+fn write_kk_gsi(path: &Path) {
+    kk_gsi().write(path);
+    std::fs::OpenOptions::new()
+        .write(true)
+        .open(path)
+        .expect("open the GSI")
+        .set_len(GSI_BYTES)
+        .expect("pad the GSI");
+}
+
+#[test]
+fn an_install_to_the_test_key_slot_a_builds_a_candidate_in_place() {
+    let bench = Bench::new();
+    let backup = bench.path("backup");
+    write_kk_backup(&backup);
+    let gsi = bench.path("gsi.img");
+    write_kk_gsi(&gsi);
+    let output = bench.path("candidate");
+
+    let candidate = GsiCandidate::build(&GsiCandidateRequest {
+        profile: &PROFILE,
+        backup_directory: &backup,
+        gsi_image: &gsi,
+        output_directory: &output,
+        rollback_evidence: &[],
+        accepted_untested_build: None,
+        stock_slot: BootSlot::B,
+        target_slot: BootSlot::A,
+    })
+    .expect("the kk candidate builds");
+
+    assert_eq!(candidate.stock_slot, BootSlot::B);
+    assert_eq!(candidate.target_slot, BootSlot::A);
+    assert_eq!(candidate.source_slot, BootSlot::A);
+    assert_eq!(candidate.top_vbmeta.rollback_index, BOOT_SLOT_FLOOR);
+
+    let view: Vec<&str> = candidate
+        .logical_view
+        .iter()
+        .map(|record| record.file.as_str())
+        .collect();
+    assert_eq!(
+        view,
+        [
+            "odm.img",
+            "product.img",
+            "system.img",
+            "system_dlkm.img",
+            "vendor.img",
+            "vendor_dlkm.img"
+        ]
+    );
+
+    let physical: Vec<(&str, Option<&str>)> = candidate
+        .physical_images
+        .iter()
+        .map(|image| (image.partition.as_str(), image.backup_source.as_deref()))
+        .collect();
+    assert_eq!(
+        physical,
+        [
+            ("boot_a", Some("boot_a")),
+            ("dtbo_a", Some("dtbo_a")),
+            ("init_boot_a", Some("init_boot_a")),
+            ("recovery_a", Some("recovery_a")),
+            ("vendor_boot_a", Some("vendor_boot_a")),
+        ]
+    );
+
+    assert_eq!(candidate.images().len(), 8);
+    assert!(!candidate.avb_verification.is_empty());
+
+    let (loaded, _) = GsiCandidate::load(&output).expect("load the saved candidate");
+    assert_eq!(loaded.source_slot, BootSlot::A);
+    assert_eq!(loaded.target_slot, BootSlot::A);
+    assert_eq!(loaded.images(), candidate.images());
+    loaded
+        .verify_files(&output)
+        .expect("the files match their records");
 }

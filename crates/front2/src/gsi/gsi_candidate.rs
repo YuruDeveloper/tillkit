@@ -141,11 +141,6 @@ impl From<GsiCandidate> for GsiCandidateRecord {
 impl GsiCandidate {
     pub fn build(request: &GsiCandidateRequest<'_>) -> Result<Self> {
         request.profile.require_gsi()?;
-        if request.target_slot == BootSlot::A {
-            return Err(Front2Error::Unsupported(
-                "the install target slot A is not supported until the boot switch and the super rebuild are complete".into(),
-            ));
-        }
         let manifest = BackupManifest::load(request.backup_directory)?;
         fs::create_dir(request.output_directory)?;
         let built = assemble(request, &manifest).and_then(|candidate| {
