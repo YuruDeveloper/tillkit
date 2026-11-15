@@ -27,7 +27,7 @@ impl SupportReport {
     pub fn evaluate(profile: &DeviceProfile, state: &DeviceState) -> Self {
         let mut checks: Vec<SupportCheck> = Self::expected_properties(profile)
             .into_iter()
-            .map(|(id, expected)| SupportCheck::exact(id, expected, state.property(id)))
+            .map(|(id, expected)| property_check(profile, id, expected, state.property(id)))
             .collect();
         checks.push(SupportCheck::present(
             ROOT_ACCESS,
@@ -81,13 +81,34 @@ impl SupportReport {
     }
 }
 
+fn property_check(
+    profile: &DeviceProfile,
+    id: &str,
+    expected: &str,
+    observed: &str,
+) -> SupportCheck {
+    if id != profile.build_fingerprint_key {
+        return SupportCheck::exact(id, expected, observed);
+    }
+    SupportCheck::build_number(
+        id,
+        expected,
+        observed,
+        profile.build_fingerprint_prefix,
+        profile.build_fingerprint_suffix,
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::device_state::PROPERTY_KEYS;
-    use crate::profiles::toss_front2::PROFILE;
+    use crate::profiles::toss_front2::{self, PROFILE};
     use crate::root_access::RootAccess;
     use std::collections::BTreeMap;
+
+    const OTHER_BUILD: &str =
+        "TOSSPLACE/toss_front2/toss_front2:13/TKQ1.230110.001/468:user/dev-keys";
 
     pub fn supported_state() -> DeviceState {
         let mut properties: BTreeMap<String, String> = PROPERTY_KEYS
@@ -152,6 +173,72 @@ mod tests {
             );
             assert!(report.require_writes_allowed().is_err());
         }
+    }
+
+    fn report_with_fingerprint(fingerprint: &str) -> SupportReport {
+        let mut state = supported_state();
+        state.properties.insert(
+            toss_front2::VENDOR_BUILD_FINGERPRINT_PROPERTY.to_string(),
+            fingerprint.to_string(),
+        );
+        SupportReport::evaluate(&PROFILE, &state)
+    }
+
+    fn fingerprint_check(report: &SupportReport) -> &SupportCheck {
+        report
+            .checks
+            .iter()
+            .find(|check| check.id == toss_front2::VENDOR_BUILD_FINGERPRINT_PROPERTY)
+            .expect("the report checks the vendor fingerprint")
+    }
+
+    #[test]
+    fn the_tested_fingerprint_passes() {
+        let report = report_with_fingerprint(toss_front2::VENDOR_BUILD_FINGERPRINT);
+        assert_eq!(fingerprint_check(&report).verdict, Verdict::Pass);
+    }
+
+    #[test]
+    fn a_fingerprint_with_another_build_number_can_be_accepted() {
+        let report = report_with_fingerprint(OTHER_BUILD);
+        let check = fingerprint_check(&report);
+        assert_eq!(check.verdict, Verdict::Fail);
+        assert!(check.can_be_accepted());
+        assert!(report.require_writes_allowed().is_err());
+        let accepted =
+            SupportOverride::accept_unmet(&report).expect("the build number is accepted");
+        assert_eq!(accepted.accepted, std::slice::from_ref(check));
+        report
+            .require_allowed_with(&accepted)
+            .expect("the accepted build number allows writes");
+    }
+
+    #[test]
+    fn a_fingerprint_of_another_device_cannot_be_accepted() {
+        for fingerprint in [
+            "OTHER/other_device/other_device:13/TKQ1.230110.001/475:user/dev-keys",
+            "TOSSPLACE/toss_front2/toss_front2:14/TKQ1.230110.001/468:user/dev-keys",
+            "TOSSPLACE/toss_front2/toss_front2:13/TKQ1.230110.001/468:user/release-keys",
+            "TOSSPLACE/toss_front2/toss_front2:13/TKQ1.230110.001/468a:user/dev-keys",
+            "TOSSPLACE/toss_front2/toss_front2:13/TKQ1.230110.001/:user/dev-keys",
+        ] {
+            let report = report_with_fingerprint(fingerprint);
+            let check = fingerprint_check(&report);
+            assert_eq!(check.verdict, Verdict::Fail, "{fingerprint}");
+            assert!(!check.can_be_accepted(), "{fingerprint}");
+            assert!(
+                SupportOverride::accept_unmet(&report).is_err(),
+                "{fingerprint}"
+            );
+        }
+    }
+
+    #[test]
+    fn an_unread_fingerprint_cannot_be_accepted() {
+        let report = report_with_fingerprint("");
+        let check = fingerprint_check(&report);
+        assert_eq!(check.verdict, Verdict::Unknown);
+        assert!(!check.can_be_accepted());
     }
 
     #[test]

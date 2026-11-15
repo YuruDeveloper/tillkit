@@ -1,6 +1,7 @@
 use crate::device_profile::DeviceProfile;
 
 pub const ID: &str = "toss-front2";
+pub const VENDOR_BUILD_FINGERPRINT_PROPERTY: &str = "ro.vendor.build.fingerprint";
 pub const VENDOR_BUILD_FINGERPRINT: &str =
     "TOSSPLACE/toss_front2/toss_front2:13/TKQ1.230110.001/475:user/dev-keys";
 pub const BUILD_FINGERPRINT_PREFIX: &str = "TOSSPLACE/toss_front2/toss_front2:13/TKQ1.230110.001/";
@@ -29,10 +30,13 @@ pub static PROFILE: DeviceProfile = DeviceProfile {
     identity: &[
         ("ro.product.vendor.manufacturer", "TOSSPLACE"),
         ("ro.product.vendor.device", "toss_front2"),
-        ("ro.vendor.build.fingerprint", VENDOR_BUILD_FINGERPRINT),
+        (VENDOR_BUILD_FINGERPRINT_PROPERTY, VENDOR_BUILD_FINGERPRINT),
         ("ro.soc.model", "QCM4325"),
         ("ro.board.platform", "bengal"),
     ],
+    build_fingerprint_key: VENDOR_BUILD_FINGERPRINT_PROPERTY,
+    build_fingerprint_prefix: BUILD_FINGERPRINT_PREFIX,
+    build_fingerprint_suffix: BUILD_FINGERPRINT_SUFFIX,
     slot_suffix: SUPPORTED_SLOT_SUFFIX,
     device_state: "locked",
     verified_boot_state: "green",
