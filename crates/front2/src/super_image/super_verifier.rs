@@ -7,17 +7,17 @@ use super::lp_metadata::{LpMetadata, checked_sum};
 use super::lp_partition::LpPartition;
 use super::super_verification::SuperVerification;
 use super::super_verification_request::SuperVerificationRequest;
-use super::{
-    DEFAULT_GROUP, DYNAMIC_GROUP, REBUILT_GROUP_INDEX, RETAINED_PARTITIONS, SYSTEM_ATTRIBUTES,
-    SYSTEM_PARTITION, TARGET_SLOT,
-};
+use super::{DEFAULT_GROUP, REBUILT_GROUP_INDEX, SYSTEM_ATTRIBUTES, SuperSlot};
 use crate::digest::{hex, sha256_file};
 use crate::error::{Front2Error, Result};
 use sha2::{Digest, Sha256};
 use std::collections::BTreeSet;
 use std::fs::File;
 
-pub fn verify_super_candidate(request: &SuperVerificationRequest<'_>) -> Result<SuperVerification> {
+pub fn verify_super_candidate(
+    request: &SuperVerificationRequest<'_>,
+    slot: &SuperSlot,
+) -> Result<SuperVerification> {
     let mut candidate = File::open(request.candidate)?;
     let mut original = File::open(request.original_super)?;
     let candidate_bytes = candidate.metadata()?.len();
@@ -28,24 +28,24 @@ pub fn verify_super_candidate(request: &SuperVerificationRequest<'_>) -> Result<
         )));
     }
     let geometry = LpGeometry::read(&mut candidate)?;
-    let metadata = LpMetadata::read_slot(&mut candidate, &geometry, TARGET_SLOT)?;
+    let metadata = LpMetadata::read_slot(&mut candidate, &geometry, slot.target_index())?;
     let original_geometry = LpGeometry::read(&mut original)?;
-    let source = LpMetadata::read_slot(&mut original, &original_geometry, TARGET_SLOT)?;
-    require_expected_tables(&metadata, &source)?;
+    let source = LpMetadata::read_slot(&mut original, &original_geometry, slot.target_index())?;
+    require_expected_tables(&metadata, &source, slot)?;
     let slot_bytes = u64::from(geometry.maximum_size);
     let mut allowed = vec![
-        ByteRange::from_length(geometry.primary_offset(TARGET_SLOT)?, slot_bytes)?,
-        ByteRange::from_length(geometry.backup_offset(TARGET_SLOT)?, slot_bytes)?,
+        ByteRange::from_length(geometry.primary_offset(slot.target_index())?, slot_bytes)?,
+        ByteRange::from_length(geometry.backup_offset(slot.target_index())?, slot_bytes)?,
     ];
     let mut ranges = Vec::new();
     let mut logical_partitions = Vec::new();
     for partition in &metadata.partitions {
-        let is_system = partition.name.as_str() == SYSTEM_PARTITION;
+        let is_system = partition.name.as_str() == slot.system();
         let extents = partition_ranges(&metadata, &source, partition, candidate_bytes)?;
-        require_expected_record(&metadata, &source, partition)?;
+        require_expected_record(&metadata, &source, partition, slot)?;
         let twin = if is_system { None } else { Some(&mut original) };
         let (bytes, sha256) = hash_extents(&mut candidate, twin, &extents)?;
-        require_expected_content(request, &source, partition, bytes, &sha256)?;
+        require_expected_content(request, &source, partition, bytes, &sha256, slot)?;
         if is_system {
             allowed.extend_from_slice(&extents);
         }
@@ -80,17 +80,21 @@ fn failure(reason: String) -> Front2Error {
     Front2Error::Verification(format!("super candidate: {reason}"))
 }
 
-fn require_expected_tables(metadata: &LpMetadata, source: &LpMetadata) -> Result<()> {
+fn require_expected_tables(
+    metadata: &LpMetadata,
+    source: &LpMetadata,
+    slot: &SuperSlot,
+) -> Result<()> {
     let names: BTreeSet<&str> = metadata
         .partitions
         .iter()
         .map(|partition| partition.name.as_str())
         .collect();
-    let mut expected_names: BTreeSet<&str> = RETAINED_PARTITIONS.into_iter().collect();
-    expected_names.insert(SYSTEM_PARTITION);
+    let mut expected_names: BTreeSet<&str> = slot.retained().iter().map(String::as_str).collect();
+    expected_names.insert(slot.system());
     if names != expected_names || metadata.partitions.len() != expected_names.len() {
         return Err(failure(format!(
-            "slot B holds {names:?} in {} records, expected {expected_names:?}",
+            "the target slot holds {names:?} in {} records, expected {expected_names:?}",
             metadata.partitions.len()
         )));
     }
@@ -98,11 +102,11 @@ fn require_expected_tables(metadata: &LpMetadata, source: &LpMetadata) -> Result
         != source.header.get(HEADER_PRESERVED_OFFSET..)
     {
         return Err(failure(format!(
-            "the header from byte {HEADER_PRESERVED_OFFSET} is not the one of the original slot B"
+            "the header from byte {HEADER_PRESERVED_OFFSET} is not the one of the original target slot"
         )));
     }
     source.single_block_device()?;
-    let (_, dynamic_group) = source.group(DYNAMIC_GROUP)?;
+    let (_, dynamic_group) = source.group(slot.dynamic_group())?;
     let groups_match = match metadata.groups.as_slice() {
         [default_group, group] => {
             default_group.name.as_str() == DEFAULT_GROUP
@@ -141,6 +145,7 @@ fn require_expected_record(
     metadata: &LpMetadata,
     source: &LpMetadata,
     partition: &LpPartition,
+    slot: &SuperSlot,
 ) -> Result<()> {
     let name = partition.name.as_str();
     if partition.group_index != REBUILT_GROUP_INDEX {
@@ -149,8 +154,8 @@ fn require_expected_record(
             partition.group_index
         )));
     }
-    if name == SYSTEM_PARTITION {
-        return require_system_attributes(partition);
+    if name == slot.system() {
+        return require_system_attributes(partition, slot);
     }
     let source_partition = source.partition(name)?;
     let unchanged = partition.attributes == source_partition.attributes
@@ -163,10 +168,11 @@ fn require_expected_record(
     Ok(())
 }
 
-fn require_system_attributes(partition: &LpPartition) -> Result<()> {
+fn require_system_attributes(partition: &LpPartition, slot: &SuperSlot) -> Result<()> {
     if partition.attributes != SYSTEM_ATTRIBUTES {
         return Err(failure(format!(
-            "{SYSTEM_PARTITION} has attributes {}, expected {SYSTEM_ATTRIBUTES}",
+            "{} has attributes {}, expected {SYSTEM_ATTRIBUTES}",
+            slot.system(),
             partition.attributes
         )));
     }
@@ -193,16 +199,19 @@ fn require_expected_content(
     partition: &LpPartition,
     bytes: u64,
     sha256: &str,
+    slot: &SuperSlot,
 ) -> Result<()> {
     let name = partition.name.as_str();
-    if name != SYSTEM_PARTITION {
+    if name != slot.system() {
         let expected_bytes = source.partition_bytes(source.partition(name)?)?;
         return require_bytes(name, bytes, expected_bytes);
     }
     if bytes != request.gsi_bytes || sha256 != request.gsi_sha256 {
         return Err(failure(format!(
-            "{SYSTEM_PARTITION} holds {bytes} bytes with SHA-256 {sha256}, the GSI is {} bytes with SHA-256 {}",
-            request.gsi_bytes, request.gsi_sha256
+            "{} holds {bytes} bytes with SHA-256 {sha256}, the GSI is {} bytes with SHA-256 {}",
+            slot.system(),
+            request.gsi_bytes,
+            request.gsi_sha256
         )));
     }
     Ok(())

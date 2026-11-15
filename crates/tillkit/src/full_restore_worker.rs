@@ -56,6 +56,7 @@ mod tests {
     use crate::install_support::{InstallFixture, MockStorage};
     use crate::install_worker;
     use front2::full_backup::FullBackupPlan;
+    use front2::gpt::BootSlot;
     use front2::install::{DataWipeApproval, InstallProgress, StoredInstallPlan, WriteApproval};
     use std::path::PathBuf;
     use tempfile::TempDir;
@@ -97,7 +98,7 @@ mod tests {
     }
 
     fn install_progress() -> (StoredInstallPlan, InstallProgress, String) {
-        let fixture = InstallFixture::standard();
+        let fixture = InstallFixture::new(BootSlot::A, BootSlot::B);
         let stored = fixture.stored_plan();
         let sha256 = stored.plan_sha256().to_string();
         let progress = InstallProgress::new(&sha256);

@@ -145,18 +145,19 @@ fn facts<'a>(
 }
 
 fn boot_lun_text(plan: &InstallPlan) -> String {
-    match plan.stock_slot {
-        BootSlot::A => format!("LUN {} → LUN {}", plan.original_boot_lun, plan.new_boot_lun),
-        BootSlot::B => format!("LUN {}, {BOOT_LUN_KEPT}", plan.new_boot_lun),
+    if plan.stock_slot != plan.target_slot {
+        format!("LUN {} → LUN {}", plan.original_boot_lun, plan.new_boot_lun)
+    } else {
+        format!("LUN {}, {BOOT_LUN_KEPT}", plan.new_boot_lun)
     }
 }
 
 fn shows_boot_lun_unknown(plan: &InstallPlan) -> bool {
-    plan.stock_slot == BootSlot::A && !plan.boot_lun_persistence_confirmed
+    plan.stock_slot != plan.target_slot && !plan.boot_lun_persistence_confirmed
 }
 
 fn shows_slot_b_not_tested(plan: &InstallPlan) -> bool {
-    plan.stock_slot == BootSlot::B
+    plan.stock_slot == BootSlot::B && plan.target_slot == BootSlot::B
 }
 
 fn halved(sha256: &str) -> String {
@@ -212,17 +213,29 @@ mod tests {
     use crate::install_support::InstallFixture;
 
     #[test]
-    fn a_slot_a_plan_moves_the_boot_lun_and_a_slot_b_plan_keeps_it() {
-        let slot_a = InstallPlan::build(&InstallFixture::standard().inputs).expect("slot A plan");
-        assert_eq!(slot_a.stock_slot, BootSlot::A);
-        assert_eq!(boot_lun_text(&slot_a), "LUN 1 → LUN 2");
-        assert!(shows_boot_lun_unknown(&slot_a));
-        assert!(!shows_slot_b_not_tested(&slot_a));
+    fn the_boot_lun_text_and_warnings_follow_the_boot_switch() {
+        let first_conversion =
+            InstallPlan::build(&InstallFixture::new(BootSlot::A, BootSlot::B).inputs)
+                .expect("slot A plan");
+        assert_eq!(boot_lun_text(&first_conversion), "LUN 1 → LUN 2");
+        assert!(shows_boot_lun_unknown(&first_conversion));
+        assert!(!shows_slot_b_not_tested(&first_conversion));
 
-        let slot_b = InstallPlan::build(&InstallFixture::stock_b().inputs).expect("slot B plan");
-        assert_eq!(slot_b.stock_slot, BootSlot::B);
-        assert_eq!(boot_lun_text(&slot_b), format!("LUN 2, {BOOT_LUN_KEPT}"));
-        assert!(!shows_boot_lun_unknown(&slot_b));
-        assert!(shows_slot_b_not_tested(&slot_b));
+        let in_place_b = InstallPlan::build(&InstallFixture::new(BootSlot::B, BootSlot::B).inputs)
+            .expect("slot B plan");
+        assert_eq!(
+            boot_lun_text(&in_place_b),
+            format!("LUN 2, {BOOT_LUN_KEPT}")
+        );
+        assert!(!shows_boot_lun_unknown(&in_place_b));
+        assert!(shows_slot_b_not_tested(&in_place_b));
+
+        let switch_to_a = InstallPlan::build(&InstallFixture::new(BootSlot::B, BootSlot::A).inputs)
+            .expect("slot A target plan");
+        assert_eq!(switch_to_a.stock_slot, BootSlot::B);
+        assert_eq!(switch_to_a.target_slot, BootSlot::A);
+        assert_eq!(boot_lun_text(&switch_to_a), "LUN 2 → LUN 1");
+        assert!(shows_boot_lun_unknown(&switch_to_a));
+        assert!(!shows_slot_b_not_tested(&switch_to_a));
     }
 }

@@ -9,6 +9,7 @@ use crate::gsi::backup_manifest::BackupManifest;
 use crate::gsi::backup_partition::BackupPartition;
 use crate::gsi::candidate_image::CandidateImage;
 use crate::gsi::gsi_candidate::{GsiCandidate, SUPER_PARTITION};
+use crate::gsi::install_source::install_source_slot;
 use crate::install::layout::{ACTIVATION_LUNS, GPT_LUN_COUNT, NEW_BOOT_LUN, ORIGINAL_BOOT_LUN};
 use crate::install::{GptBackup, InstallImage, InstallInputs};
 use std::fs;
@@ -30,10 +31,16 @@ pub fn install_inputs(
     let inputs = install_inputs_from_images(
         &candidate.images(),
         &candidate.original_super.sha256,
+        candidate.target_slot,
         candidate_directory,
         backup_directory,
     )?;
     require_matching_stock_slot(candidate.stock_slot, inputs.stock_slot)?;
+    require_expected_source(
+        candidate.source_slot,
+        inputs.stock_slot,
+        candidate.target_slot,
+    )?;
     Ok(inputs)
 }
 
@@ -41,6 +48,16 @@ fn require_matching_stock_slot(candidate: BootSlot, backup: BootSlot) -> Result<
     if candidate != backup {
         return Err(Front2Error::Plan(format!(
             "the candidate was made for stock slot {candidate:?}, the backup boots slot {backup:?}"
+        )));
+    }
+    Ok(())
+}
+
+fn require_expected_source(source: BootSlot, boot: BootSlot, target: BootSlot) -> Result<()> {
+    let expected = install_source_slot(boot, target)?;
+    if source != expected {
+        return Err(Front2Error::Plan(format!(
+            "the candidate reads the stock images from the source slot {source:?}, the install from the boot slot {boot:?} to the target slot {target:?} reads the source slot {expected:?}"
         )));
     }
     Ok(())
@@ -72,7 +89,7 @@ pub fn require_slot_a_active(backup_directory: &Path) -> Result<()> {
     for lun in ACTIVATION_LUNS {
         let (_, main) = gpt_backup(&manifest, lun, GptCopyKind::Main)?;
         let (_, backup) = gpt_backup(&manifest, lun, GptCopyKind::Backup)?;
-        SlotActivation::prepare(lun, &main, &backup)?;
+        SlotActivation::prepare(lun, BootSlot::B, &main, &backup)?;
     }
     Ok(())
 }
@@ -80,6 +97,7 @@ pub fn require_slot_a_active(backup_directory: &Path) -> Result<()> {
 pub fn install_inputs_from_images(
     images: &[CandidateImage],
     original_super_sha256: &str,
+    target_slot: BootSlot,
     candidate_directory: &Path,
     backup_directory: &Path,
 ) -> Result<InstallInputs> {
@@ -108,11 +126,12 @@ pub fn install_inputs_from_images(
         .map(|(lun, bytes)| (lun, bytes.as_slice()))
         .collect();
     let (activation_lun0, activation_lun4) =
-        slot_activations(stock_slot, &main_copies, &backup_copies)?;
+        slot_activations(stock_slot, target_slot, &main_copies, &backup_copies)?;
     let misc = manifest.partition(MISC_PARTITION)?;
     Ok(InstallInputs {
         candidate_directory: std::path::absolute(candidate_directory)?,
         stock_slot,
+        target_slot,
         partition_map: PartitionMap::from_main_copies(&borrowed)?,
         images: images
             .iter()
@@ -131,31 +150,51 @@ pub fn install_inputs_from_images(
 
 fn slot_activations(
     stock_slot: BootSlot,
+    target_slot: BootSlot,
     main_copies: &[Vec<u8>],
     backup_copies: &[Vec<u8>],
 ) -> Result<(Option<SlotActivation>, Option<SlotActivation>)> {
-    match stock_slot {
-        BootSlot::A => {
+    match (stock_slot, target_slot) {
+        (BootSlot::A, BootSlot::B) | (BootSlot::B, BootSlot::A) => {
             let [first_lun, second_lun] = ACTIVATION_LUNS;
             Ok((
-                Some(prepare_activation(first_lun, main_copies, backup_copies)?),
-                Some(prepare_activation(second_lun, main_copies, backup_copies)?),
+                Some(prepare_activation(
+                    first_lun,
+                    target_slot,
+                    main_copies,
+                    backup_copies,
+                )?),
+                Some(prepare_activation(
+                    second_lun,
+                    target_slot,
+                    main_copies,
+                    backup_copies,
+                )?),
             ))
         }
-        BootSlot::B => {
+        (BootSlot::B, BootSlot::B) => {
             require_tidy_stock_b(main_copies, backup_copies)?;
             Ok((None, None))
         }
+        (BootSlot::A, BootSlot::A) => Err(Front2Error::Unsupported(
+            "the install from the stock slot A to the target slot A is not supported".into(),
+        )),
     }
 }
 
 fn prepare_activation(
     lun: u8,
+    target_slot: BootSlot,
     main_copies: &[Vec<u8>],
     backup_copies: &[Vec<u8>],
 ) -> Result<SlotActivation> {
     let position = usize::from(lun);
-    SlotActivation::prepare(lun, &main_copies[position], &backup_copies[position])
+    SlotActivation::prepare(
+        lun,
+        target_slot,
+        &main_copies[position],
+        &backup_copies[position],
+    )
 }
 
 fn require_tidy_stock_b(main_copies: &[Vec<u8>], backup_copies: &[Vec<u8>]) -> Result<()> {
@@ -264,5 +303,23 @@ mod tests {
             .expect_err("a slot B candidate on a slot A backup");
         assert!(matches!(error, Front2Error::Plan(_)), "{error}");
         assert!(error.to_string().contains("stock slot"), "{error}");
+    }
+
+    #[test]
+    fn a_candidate_source_that_fits_the_boot_and_target_is_accepted() {
+        require_expected_source(BootSlot::A, BootSlot::A, BootSlot::B)
+            .expect("a slot A source for a slot A boot to the target slot B");
+        require_expected_source(BootSlot::B, BootSlot::B, BootSlot::B)
+            .expect("a slot B source for a slot B boot to the target slot B");
+        require_expected_source(BootSlot::A, BootSlot::B, BootSlot::A)
+            .expect("a slot A source for a slot B boot to the target slot A");
+    }
+
+    #[test]
+    fn a_candidate_source_that_does_not_fit_the_boot_and_target_is_rejected() {
+        let error = require_expected_source(BootSlot::B, BootSlot::B, BootSlot::A)
+            .expect_err("a slot B source for a slot B boot to the target slot A");
+        assert!(matches!(error, Front2Error::Plan(_)), "{error}");
+        assert!(error.to_string().contains("source slot"), "{error}");
     }
 }

@@ -9,8 +9,8 @@ use front2::gsi::{
     gsi_candidate::{CANDIDATE_FILE, SUPER_FILE, VIEW_DIRECTORY},
 };
 use front2::super_image::{
-    SuperCandidateRequest, SuperLayoutPlan, SuperVerificationRequest, build_super_candidate,
-    verify_super_candidate,
+    SuperCandidateRequest, SuperLayoutPlan, SuperSlot, SuperVerificationRequest,
+    build_super_candidate, verify_super_candidate,
 };
 use serde_json::{Value, json};
 use std::path::{Path, PathBuf};
@@ -44,6 +44,7 @@ fn request<'a>(backup: &'a Path, gsi: &'a Path, output: &'a Path) -> GsiCandidat
         rollback_evidence: &[],
         accepted_untested_build: None,
         stock_slot: BootSlot::A,
+        target_slot: BootSlot::B,
     }
 }
 
@@ -173,7 +174,8 @@ fn the_logical_view_holds_the_partitions_of_the_verified_candidate() {
     std::fs::write(&gsi, gsi_image(GSI_BYTES)).expect("write the GSI");
     let gsi_sha256 = sha256_file(&gsi).expect("GSI digest").1;
     let candidate = directory.path().join(SUPER_FILE);
-    let plan = SuperLayoutPlan::from_super_file(&original, GSI_BYTES).expect("plan");
+    let plan = SuperLayoutPlan::from_super_file(&original, GSI_BYTES, &SuperSlot::new(BootSlot::B))
+        .expect("plan");
     build_super_candidate(
         &SuperCandidateRequest {
             original_super: &original,
@@ -183,19 +185,24 @@ fn the_logical_view_holds_the_partitions_of_the_verified_candidate() {
             output: &candidate,
         },
         &plan,
+        &SuperSlot::new(BootSlot::B),
     )
     .expect("candidate");
-    let verification = verify_super_candidate(&SuperVerificationRequest {
-        candidate: &candidate,
-        original_super: &original,
-        gsi_bytes: GSI_BYTES,
-        gsi_sha256: &gsi_sha256,
-    })
+    let verification = verify_super_candidate(
+        &SuperVerificationRequest {
+            candidate: &candidate,
+            original_super: &original,
+            gsi_bytes: GSI_BYTES,
+            gsi_sha256: &gsi_sha256,
+        },
+        &SuperSlot::new(BootSlot::B),
+    )
     .expect("verification");
 
     let view = directory.path().join(VIEW_DIRECTORY);
     std::fs::create_dir(&view).expect("create the view");
-    let records = extract_logical_view(&candidate, &view).expect("view");
+    let records =
+        extract_logical_view(&candidate, &view, &SuperSlot::new(BootSlot::B)).expect("view");
     let names: Vec<&str> = records.iter().map(|record| record.file.as_str()).collect();
     assert_eq!(
         names,
@@ -217,7 +224,52 @@ fn the_logical_view_holds_the_partitions_of_the_verified_candidate() {
         std::fs::read(view.join("system.img")).expect("system view"),
         gsi_image(GSI_BYTES)
     );
-    assert!(extract_logical_view(&candidate, &view).is_err());
+    assert!(extract_logical_view(&candidate, &view, &SuperSlot::new(BootSlot::B)).is_err());
+}
+
+#[test]
+fn the_logical_view_strips_the_slot_a_suffix() {
+    let directory = tempfile::tempdir().expect("tempdir");
+    let original = directory.path().join("super.bin");
+    let source = SyntheticSuper::standard().image();
+    std::fs::write(&original, &source).expect("write the super");
+    let gsi = directory.path().join("gsi.img");
+    std::fs::write(&gsi, gsi_image(GSI_BYTES)).expect("write the GSI");
+    let gsi_sha256 = sha256_file(&gsi).expect("GSI digest").1;
+    let candidate = directory.path().join(SUPER_FILE);
+    let slot_a = SuperSlot::new(BootSlot::A);
+    let plan = SuperLayoutPlan::from_super_file(&original, GSI_BYTES, &slot_a).expect("plan");
+    build_super_candidate(
+        &SuperCandidateRequest {
+            original_super: &original,
+            original_super_sha256: &sha256_bytes(&source),
+            gsi_image: &gsi,
+            gsi_sha256: &gsi_sha256,
+            output: &candidate,
+        },
+        &plan,
+        &slot_a,
+    )
+    .expect("candidate");
+    let view = directory.path().join(VIEW_DIRECTORY);
+    std::fs::create_dir(&view).expect("create the view");
+    let records = extract_logical_view(&candidate, &view, &slot_a).expect("view");
+    let names: Vec<&str> = records.iter().map(|record| record.file.as_str()).collect();
+    assert_eq!(
+        names,
+        [
+            "odm.img",
+            "product.img",
+            "system.img",
+            "system_dlkm.img",
+            "vendor.img",
+            "vendor_dlkm.img"
+        ]
+    );
+    assert_eq!(
+        std::fs::read(view.join("system.img")).expect("system view"),
+        gsi_image(GSI_BYTES)
+    );
 }
 
 #[test]

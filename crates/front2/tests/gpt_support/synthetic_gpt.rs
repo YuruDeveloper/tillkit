@@ -12,13 +12,20 @@ const HEADER_BYTES: usize = 92;
 #[derive(Debug, Clone)]
 pub struct SyntheticGpt {
     entries: Vec<(String, [u8; ENTRY_BYTES])>,
+    capacity: usize,
 }
 
 impl SyntheticGpt {
     pub fn empty() -> Self {
         Self {
             entries: Vec::new(),
+            capacity: ENTRY_COUNT,
         }
+    }
+
+    pub fn with_capacity(mut self, capacity: usize) -> Self {
+        self.capacity = capacity;
+        self
     }
 
     pub fn standard() -> Self {
@@ -65,8 +72,8 @@ impl SyntheticGpt {
     }
 
     pub fn table(&self) -> Vec<u8> {
-        assert!(self.entries.len() <= ENTRY_COUNT);
-        let mut table = vec![0u8; ENTRY_COUNT * ENTRY_BYTES];
+        assert!(self.entries.len() <= self.capacity);
+        let mut table = vec![0u8; self.capacity * ENTRY_BYTES];
         for (i, (_, entry)) in self.entries.iter().enumerate() {
             table[i * ENTRY_BYTES..(i + 1) * ENTRY_BYTES].copy_from_slice(entry);
         }
@@ -102,7 +109,7 @@ impl SyntheticGpt {
         header[48..56].copy_from_slice(&(LAST_LBA - 5).to_le_bytes());
         header[56..72].fill(0xD1);
         header[72..80].copy_from_slice(&entries_lba.to_le_bytes());
-        header[80..84].copy_from_slice(&(ENTRY_COUNT as u32).to_le_bytes());
+        header[80..84].copy_from_slice(&(self.capacity as u32).to_le_bytes());
         header[84..88].copy_from_slice(&(ENTRY_BYTES as u32).to_le_bytes());
         seal(kind, &mut bytes);
         bytes
@@ -112,7 +119,12 @@ impl SyntheticGpt {
 pub fn seal(kind: GptCopyKind, bytes: &mut [u8]) {
     let header = kind.header_offset();
     let table = kind.table_offset();
-    let table_checksum = crc32(&bytes[table..table + ENTRY_COUNT * ENTRY_BYTES]);
+    let entry_count = u32::from_le_bytes(
+        bytes[header + 80..header + 84]
+            .try_into()
+            .expect("entry count"),
+    ) as usize;
+    let table_checksum = crc32(&bytes[table..table + entry_count * ENTRY_BYTES]);
     bytes[header + 88..header + 92].copy_from_slice(&table_checksum.to_le_bytes());
     bytes[header + 16..header + 20].fill(0);
     let header_checksum = crc32(&bytes[header..header + HEADER_BYTES]);

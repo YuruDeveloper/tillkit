@@ -12,6 +12,9 @@ use front2::profiles::toss_front2::PROFILE;
 use front2::top_signature::verify_top_signature;
 use std::path::{Path, PathBuf};
 
+mod super_support;
+use super_support::SyntheticSuper;
+
 const PARTITION_BYTES: u64 = 65536;
 const STOCK_ROLLBACK: u64 = 1_700_000_000;
 const SYSTEM_ROLLBACK: u64 = 1_710_000_000;
@@ -206,6 +209,25 @@ impl Bench {
         original: &Source<'_>,
         evidence: &[RollbackEvidence],
     ) -> front2::Result<PathBuf> {
+        self.top_full(stock, original, evidence, None)
+    }
+
+    fn top_with_floor(
+        &self,
+        stock: &Source<'_>,
+        original: &Source<'_>,
+        floor: Option<u64>,
+    ) -> front2::Result<PathBuf> {
+        self.top_full(stock, original, &[], floor)
+    }
+
+    fn top_full(
+        &self,
+        stock: &Source<'_>,
+        original: &Source<'_>,
+        evidence: &[RollbackEvidence],
+        floor: Option<u64>,
+    ) -> front2::Result<PathBuf> {
         let stock_path = self.path("stock-top.bin");
         let original_path = self.path("original-top.bin");
         stock.write(&stock_path);
@@ -215,7 +237,7 @@ impl Bench {
             stock_slot_a: &stock_path,
             original_slot_b: &original_path,
         };
-        build_top_vbmeta(&template, evidence, &output).map(|_| output)
+        build_top_vbmeta(&template, evidence, floor, &output).map(|_| output)
     }
 
     fn system(
@@ -319,6 +341,53 @@ fn top_refuses_rollback_evidence_above_the_stock_value() {
     bench
         .top_with_evidence(&stock_top(), &original_top(), &evidence)
         .expect("equal evidence is accepted");
+}
+
+const BOOT_SLOT_FLOOR: u64 = 1_675_555_200;
+
+#[test]
+fn top_signs_at_the_rollback_floor_above_the_source_value() {
+    // The source top vbmeta declares rollback index 0, below the floor of the
+    // boot slot. An in-place slot A install signs the target top vbmeta at exactly
+    // the floor so the boot switch passes the rollback check without raising it.
+    let bench = Bench::new();
+    let output = bench
+        .top_with_floor(&original_top(), &original_top(), Some(BOOT_SLOT_FLOOR))
+        .expect("the floor is signed");
+    let built = VbmetaSource::read(&output).expect("built");
+    assert_eq!(built.info.header.rollback_index, BOOT_SLOT_FLOOR);
+    assert_eq!(built.info.header.rollback_index_location, 0);
+    verify_top_signature(&output, "testkey_rsa4096").expect("signature");
+}
+
+#[test]
+fn top_refuses_a_rollback_floor_below_the_source_value() {
+    let bench = Bench::new();
+    let floor = Some(STOCK_ROLLBACK - 1);
+    let message = refusal(bench.top_with_floor(&stock_top(), &original_top(), floor));
+    assert!(
+        message.contains("below the source top vbmeta rollback index"),
+        "{message}"
+    );
+    assert!(!bench.path("vbmeta.img").exists());
+}
+
+#[test]
+fn top_refuses_rollback_evidence_above_the_floor() {
+    let bench = Bench::new();
+    let evidence = [RollbackEvidence {
+        source: "devinfo candidate".to_string(),
+        value: BOOT_SLOT_FLOOR + 1,
+    }];
+    let result = bench.top_full(
+        &original_top(),
+        &original_top(),
+        &evidence,
+        Some(BOOT_SLOT_FLOOR),
+    );
+    let message = refusal(result);
+    assert!(message.contains("do not agree"), "{message}");
+    assert!(!bench.path("vbmeta.img").exists());
 }
 
 #[test]
@@ -480,7 +549,7 @@ fn letter_1134_top_refuses_an_original_slot_b_with_a_damaged_signature() {
         stock_slot_a: &stock,
         original_slot_b: &original,
     };
-    let error = build_top_vbmeta(&template, &[], &output).expect_err("damaged signature");
+    let error = build_top_vbmeta(&template, &[], None, &output).expect_err("damaged signature");
     assert!(
         matches!(error, front2::Front2Error::Verification(_)),
         "{error}"
@@ -721,6 +790,7 @@ fn a_candidate_from_an_untested_build_needs_the_acceptance_of_its_fingerprint() 
             rollback_evidence: &[],
             accepted_untested_build: accepted,
             stock_slot: BootSlot::A,
+            target_slot: BootSlot::B,
         })
         .expect_err("the backup has no super dump")
         .to_string()
@@ -756,6 +826,7 @@ fn a_candidate_from_the_tested_build_needs_no_acceptance() {
         rollback_evidence: &[],
         accepted_untested_build: None,
         stock_slot: BootSlot::A,
+        target_slot: BootSlot::B,
     })
     .expect_err("the backup has no super dump")
     .to_string();
@@ -818,7 +889,7 @@ fn real_images_give_the_bytes_that_started_the_device_when_available() {
         original_slot_b: &original_top,
     };
     let output = directory.path().join("vbmeta.img");
-    let built = build_top_vbmeta(&template, &[], &output).expect("top");
+    let built = build_top_vbmeta(&template, &[], None, &output).expect("top");
     let reference = evidence
         .join("root-preparation")
         .join("current-vbmeta_b.img");
@@ -859,4 +930,230 @@ fn real_images_give_the_bytes_that_started_the_device_when_available() {
     println!("vbmeta_system: built {built:?}");
     println!("vbmeta_system: reference {reference_sha256}");
     assert_eq!(built.image.sha256, reference_sha256);
+}
+
+const GSI_BYTES: u64 = 4608 * 512;
+
+// The descriptors below carry empty digests. libavb treats an empty digest as a
+// persistent digest and does not compare it against the image, so verify_view
+// passes without a full consistent hash tree. The digest arithmetic is checked
+// by the build_top_vbmeta and build_system_vbmeta tests above, so this test can
+// keep the images small and check the test key slot A candidate build instead.
+fn hash_persistent(partition: &str) -> DescriptorInfo {
+    DescriptorInfo::Hash {
+        image_size: 4096,
+        hash_algorithm: "sha256".to_string(),
+        partition_name: partition.to_string(),
+        salt: vec![1; 32],
+        digest: Vec::new(),
+        flags: 0,
+    }
+}
+
+fn hashtree_persistent(partition: &str) -> DescriptorInfo {
+    DescriptorInfo::Hashtree {
+        dm_verity_version: 1,
+        image_size: 4096,
+        tree_offset: 0,
+        tree_size: 0,
+        data_block_size: 4096,
+        hash_block_size: 4096,
+        fec_num_roots: 0,
+        fec_offset: 0,
+        fec_size: 0,
+        hash_algorithm: "sha256".to_string(),
+        partition_name: partition.to_string(),
+        salt: vec![2; 32],
+        root_digest: Vec::new(),
+        flags: 0,
+    }
+}
+
+fn testkey_slot_a_top_vbmeta(fingerprints: &[&'static str]) -> Source<'static> {
+    Source {
+        key_spec: "testkey_rsa4096",
+        algorithm: "SHA256_RSA4096",
+        rollback_index: 0,
+        flags: 0,
+        properties: fingerprints
+            .iter()
+            .map(|value| ("com.android.build.boot.fingerprint", *value))
+            .collect(),
+        descriptors: vec![
+            hash_persistent("boot"),
+            hash_persistent("dtbo"),
+            hash_persistent("init_boot"),
+            hash_persistent("recovery"),
+            hash_persistent("vendor_boot"),
+        ],
+        chains: vec![("vbmeta_system", 2, OTHER_KEY)],
+    }
+}
+
+fn stock_slot_b_top_vbmeta() -> Source<'static> {
+    let mut source = stock_top();
+    source.rollback_index = BOOT_SLOT_FLOOR;
+    source
+}
+
+fn testkey_slot_a_system_vbmeta() -> Source<'static> {
+    Source {
+        key_spec: "testkey_rsa2048",
+        algorithm: "SHA256_RSA2048",
+        rollback_index: SYSTEM_ROLLBACK,
+        flags: 0,
+        properties: vec![
+            ("com.android.build.system.fingerprint", STOCK_SYSTEM),
+            ("com.android.build.product.fingerprint", "stock/468"),
+        ],
+        descriptors: vec![hashtree_persistent("product")],
+        chains: Vec::new(),
+    }
+}
+
+fn gsi_source() -> Source<'static> {
+    Source {
+        key_spec: "testkey_rsa4096",
+        algorithm: "SHA256_RSA4096",
+        rollback_index: 0,
+        flags: 0,
+        properties: vec![("com.android.build.system.fingerprint", "gsi/1")],
+        descriptors: vec![hashtree_persistent("system")],
+        chains: Vec::new(),
+    }
+}
+
+fn record_entry(entries: &mut Vec<serde_json::Value>, relative: &str, path: &Path) {
+    let (bytes, sha256) = sha256_file(path).expect("digest of the dump");
+    entries.push(serde_json::json!({
+        "path": relative,
+        "bytes": bytes,
+        "sha256": sha256.to_ascii_uppercase(),
+    }));
+}
+
+fn write_testkey_slot_a_backup(backup: &Path) {
+    let lun0 = backup.join("partitions").join("lun0");
+    let lun4 = backup.join("partitions").join("lun4");
+    std::fs::create_dir_all(&lun0).expect("create lun0");
+    std::fs::create_dir_all(&lun4).expect("create lun4");
+    let mut entries = Vec::new();
+
+    let super_path = lun0.join("super.bin");
+    std::fs::write(&super_path, SyntheticSuper::standard().image()).expect("write the super");
+    record_entry(&mut entries, "partitions\\lun0\\super.bin", &super_path);
+
+    for name in [
+        "boot_a",
+        "dtbo_a",
+        "init_boot_a",
+        "recovery_a",
+        "vendor_boot_a",
+    ] {
+        let path = lun4.join(format!("{name}.bin"));
+        std::fs::write(&path, vec![0x5A; 4096]).expect("write the physical image");
+        record_entry(
+            &mut entries,
+            &format!("partitions\\lun4\\{name}.bin"),
+            &path,
+        );
+    }
+
+    for (name, source) in [
+        ("vbmeta_a", testkey_slot_a_top_vbmeta(&[TESTED_BUILD])),
+        ("vbmeta_b", stock_slot_b_top_vbmeta()),
+        ("vbmeta_system_a", testkey_slot_a_system_vbmeta()),
+    ] {
+        let path = lun4.join(format!("{name}.bin"));
+        source.write(&path);
+        record_entry(
+            &mut entries,
+            &format!("partitions\\lun4\\{name}.bin"),
+            &path,
+        );
+    }
+
+    let text = serde_json::to_string_pretty(&entries).expect("manifest text");
+    std::fs::write(backup.join("sha256-manifest.json"), text).expect("write the manifest");
+}
+
+fn write_gsi_image(path: &Path) {
+    gsi_source().write(path);
+    std::fs::OpenOptions::new()
+        .write(true)
+        .open(path)
+        .expect("open the GSI")
+        .set_len(GSI_BYTES)
+        .expect("pad the GSI");
+}
+
+#[test]
+fn an_install_to_the_test_key_slot_a_builds_a_candidate_in_place() {
+    let bench = Bench::new();
+    let backup = bench.path("backup");
+    write_testkey_slot_a_backup(&backup);
+    let gsi = bench.path("gsi.img");
+    write_gsi_image(&gsi);
+    let output = bench.path("candidate");
+
+    let candidate = GsiCandidate::build(&GsiCandidateRequest {
+        profile: &PROFILE,
+        backup_directory: &backup,
+        gsi_image: &gsi,
+        output_directory: &output,
+        rollback_evidence: &[],
+        accepted_untested_build: None,
+        stock_slot: BootSlot::B,
+        target_slot: BootSlot::A,
+    })
+    .expect("the test key slot A candidate builds");
+
+    assert_eq!(candidate.stock_slot, BootSlot::B);
+    assert_eq!(candidate.target_slot, BootSlot::A);
+    assert_eq!(candidate.source_slot, BootSlot::A);
+    assert_eq!(candidate.top_vbmeta.rollback_index, BOOT_SLOT_FLOOR);
+
+    let view: Vec<&str> = candidate
+        .logical_view
+        .iter()
+        .map(|record| record.file.as_str())
+        .collect();
+    assert_eq!(
+        view,
+        [
+            "odm.img",
+            "product.img",
+            "system.img",
+            "system_dlkm.img",
+            "vendor.img",
+            "vendor_dlkm.img"
+        ]
+    );
+
+    let physical: Vec<(&str, Option<&str>)> = candidate
+        .physical_images
+        .iter()
+        .map(|image| (image.partition.as_str(), image.backup_source.as_deref()))
+        .collect();
+    assert_eq!(
+        physical,
+        [
+            ("boot_a", Some("boot_a")),
+            ("dtbo_a", Some("dtbo_a")),
+            ("init_boot_a", Some("init_boot_a")),
+            ("recovery_a", Some("recovery_a")),
+            ("vendor_boot_a", Some("vendor_boot_a")),
+        ]
+    );
+
+    assert_eq!(candidate.images().len(), 8);
+    assert!(!candidate.avb_verification.is_empty());
+
+    let (loaded, _) = GsiCandidate::load(&output).expect("load the saved candidate");
+    assert_eq!(loaded.source_slot, BootSlot::A);
+    assert_eq!(loaded.target_slot, BootSlot::A);
+    assert_eq!(loaded.images(), candidate.images());
+    loaded
+        .verify_files(&output)
+        .expect("the files match their records");
 }

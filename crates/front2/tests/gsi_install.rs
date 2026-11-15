@@ -89,20 +89,21 @@ fn inputs_of(fixture: &InstallFixture) -> Result<InstallInputs> {
     install_inputs_from_images(
         &candidate_images(fixture),
         &original_super_sha256(fixture),
+        fixture.inputs.target_slot,
         &fixture.inputs.candidate_directory,
         &fixture.inputs.backup_directory,
     )
 }
 
 fn prepared_fixture() -> InstallFixture {
-    let fixture = InstallFixture::standard();
+    let fixture = InstallFixture::new(BootSlot::A, BootSlot::B);
     let backup = &fixture.inputs.backup_directory;
     write_manifest(backup, &manifest_entries(backup));
     fixture
 }
 
 fn prepared_b_fixture() -> InstallFixture {
-    let fixture = InstallFixture::stock_b();
+    let fixture = InstallFixture::new(BootSlot::B, BootSlot::B);
     let backup = &fixture.inputs.backup_directory;
     write_manifest(backup, &manifest_entries(backup));
     fixture
@@ -134,6 +135,7 @@ fn a_candidate_from_another_backup_is_rejected() {
     let error = install_inputs_from_images(
         &candidate_images(&fixture),
         &"0f".repeat(32),
+        fixture.inputs.target_slot,
         &fixture.inputs.candidate_directory,
         &fixture.inputs.backup_directory,
     )
@@ -259,6 +261,33 @@ fn a_tidy_stock_slot_b_backup_gives_the_inputs_with_no_slot_activation() {
             .iter()
             .any(|step| matches!(step, InstallStep::SetBootLun { .. }))
     );
+}
+
+#[test]
+fn a_stock_slot_b_backup_with_target_slot_a_prepares_a_slot_b_to_slot_a_activation() {
+    let fixture = prepared_b_fixture();
+    let inputs = install_inputs_from_images(
+        &candidate_images(&fixture),
+        &original_super_sha256(&fixture),
+        BootSlot::A,
+        &fixture.inputs.candidate_directory,
+        &fixture.inputs.backup_directory,
+    )
+    .expect("a stock slot B backup with target slot A gives the inputs");
+    assert_eq!(inputs.stock_slot, BootSlot::B);
+    assert_eq!(inputs.target_slot, BootSlot::A);
+    let lun4 = inputs
+        .activation_lun4
+        .as_ref()
+        .expect("a boot switch prepares the LUN 4 activation");
+    assert!(inputs.activation_lun0.is_some());
+    let boot = lun4
+        .changes
+        .iter()
+        .find(|change| change.a == "boot_a")
+        .expect("the LUN 4 activation changes the boot pair");
+    assert_eq!(boot.flags_after_a, "003f000000000000");
+    assert_eq!(boot.flags_after_b, "0072000000000000");
 }
 
 #[test]

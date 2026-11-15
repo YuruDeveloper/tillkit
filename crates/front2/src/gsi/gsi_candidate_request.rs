@@ -12,4 +12,5 @@ pub struct GsiCandidateRequest<'a> {
     pub rollback_evidence: &'a [RollbackEvidence],
     pub accepted_untested_build: Option<&'a str>,
     pub stock_slot: BootSlot,
+    pub target_slot: BootSlot,
 }

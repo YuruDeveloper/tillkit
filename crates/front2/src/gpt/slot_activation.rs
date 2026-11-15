@@ -1,5 +1,6 @@
 use crate::digest::sha256_bytes;
 use crate::error::{Front2Error, Result};
+use crate::gpt::boot_slot::BootSlot;
 use crate::gpt::gpt_copy::GptCopy;
 use crate::gpt::gpt_copy_kind::GptCopyKind;
 use crate::gpt::gpt_entry::GptEntry;
@@ -28,13 +29,13 @@ pub struct SlotActivation {
 }
 
 impl SlotActivation {
-    pub fn prepare(lun: u8, main: &[u8], backup: &[u8]) -> Result<Self> {
+    pub fn prepare(lun: u8, target: BootSlot, main: &[u8], backup: &[u8]) -> Result<Self> {
         let main_copy = GptCopy::parse(GptCopyKind::Main, main)?;
         let backup_copy = GptCopy::parse(GptCopyKind::Backup, backup)?;
         main_copy.require_pair_with(&backup_copy, &format!("LUN {lun}"))?;
         let mut table = main_copy.table().to_vec();
         let mut permitted = PermittedBytes::none(table.len());
-        let changes = switch_slots(lun, &main_copy, &mut table, &mut permitted)?;
+        let changes = switch_slots(lun, target, &main_copy, &mut table, &mut permitted)?;
         permitted.require_only_permitted_differences(
             main_copy.table(),
             &table,
@@ -67,6 +68,7 @@ impl SlotActivation {
 
 fn switch_slots(
     lun: u8,
+    target: BootSlot,
     copy: &GptCopy,
     table: &mut [u8],
     permitted: &mut PermittedBytes,
@@ -76,7 +78,7 @@ fn switch_slots(
         let Some(entry_b) = partner_of(lun, copy, entry_a)? else {
             continue;
         };
-        changes.push(switch_pair(lun, entry_a, entry_b, table)?);
+        changes.push(switch_pair(lun, target, entry_a, entry_b, table)?);
         permit_entry(permitted, entry_a)?;
         permit_entry(permitted, entry_b)?;
     }
@@ -108,32 +110,41 @@ fn partner_of<'copy>(
 
 fn switch_pair(
     lun: u8,
+    target: BootSlot,
     entry_a: &GptEntry,
     entry_b: &GptEntry,
     table: &mut [u8],
 ) -> Result<SlotChange> {
     let is_boot_pair = entry_a.name == BOOT_A_NAME;
-    if is_boot_pair && entry_a.flags & ACTIVE_FLAG == 0 {
+    let (source, dest) = match target {
+        BootSlot::B => (entry_a, entry_b),
+        BootSlot::A => (entry_b, entry_a),
+    };
+    if is_boot_pair && source.flags & ACTIVE_FLAG == 0 {
         return Err(Front2Error::Unsupported(format!(
             "LUN {lun}: {} is not active, flags {:016x}",
-            entry_a.name, entry_a.flags
+            source.name, source.flags
         )));
     }
-    if entry_b.flags & ACTIVE_FLAG != 0 {
+    if dest.flags & ACTIVE_FLAG != 0 {
         return Err(Front2Error::Unsupported(format!(
             "LUN {lun}: {} is already active, flags {:016x}",
-            entry_b.name, entry_b.flags
+            dest.name, dest.flags
         )));
     }
-    let mut flags_a = entry_a.flags & !ACTIVE_FLAG;
-    let mut flags_b = entry_b.flags | ACTIVE_FLAG;
+    let mut flags_source = source.flags & !ACTIVE_FLAG;
+    let mut flags_dest = dest.flags | ACTIVE_FLAG;
     if is_boot_pair {
-        flags_a = (flags_a & !PRIORITY_MASK) | INACTIVE_BOOT_PRIORITY;
-        flags_b =
-            (flags_b | PRIORITY_MASK | RETRY_COUNT_MASK) & !SUCCESSFUL_FLAG & !UNBOOTABLE_FLAG;
+        flags_source = (flags_source & !PRIORITY_MASK) | INACTIVE_BOOT_PRIORITY;
+        flags_dest =
+            (flags_dest | PRIORITY_MASK | RETRY_COUNT_MASK) & !SUCCESSFUL_FLAG & !UNBOOTABLE_FLAG;
     }
-    write_entry(table, entry_a, &entry_b.type_guid, flags_a)?;
-    write_entry(table, entry_b, &entry_a.type_guid, flags_b)?;
+    write_entry(table, source, &dest.type_guid, flags_source)?;
+    write_entry(table, dest, &source.type_guid, flags_dest)?;
+    let (flags_a, flags_b) = match target {
+        BootSlot::B => (flags_source, flags_dest),
+        BootSlot::A => (flags_dest, flags_source),
+    };
     Ok(SlotChange {
         lun,
         a: entry_a.name.clone(),

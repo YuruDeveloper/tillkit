@@ -9,7 +9,7 @@ use front2::digest::sha256_file;
 use front2::gpt::BootSlot;
 use front2::gsi::{
     GsiCandidate, GsiCandidateRequest, StockBuild, backup_boot_slot, backup_stock_build,
-    install_inputs, require_slot_a_active,
+    find_testkey_slot, install_inputs, install_source_slot, require_slot_a_active,
 };
 use front2::install::{InstallPlan, PLAN_FILE};
 use front2::{DeviceProfile, Front2Error, Result};
@@ -20,7 +20,7 @@ use std::path::{Path, PathBuf};
 const CANDIDATE_PREFIX: &str = "gsi-";
 const PLAN_PREFIX: &str = "install-";
 const BACKUP_NOT_READ: &str = "이 이미지로 만든 계획이 쓰던 전체 백업을 읽지 못했습니다. 그 폴더를 읽을 수 있게 한 뒤에 MAKE PLAN을 다시 누르거나, USE EXISTING BACKUP으로 쓸 전체 백업을 직접 골라 주세요.";
-const BACKUP_SLOTS_UNSUPPORTED: &str = "이 전체 백업으로는 설치 계획을 만들 수 없습니다. 설치는 부팅 슬롯을 A에서 B로 바꾸는데, 이 백업의 파티션 표는 그 전환을 할 수 있는 상태(슬롯 A만 활성)와 맞지 않습니다. 순정 상태에서 만들어 둔 전체 백업이 있으면 USE EXISTING BACKUP으로 그 폴더를 골라 주세요.";
+const BACKUP_SLOTS_UNSUPPORTED: &str = "이 전체 백업으로는 설치 계획을 만들 수 없습니다. 백업에 기록된 파티션 표가 설치에 필요한 슬롯 상태와 맞지 않습니다. 자세한 이유는 뒤에 함께 표시됩니다. 순정 상태에서 미리 만들어 둔 전체 백업이 있다면, USE EXISTING BACKUP으로 그 폴더를 선택해 주세요.";
 const NOT_STOCK_SLOT_B: &str = "이 전체 백업은 TillKit이 제자리에 GSI를 설치할 수 있는 순정 부팅 슬롯 B 상태가 아닙니다. 뒤에 적힌 이유를 확인해 주세요. 이미 GSI를 설치한 기기에서 만든 백업이라면, 순정 상태에서 만들어 둔 전체 백업을 USE EXISTING BACKUP으로 골라 주세요.";
 
 pub fn prepare(
@@ -32,11 +32,13 @@ pub fn prepare(
     accepted_build: Option<&str>,
 ) -> Result<PreparedInstall> {
     if let Some(stored) = stored(paths, backup, backup_is_found, gsi_image)? {
-        let build = backup_stock_build(&stored.plan.backup_directory, stored.plan.stock_slot);
+        let source_slot = install_source_slot(stored.plan.stock_slot, stored.plan.target_slot)?;
+        let build = backup_stock_build(&stored.plan.backup_directory, source_slot);
         return Ok(planned(stored, build));
     }
-    let stock_slot = require_installable_slot(backup)?;
-    let build = backup_stock_build(backup, stock_slot)?;
+    let (stock_slot, target_slot) = installable_slots(backup)?;
+    let source_slot = install_source_slot(stock_slot, target_slot)?;
+    let build = backup_stock_build(backup, source_slot)?;
     if let Some(fingerprint) = build.unaccepted_fingerprint(accepted_build) {
         return Ok(PreparedInstall::UntestedBuild(fingerprint.to_string()));
     }
@@ -47,11 +49,12 @@ pub fn prepare(
         profile,
         accepted_build,
         stock_slot,
+        target_slot,
     );
-    let review = told_if_not_stock_b(stock_slot, review)?;
+    let review = told_if_not_stock_b(stock_slot, target_slot, review)?;
     let install = plan_install(paths, &review, backup, profile);
     let install = removed_on_failure(&review.directory, install);
-    let install = told_if_not_stock_b(stock_slot, install)?;
+    let install = told_if_not_stock_b(stock_slot, target_slot, install)?;
     Ok(planned(install, Ok(build)))
 }
 
@@ -60,12 +63,25 @@ fn planned(review: InstallReview, build: Result<StockBuild>) -> PreparedInstall 
     PreparedInstall::Planned(Box::new(InstallReview { build, ..review }))
 }
 
-fn require_installable_slot(backup: &Path) -> Result<BootSlot> {
-    let slot = told_as_unsupported_slots(backup_boot_slot(backup))?;
-    if slot == BootSlot::A {
+fn installable_slots(backup: &Path) -> Result<(BootSlot, BootSlot)> {
+    let stock_slot = told_as_unsupported_slots(backup_boot_slot(backup))?;
+    let target_slot = install_target_slot(backup)?;
+    if stock_slot == BootSlot::A && target_slot == BootSlot::B {
         told_as_unsupported_slots(require_slot_a_active(backup))?;
     }
-    Ok(slot)
+    Ok((stock_slot, target_slot))
+}
+
+// The install target is the test key slot, because the tool can only reproduce
+// the test key. The kk device holds the test key on slot A. find_testkey_slot
+// returns a slot only when one slot holds the test key. For no test key slot or
+// two test key slots, the target is slot B.
+fn install_target_slot(backup: &Path) -> Result<BootSlot> {
+    match find_testkey_slot(backup) {
+        Ok(slot) => Ok(slot),
+        Err(Front2Error::Unsupported(_)) => Ok(BootSlot::B),
+        Err(other) => Err(other),
+    }
 }
 
 fn told_as_unsupported_slots<Value>(result: Result<Value>) -> Result<Value> {
@@ -77,12 +93,16 @@ fn told_as_unsupported_slots<Value>(result: Result<Value>) -> Result<Value> {
     }
 }
 
-fn told_if_not_stock_b<Value>(stock_slot: BootSlot, result: Result<Value>) -> Result<Value> {
-    match (stock_slot, result) {
-        (BootSlot::B, Err(Front2Error::Unsupported(reason))) => {
+fn told_if_not_stock_b<Value>(
+    stock_slot: BootSlot,
+    target_slot: BootSlot,
+    result: Result<Value>,
+) -> Result<Value> {
+    match (stock_slot, target_slot, result) {
+        (BootSlot::B, BootSlot::B, Err(Front2Error::Unsupported(reason))) => {
             Err(Front2Error::Plan(format!("{NOT_STOCK_SLOT_B} ({reason})")))
         }
-        (_, other) => other,
+        (_, _, other) => other,
     }
 }
 
@@ -180,6 +200,7 @@ fn build_candidate(
     profile: &DeviceProfile,
     accepted_build: Option<&str>,
     stock_slot: BootSlot,
+    target_slot: BootSlot,
 ) -> Result<GsiReview> {
     let root = paths.gsi_candidates();
     std::fs::create_dir_all(&root)?;
@@ -192,6 +213,7 @@ fn build_candidate(
         rollback_evidence: &[],
         accepted_untested_build: accepted_build,
         stock_slot,
+        target_slot,
     };
     let candidate = GsiCandidate::build(&request)?;
     let review = reviewed_candidate(directory.clone(), &candidate);
@@ -283,7 +305,7 @@ mod tests {
     fn letter_1462_a_plan_keeps_the_build_or_the_failure_of_its_read() {
         use crate::install_support::InstallFixture;
 
-        let fixture = InstallFixture::standard();
+        let fixture = InstallFixture::new(BootSlot::A, BootSlot::B);
         let stored = fixture.stored_plan();
         let review = InstallReview {
             plan: stored.plan().clone(),
@@ -310,19 +332,34 @@ mod tests {
     #[test]
     fn a_slot_b_backup_that_is_not_a_stock_slot_b_is_told_in_plain_words() {
         let reason = "LUN 4: boot_a has the active flag".to_string();
-        let told =
-            told_if_not_stock_b::<()>(BootSlot::B, Err(Front2Error::Unsupported(reason.clone())))
-                .expect_err("a slot B backup that is not a tidy stock slot B is not used");
+        let told = told_if_not_stock_b::<()>(
+            BootSlot::B,
+            BootSlot::B,
+            Err(Front2Error::Unsupported(reason.clone())),
+        )
+        .expect_err("a slot B backup that is not a tidy stock slot B is not used");
         assert!(matches!(told, Front2Error::Plan(_)), "{told}");
         let text = told.to_string();
         assert!(text.contains(NOT_STOCK_SLOT_B), "{text}");
         assert!(text.contains(&reason), "{text}");
 
-        let kept =
-            told_if_not_stock_b::<()>(BootSlot::A, Err(Front2Error::Unsupported("other".into())))
-                .expect_err("a slot A failure stays as it is");
+        let kept = told_if_not_stock_b::<()>(
+            BootSlot::A,
+            BootSlot::B,
+            Err(Front2Error::Unsupported("other".into())),
+        )
+        .expect_err("a slot A failure stays as it is");
         assert!(matches!(kept, Front2Error::Unsupported(_)), "{kept}");
-        assert!(told_if_not_stock_b(BootSlot::B, Ok(7)).is_ok());
+
+        let switch = told_if_not_stock_b::<()>(
+            BootSlot::B,
+            BootSlot::A,
+            Err(Front2Error::Unsupported("other".into())),
+        )
+        .expect_err("a slot B to slot A failure stays as it is");
+        assert!(matches!(switch, Front2Error::Unsupported(_)), "{switch}");
+
+        assert!(told_if_not_stock_b(BootSlot::B, BootSlot::B, Ok(7)).is_ok());
     }
 
     #[test]
@@ -348,8 +385,8 @@ mod tests {
             .expect_err("the backup is not used");
         let text = told.to_string();
         assert!(text.contains(&reason), "{text}");
-        assert!(text.contains("슬롯 A만 활성"), "{text}");
-        assert!(!text.contains("슬롯 A로 부팅하는 상태가 아니"), "{text}");
+        assert!(text.contains(BACKUP_SLOTS_UNSUPPORTED), "{text}");
+        assert!(!text.contains("A에서 B로"), "{text}");
     }
 
     #[test]
@@ -400,7 +437,7 @@ mod tests {
     fn the_newest_stored_plan_that_fits_is_used_again() {
         use crate::install_support::InstallFixture;
 
-        let fixture = InstallFixture::standard();
+        let fixture = InstallFixture::new(BootSlot::A, BootSlot::B);
         let paths = DataPaths::new(fixture.directory.path().join("data"));
         let plans = paths.install_plans();
         let plan = InstallPlan::build(&fixture.inputs).expect("plan");
@@ -426,7 +463,7 @@ mod tests {
     fn letter_1348_a_found_backup_gives_the_newest_plan_of_the_image_and_its_backup() {
         use crate::install_support::InstallFixture;
 
-        let fixture = InstallFixture::standard();
+        let fixture = InstallFixture::new(BootSlot::A, BootSlot::B);
         let paths = DataPaths::new(fixture.directory.path().join("data"));
         let plans = paths.install_plans();
         let first = InstallPlan::build(&fixture.inputs).expect("plan");

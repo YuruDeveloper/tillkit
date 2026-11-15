@@ -7,8 +7,7 @@ use super::partition_overlap::PartitionOverlap;
 use super::planned_extent::PlannedExtent;
 use super::retained_partition::RetainedPartition;
 use super::{
-    COW_GROUP, COW_SUFFIX, DEFAULT_GROUP, DYNAMIC_GROUP, EXTENT_ALIGNMENT_SECTORS, GSI_BLOCK_BYTES,
-    ORIGINAL_SLOT, RETAINED_PARTITIONS, SYSTEM_EXT_PARTITION, SYSTEM_PARTITION, TARGET_SLOT,
+    COW_GROUP, COW_SUFFIX, DEFAULT_GROUP, EXTENT_ALIGNMENT_SECTORS, GSI_BLOCK_BYTES, SuperSlot,
 };
 use crate::error::{Front2Error, Result};
 use serde::{Deserialize, Serialize};
@@ -25,41 +24,46 @@ pub struct SuperLayoutPlan {
     pub alignment_offset_bytes: u32,
     pub used_bytes: u64,
     pub group_maximum_bytes: u64,
-    pub original_a_overlaps: Vec<PartitionOverlap>,
+    pub opposite_overlaps: Vec<PartitionOverlap>,
 }
 
 impl SuperLayoutPlan {
-    pub fn from_super_file(super_image: &Path, gsi_bytes: u64) -> Result<Self> {
+    pub fn from_super_file(super_image: &Path, gsi_bytes: u64, slot: &SuperSlot) -> Result<Self> {
         let mut file = File::open(super_image)?;
         let geometry = LpGeometry::read(&mut file)?;
-        let target = LpMetadata::read_slot(&mut file, &geometry, TARGET_SLOT)?;
-        let original_a = LpMetadata::read_slot(&mut file, &geometry, ORIGINAL_SLOT)?;
-        Self::plan(&target, &original_a, gsi_bytes)
+        let target = LpMetadata::read_slot(&mut file, &geometry, slot.target_index())?;
+        let opposite = LpMetadata::read_slot(&mut file, &geometry, slot.opposite_index())?;
+        Self::plan(slot, &target, &opposite, gsi_bytes)
     }
 
-    pub fn plan(target: &LpMetadata, original_a: &LpMetadata, gsi_bytes: u64) -> Result<Self> {
+    pub fn plan(
+        slot: &SuperSlot,
+        target: &LpMetadata,
+        opposite: &LpMetadata,
+        gsi_bytes: u64,
+    ) -> Result<Self> {
         if gsi_bytes == 0 || !gsi_bytes.is_multiple_of(GSI_BLOCK_BYTES) {
             return Err(Front2Error::Plan(format!(
                 "a GSI of {gsi_bytes} bytes is not a positive multiple of {GSI_BLOCK_BYTES} bytes"
             )));
         }
         target.require_known_extent_targets()?;
-        original_a.require_known_extent_targets()?;
+        opposite.require_known_extent_targets()?;
         let device = target.single_block_device()?;
         let alignment_sectors = device.alignment_sectors()?;
-        let (retained, ranges) = retained_ranges(target, device)?;
+        let (retained, ranges) = retained_ranges(slot, target, device)?;
         let free = free_ranges(ranges, device.first_logical_sector, device.last_sector())?;
         let allocation = allocate(&free, alignment_sectors, gsi_bytes / SECTOR_BYTES)?;
         let used_bytes = used_bytes(&retained, gsi_bytes)?;
-        let (_, group) = target.group(DYNAMIC_GROUP)?;
-        require_group_fits(used_bytes, group.maximum_size)?;
-        require_aligned_system(target, alignment_sectors)?;
-        require_known_slot_1_names(target)?;
+        let (_, group) = target.group(slot.dynamic_group())?;
+        require_group_fits(used_bytes, group.maximum_size, slot.dynamic_group())?;
+        require_aligned_system(slot, target, alignment_sectors)?;
+        require_known_names(slot, target)?;
         Ok(Self {
             gsi_bytes,
             super_bytes: device.size,
             retained,
-            original_a_overlaps: overlaps(original_a, &allocation)?,
+            opposite_overlaps: overlaps(opposite, &allocation)?,
             allocation,
             alignment_bytes: device.alignment,
             alignment_offset_bytes: device.alignment_offset,
@@ -72,17 +76,18 @@ impl SuperLayoutPlan {
 type NamedRange = (u64, u64, String);
 
 fn retained_ranges(
+    slot: &SuperSlot,
     target: &LpMetadata,
     device: &LpBlockDevice,
 ) -> Result<(Vec<RetainedPartition>, Vec<NamedRange>)> {
     let mut retained = Vec::new();
     let mut ranges = Vec::new();
-    for name in RETAINED_PARTITIONS {
+    for name in slot.retained() {
         target.partition(name)?;
     }
     for partition in &target.partitions {
         let name = partition.name.as_str();
-        if !RETAINED_PARTITIONS.contains(&name) {
+        if !slot.retained().iter().any(|retained| retained == name) {
             continue;
         }
         for extent in target.extents_of(partition)? {
@@ -154,7 +159,7 @@ fn allocate(
     }
     if remaining != 0 {
         return Err(Front2Error::Plan(format!(
-            "the GSI needs {gsi_sectors} sectors, the free aligned space of slot B is {remaining} sectors short"
+            "the GSI needs {gsi_sectors} sectors, the free aligned space of the target slot is {remaining} sectors short"
         )));
     }
     Ok(allocation)
@@ -168,34 +173,37 @@ fn used_bytes(retained: &[RetainedPartition], gsi_bytes: u64) -> Result<u64> {
     Ok(total)
 }
 
-fn require_group_fits(used_bytes: u64, maximum_bytes: u64) -> Result<()> {
+fn require_group_fits(used_bytes: u64, maximum_bytes: u64, group: &str) -> Result<()> {
     if maximum_bytes != 0 && used_bytes > maximum_bytes {
         return Err(Front2Error::Plan(format!(
-            "the retained partitions and the GSI use {used_bytes} bytes, group {DYNAMIC_GROUP} allows {maximum_bytes} bytes"
+            "the retained partitions and the GSI use {used_bytes} bytes, group {group} allows {maximum_bytes} bytes"
         )));
     }
     Ok(())
 }
 
-fn require_aligned_system(target: &LpMetadata, alignment_sectors: u64) -> Result<()> {
-    let system = target.partition(SYSTEM_PARTITION)?;
+fn require_aligned_system(
+    slot: &SuperSlot,
+    target: &LpMetadata,
+    alignment_sectors: u64,
+) -> Result<()> {
+    let system = target.partition(slot.system())?;
     let aligned = |extent: &LpExtent| {
         extent.target_type == TARGET_TYPE_LINEAR
             && extent.target_sector.is_multiple_of(alignment_sectors)
     };
     if !target.extents_of(system)?.iter().all(aligned) {
         return Err(Front2Error::Plan(format!(
-            "{SYSTEM_PARTITION} has an extent that is not linear or does not start on a multiple of {alignment_sectors} sectors"
+            "{} has an extent that is not linear or does not start on a multiple of {alignment_sectors} sectors",
+            slot.system()
         )));
     }
     Ok(())
 }
 
-fn require_known_slot_1_names(target: &LpMetadata) -> Result<()> {
-    let base: Vec<&str> = [SYSTEM_PARTITION, SYSTEM_EXT_PARTITION]
-        .into_iter()
-        .chain(RETAINED_PARTITIONS)
-        .collect();
+fn require_known_names(slot: &SuperSlot, target: &LpMetadata) -> Result<()> {
+    let mut base: Vec<&str> = vec![slot.system(), slot.system_ext()];
+    base.extend(slot.retained().iter().map(String::as_str));
     let mut allowed: Vec<String> = Vec::with_capacity(base.len() * 2);
     for name in base {
         allowed.push(name.to_string());
@@ -205,30 +213,29 @@ fn require_known_slot_1_names(target: &LpMetadata) -> Result<()> {
         let name = partition.name.as_str();
         if !allowed.iter().any(|known| known == name) {
             return Err(Front2Error::Plan(format!(
-                "super slot 1 has the partition {name}, which is not one of {allowed:?}"
+                "super slot {} has the partition {name}, which is not one of {allowed:?}",
+                slot.target_index()
             )));
         }
     }
-    let groups = [DEFAULT_GROUP, DYNAMIC_GROUP, COW_GROUP];
+    let groups = [DEFAULT_GROUP, slot.dynamic_group(), COW_GROUP];
     for group in &target.groups {
         let name = group.name.as_str();
         if !groups.contains(&name) {
             return Err(Front2Error::Plan(format!(
-                "super slot 1 has the group {name}, which is not one of {groups:?}"
+                "super slot {} has the group {name}, which is not one of {groups:?}",
+                slot.target_index()
             )));
         }
     }
     Ok(())
 }
 
-fn overlaps(
-    original_a: &LpMetadata,
-    allocation: &[PlannedExtent],
-) -> Result<Vec<PartitionOverlap>> {
+fn overlaps(opposite: &LpMetadata, allocation: &[PlannedExtent]) -> Result<Vec<PartitionOverlap>> {
     let mut overlaps = Vec::new();
-    for partition in &original_a.partitions {
+    for partition in &opposite.partitions {
         let mut overlap_sectors = 0u64;
-        for extent in original_a.extents_of(partition)? {
+        for extent in opposite.extents_of(partition)? {
             overlap_sectors = checked_sum(overlap_sectors, overlap_with(extent, allocation)?)?;
         }
         if overlap_sectors == 0 {

@@ -3,7 +3,7 @@ mod gpt_support;
 mod install_support;
 
 use front2::full_backup::{FullBackupPlan, validate_full_backup};
-use front2::gpt::GptCopyKind;
+use front2::gpt::{BootSlot, GptCopyKind};
 use front2::gsi::{BackupEntry, BackupManifest, CandidateImage, install_inputs_from_images};
 use front2::install::{InstallPlan, SectorStorage};
 use full_backup_support::BackupFixture;
@@ -57,6 +57,7 @@ fn letter_1292_full_backup_is_read_only_and_builds_install_inputs() {
     let inputs = install_inputs_from_images(
         &images,
         &manifest.partition("super").unwrap().sha256,
+        BootSlot::B,
         &fixture.inputs.candidate_directory,
         &output,
     )

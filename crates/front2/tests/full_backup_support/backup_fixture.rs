@@ -1,6 +1,7 @@
 use super::ReadOnlyStorage;
 use crate::gpt_support::{LAST_LBA, SyntheticGpt};
 use crate::install_support::InstallFixture;
+use front2::gpt::BootSlot;
 use front2::install::InstallInputs;
 use std::path::PathBuf;
 use tempfile::TempDir;
@@ -17,7 +18,9 @@ impl BackupFixture {
     }
 
     pub fn with_super_sectors(sectors: u64) -> Self {
-        let fixture = InstallFixture::with_super_sectors(sectors);
+        let fixture = InstallFixture::builder(BootSlot::A, BootSlot::B)
+            .with_super_sectors(sectors)
+            .build();
         let mut storage = ReadOnlyStorage::new(fixture.storage);
         let first_alignment = SyntheticGpt::empty()
             .with_entry("cdt", 0)

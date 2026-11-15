@@ -2,8 +2,8 @@ mod gpt_support;
 
 use front2::digest::sha256_bytes;
 use front2::gpt::{
-    GptCopy, GptCopyKind, PartitionLocation, PartitionMap, SlotActivation, misc_wipe_sector,
-    require_current_copy_matches, require_matching_table_areas,
+    BootSlot, GptCopy, GptCopyKind, PartitionLocation, PartitionMap, SlotActivation,
+    misc_wipe_sector, require_current_copy_matches, require_matching_table_areas,
 };
 use front2::{Front2Error, Result};
 use gpt_support::{
@@ -25,9 +25,29 @@ const EXPECTED_PAIRS: [(&str, &str, u64, u64); 3] = [
     ("vbmeta_a", "vbmeta_b", 0x107b << 48, 0x107f << 48),
     ("dtbo_a", "dtbo_b", 0x007b << 48, 0x007f << 48),
 ];
+const SLOT_A_EXPECTED_PAIRS: [(&str, &str, u64, u64); 3] = [
+    ("boot_a", "boot_b", 0x003f << 48, 0x0072 << 48),
+    ("vbmeta_a", "vbmeta_b", 0x107f << 48, 0x107b << 48),
+    ("dtbo_a", "dtbo_b", 0x007f << 48, 0x007b << 48),
+];
 
 fn activate(gpt: &SyntheticGpt) -> Result<SlotActivation> {
-    SlotActivation::prepare(LUN, &gpt.main(), &gpt.backup())
+    SlotActivation::prepare(LUN, BootSlot::B, &gpt.main(), &gpt.backup())
+}
+
+fn activate_to_slot_a(gpt: &SyntheticGpt) -> Result<SlotActivation> {
+    SlotActivation::prepare(LUN, BootSlot::A, &gpt.main(), &gpt.backup())
+}
+
+fn slot_b_active() -> SyntheticGpt {
+    SyntheticGpt::empty()
+        .with_entry("boot_a", 0x0073 << 48)
+        .with_entry("boot_b", 0x0077 << 48)
+        .with_entry("vbmeta_a", 0x107b << 48)
+        .with_entry("vbmeta_b", 0x107f << 48)
+        .with_entry("dtbo_a", 0x007b << 48)
+        .with_entry("dtbo_b", 0x007f << 48)
+        .with_entry("misc", 0)
 }
 
 fn rejection<Outcome: Debug>(result: Result<Outcome>, fragment: &str) -> Front2Error {
@@ -214,14 +234,14 @@ fn a_damaged_header_checksum_is_rejected() {
     let mut main = gpt.main();
     main[MAIN_HEADER + 56] ^= 0xFF;
     let err = rejection(
-        SlotActivation::prepare(LUN, &main, &gpt.backup()),
+        SlotActivation::prepare(LUN, BootSlot::B, &main, &gpt.backup()),
         "header CRC32",
     );
     assert!(matches!(err, Front2Error::Image(_)));
     let mut backup = gpt.backup();
     backup[BACKUP_HEADER + 16] ^= 0x01;
     rejection(
-        SlotActivation::prepare(LUN, &gpt.main(), &backup),
+        SlotActivation::prepare(LUN, BootSlot::B, &gpt.main(), &backup),
         "header CRC32",
     );
 }
@@ -232,14 +252,14 @@ fn a_damaged_table_checksum_is_rejected() {
     let mut main = gpt.main();
     main[MAIN_TABLE + 20] ^= 0xFF;
     let err = rejection(
-        SlotActivation::prepare(LUN, &main, &gpt.backup()),
+        SlotActivation::prepare(LUN, BootSlot::B, &main, &gpt.backup()),
         "table CRC32",
     );
     assert!(matches!(err, Front2Error::Image(_)));
     let mut backup = gpt.backup();
     backup[ENTRY_BYTES + 48] ^= 0x04;
     rejection(
-        SlotActivation::prepare(LUN, &gpt.main(), &backup),
+        SlotActivation::prepare(LUN, BootSlot::B, &gpt.main(), &backup),
         "table CRC32",
     );
 }
@@ -249,7 +269,7 @@ fn a_backup_table_that_differs_from_the_main_table_is_rejected() {
     let gpt = SyntheticGpt::standard();
     let other = SyntheticGpt::standard().with_flags("misc", 1);
     let err = rejection(
-        SlotActivation::prepare(LUN, &gpt.main(), &other.backup()),
+        SlotActivation::prepare(LUN, BootSlot::B, &gpt.main(), &other.backup()),
         "do not agree in tables",
     );
     assert!(matches!(err, Front2Error::Verification(_)));
@@ -296,6 +316,41 @@ fn an_already_active_slot_b_partition_is_rejected() {
 }
 
 #[test]
+fn an_activation_to_slot_a_swaps_type_guids_and_moves_flags() {
+    let gpt = slot_b_active();
+    let activation = activate_to_slot_a(&gpt).expect("activation to slot A");
+    let before = GptCopy::parse(GptCopyKind::Main, &gpt.main()).expect("original");
+    let after = parsed_output(&activation, GptCopyKind::Main);
+    let after_backup = parsed_output(&activation, GptCopyKind::Backup);
+    assert_eq!(after.table(), after_backup.table());
+    for (name_a, name_b, flags_a, flags_b) in SLOT_A_EXPECTED_PAIRS {
+        assert_switched(&before, &after, name_a, name_b, flags_a);
+        assert_switched(&before, &after, name_b, name_a, flags_b);
+    }
+    assert_eq!(after.entry("misc"), before.entry("misc"));
+    let boot = &activation.changes[0];
+    assert_eq!(boot.a, "boot_a");
+    assert_eq!(boot.flags_before_a, "0073000000000000");
+    assert_eq!(boot.flags_before_b, "0077000000000000");
+    assert_eq!(boot.flags_after_a, "003f000000000000");
+    assert_eq!(boot.flags_after_b, "0072000000000000");
+}
+
+#[test]
+fn an_activation_to_slot_a_without_an_active_boot_b_is_rejected() {
+    let gpt = slot_b_active().with_flags("boot_b", 0x0073 << 48);
+    let err = rejection(activate_to_slot_a(&gpt), "boot_b is not active");
+    assert!(matches!(err, Front2Error::Unsupported(_)));
+}
+
+#[test]
+fn an_activation_to_slot_a_with_an_already_active_boot_a_is_rejected() {
+    let gpt = slot_b_active().with_flags("boot_a", 0x0077 << 48);
+    let err = rejection(activate_to_slot_a(&gpt), "boot_a is already active");
+    assert!(matches!(err, Front2Error::Unsupported(_)));
+}
+
+#[test]
 fn a_repeated_partition_name_is_rejected() {
     let gpt = SyntheticGpt::standard().with_entry("misc", 0);
     let err = rejection(activate(&gpt), "more than once");
@@ -309,7 +364,7 @@ fn a_different_signature_is_rejected() {
     main[MAIN_HEADER] = b'X';
     seal(GptCopyKind::Main, &mut main);
     let err = rejection(
-        SlotActivation::prepare(LUN, &main, &gpt.backup()),
+        SlotActivation::prepare(LUN, BootSlot::B, &main, &gpt.backup()),
         "EFI PART signature",
     );
     assert!(matches!(err, Front2Error::Image(_)));
@@ -317,7 +372,7 @@ fn a_different_signature_is_rejected() {
     backup[BACKUP_HEADER + 7] = b'X';
     seal(GptCopyKind::Backup, &mut backup);
     rejection(
-        SlotActivation::prepare(LUN, &gpt.main(), &backup),
+        SlotActivation::prepare(LUN, BootSlot::B, &gpt.main(), &backup),
         "EFI PART signature",
     );
 }
@@ -327,11 +382,11 @@ fn a_dump_of_the_wrong_size_is_rejected() {
     let gpt = SyntheticGpt::standard();
     let main = gpt.main();
     rejection(
-        SlotActivation::prepare(LUN, &main[..SECTOR * 5], &gpt.backup()),
+        SlotActivation::prepare(LUN, BootSlot::B, &main[..SECTOR * 5], &gpt.backup()),
         "a dump of 24576 bytes is required",
     );
     rejection(
-        SlotActivation::prepare(LUN, &gpt.backup(), &gpt.main()),
+        SlotActivation::prepare(LUN, BootSlot::B, &gpt.backup(), &gpt.main()),
         "a dump of 24576 bytes is required",
     );
 }
@@ -343,14 +398,14 @@ fn a_header_whose_positions_do_not_fit_the_dump_is_rejected() {
     backup[BACKUP_HEADER + 72..BACKUP_HEADER + 80].copy_from_slice(&(LAST_LBA - 5).to_le_bytes());
     seal(GptCopyKind::Backup, &mut backup);
     rejection(
-        SlotActivation::prepare(LUN, &gpt.main(), &backup),
+        SlotActivation::prepare(LUN, BootSlot::B, &gpt.main(), &backup),
         "the dump layout does not allow this",
     );
     let mut main = gpt.main();
     main[MAIN_HEADER + 24..MAIN_HEADER + 32].copy_from_slice(&2u64.to_le_bytes());
     seal(GptCopyKind::Main, &mut main);
     rejection(
-        SlotActivation::prepare(LUN, &main, &gpt.backup()),
+        SlotActivation::prepare(LUN, BootSlot::B, &main, &gpt.backup()),
         "the dump layout does not allow this",
     );
 }
@@ -476,7 +531,7 @@ fn letter_1126_item_1_a_backup_with_another_disk_guid_is_rejected() {
     let backup = backup_with(&gpt, |header| header[56] ^= 1);
     GptCopy::parse(GptCopyKind::Backup, &backup).expect("the copy alone is valid");
     let err = rejection(
-        SlotActivation::prepare(LUN, &gpt.main(), &backup),
+        SlotActivation::prepare(LUN, BootSlot::B, &gpt.main(), &backup),
         "do not agree in disk GUID",
     );
     assert!(matches!(err, Front2Error::Verification(_)));
@@ -496,7 +551,7 @@ fn letter_1126_item_2_a_backup_at_a_position_the_main_header_does_not_name_is_re
     });
     GptCopy::parse(GptCopyKind::Backup, &backup).expect("the copy alone is valid");
     rejection(
-        SlotActivation::prepare(LUN, &gpt.main(), &backup),
+        SlotActivation::prepare(LUN, BootSlot::B, &gpt.main(), &backup),
         "do not agree in backup header position",
     );
 
@@ -504,7 +559,7 @@ fn letter_1126_item_2_a_backup_at_a_position_the_main_header_does_not_name_is_re
         header[32..40].copy_from_slice(&2u64.to_le_bytes());
     });
     rejection(
-        SlotActivation::prepare(LUN, &gpt.main(), &backup),
+        SlotActivation::prepare(LUN, BootSlot::B, &gpt.main(), &backup),
         "do not agree in main header position",
     );
 
@@ -512,7 +567,7 @@ fn letter_1126_item_2_a_backup_at_a_position_the_main_header_does_not_name_is_re
         header[48..56].copy_from_slice(&(LAST_LBA - 6).to_le_bytes());
     });
     rejection(
-        SlotActivation::prepare(LUN, &gpt.main(), &backup),
+        SlotActivation::prepare(LUN, BootSlot::B, &gpt.main(), &backup),
         "do not agree in usable LBA range",
     );
 }
@@ -834,6 +889,7 @@ fn real_backup_gives_the_gpt_images_that_worked_on_the_device_when_available() {
     for lun in [0u8, 4u8] {
         let activation = SlotActivation::prepare(
             lun,
+            BootSlot::B,
             &real_gpt(&backup, GptCopyKind::Main, lun),
             &real_gpt(&backup, GptCopyKind::Backup, lun),
         )

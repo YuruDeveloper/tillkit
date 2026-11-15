@@ -9,9 +9,9 @@ use crate::install::gpt_copy_record::GptCopyRecord;
 use crate::install::install_image::InstallImage;
 use crate::install::install_inputs::InstallInputs;
 use crate::install::layout::{
-    ACTIVATION_LUNS, GPT_LUN_COUNT, GPT_STEP_ORDER, IMAGE_PARTITIONS, METADATA_PARTITION,
-    MISC_PARTITION, MISC_PLAN_FILE, MISC_STEP_SECTORS, USERDATA_PARTITION, gpt_plan_file,
-    gpt_step_name, require_relative_file, sectors_to_bytes,
+    ACTIVATION_LUNS, GPT_LUN_COUNT, GPT_STEP_ORDER, METADATA_PARTITION, MISC_PARTITION,
+    MISC_PLAN_FILE, MISC_STEP_SECTORS, USERDATA_PARTITION, gpt_plan_file, gpt_step_name,
+    image_partitions, require_relative_file, sectors_to_bytes,
 };
 use crate::install::plan_payload::PlanPayload;
 use crate::install::planned_target::PlannedTarget;
@@ -52,13 +52,13 @@ pub fn gpt_copy_records(inputs: &InstallInputs) -> Result<Vec<GptCopyRecord>> {
 }
 
 pub fn planned_targets(inputs: &InstallInputs) -> Result<Vec<PlannedTarget>> {
-    require_known_images(&inputs.images)?;
+    require_known_images(&inputs.images, inputs.target_slot)?;
     let mut targets = Vec::new();
-    for name in IMAGE_PARTITIONS {
-        targets.push(image_target(inputs, name)?);
+    for name in image_partitions(inputs.target_slot) {
+        targets.push(image_target(inputs, &name)?);
     }
     targets.push(metadata_target(inputs)?);
-    if inputs.stock_slot == BootSlot::A {
+    if inputs.stock_slot != inputs.target_slot {
         for (kind, lun) in GPT_STEP_ORDER {
             targets.push(gpt_target(inputs, kind, lun)?);
         }
@@ -142,10 +142,11 @@ fn require_map_from_backup(
     Ok(())
 }
 
-fn require_known_images(images: &[InstallImage]) -> Result<()> {
+fn require_known_images(images: &[InstallImage], target_slot: BootSlot) -> Result<()> {
+    let known = image_partitions(target_slot);
     let unknown = images
         .iter()
-        .find(|image| !IMAGE_PARTITIONS.contains(&image.partition.as_str()));
+        .find(|image| !known.contains(&image.partition));
     match unknown {
         Some(image) => Err(Front2Error::Plan(format!(
             "the install plan has no step for an image of {:?}",
@@ -323,7 +324,7 @@ fn require_output_fits(name: &str, output: &GptOutput, record: &GptCopyRecord) -
 
 fn gpt_target(inputs: &InstallInputs, kind: GptCopyKind, lun: u8) -> Result<PlannedTarget> {
     let name = gpt_step_name(kind, lun);
-    let file = gpt_plan_file(kind, lun);
+    let file = gpt_plan_file(kind, lun, inputs.target_slot);
     let output = activation_for(inputs, lun)?.output(kind)?;
     let (record, original) = read_gpt_backup(inputs, lun, kind)?;
     require_output_fits(&name, output, &record)?;

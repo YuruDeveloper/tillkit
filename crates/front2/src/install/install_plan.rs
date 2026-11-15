@@ -5,7 +5,7 @@ use crate::image_record::ImageRecord;
 use crate::install::gpt_copy_record::GptCopyRecord;
 use crate::install::install_inputs::InstallInputs;
 use crate::install::install_step::InstallStep;
-use crate::install::layout::{BOOT_WLUN, NEW_BOOT_LUN, ORIGINAL_BOOT_LUN, PLAN_FILE, PLAN_SCHEMA};
+use crate::install::layout::{BOOT_WLUN, PLAN_FILE, PLAN_SCHEMA, boot_lun_pair};
 use crate::install::plan_assembly;
 use crate::install::plan_payload::PlanPayload;
 use crate::install::plan_validation;
@@ -32,6 +32,8 @@ pub struct InstallPlan {
     pub boot_lun_persistence_confirmed: bool,
     #[serde(default, skip_serializing_if = "is_slot_a")]
     pub stock_slot: BootSlot,
+    #[serde(default = "default_target_slot", skip_serializing_if = "is_slot_b")]
+    pub target_slot: BootSlot,
     pub original_boot_lun: u8,
     pub new_boot_lun: u8,
     pub boot_wlun: u8,
@@ -50,6 +52,7 @@ impl InstallPlan {
         let gpt_copies = plan_assembly::gpt_copy_records(inputs)?;
         let targets = plan_assembly::planned_targets(inputs)?;
         let data_restore = plan_assembly::userdata_restore(inputs)?;
+        let (original_boot_lun, new_boot_lun) = boot_lun_pair(inputs.target_slot);
         let mut plan = Self {
             schema: PLAN_SCHEMA,
             sector_bytes: SECTOR_BYTES as u64,
@@ -60,8 +63,9 @@ impl InstallPlan {
             stored_rollback_source_confirmed: false,
             boot_lun_persistence_confirmed: false,
             stock_slot: inputs.stock_slot,
-            original_boot_lun: ORIGINAL_BOOT_LUN,
-            new_boot_lun: NEW_BOOT_LUN,
+            target_slot: inputs.target_slot,
+            original_boot_lun,
+            new_boot_lun,
             boot_wlun: BOOT_WLUN,
             candidate_directory: inputs.candidate_directory.clone(),
             backup_directory: inputs.backup_directory.clone(),
@@ -148,8 +152,11 @@ impl InstallPlan {
 
     fn push_target(&mut self, target: PlannedTarget) {
         if target.step.requires_data_wipe_approval {
-            self.steps
-                .push(boot_lun_step(self.stock_slot, self.new_boot_lun));
+            self.steps.push(boot_lun_step(
+                self.stock_slot,
+                self.target_slot,
+                self.new_boot_lun,
+            ));
         }
         self.restore_set.push(target.restore);
         self.payloads.extend(target.payload);
@@ -179,15 +186,24 @@ impl InstallPlan {
     }
 }
 
-fn boot_lun_step(stock_slot: BootSlot, lun: u8) -> InstallStep {
-    match stock_slot {
-        BootSlot::A => InstallStep::SetBootLun { lun },
-        BootSlot::B => InstallStep::KeepBootLun { lun },
+fn boot_lun_step(boot_slot: BootSlot, target_slot: BootSlot, lun: u8) -> InstallStep {
+    if boot_slot != target_slot {
+        InstallStep::SetBootLun { lun }
+    } else {
+        InstallStep::KeepBootLun { lun }
     }
 }
 
 fn is_slot_a(slot: &BootSlot) -> bool {
     matches!(slot, BootSlot::A)
+}
+
+fn is_slot_b(slot: &BootSlot) -> bool {
+    matches!(slot, BootSlot::B)
+}
+
+fn default_target_slot() -> BootSlot {
+    BootSlot::B
 }
 
 fn plan_file_of(step: &WriteStep) -> Option<&str> {

@@ -49,10 +49,11 @@ mod tests {
     use super::*;
     use crate::install_support::InstallFixture;
     use crate::install_worker;
+    use front2::gpt::BootSlot;
 
     #[test]
     fn work_without_a_link_stops_and_work_with_a_link_runs() {
-        let fixture = InstallFixture::standard();
+        let fixture = InstallFixture::new(BootSlot::A, BootSlot::B);
         let plan_directory = fixture.plan_directory();
         fixture.stored_plan();
         let slot = Mutex::new(None);
