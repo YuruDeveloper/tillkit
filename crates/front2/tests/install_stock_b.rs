@@ -139,31 +139,39 @@ fn the_target_b_plan_omits_the_target_slot_field_and_a_target_a_plan_records_it(
 }
 
 #[test]
-fn an_install_plan_for_target_slot_a_is_rejected_at_validation() {
-    let fixture = InstallFixture::standard();
-    let mut plan = InstallPlan::build(&fixture.inputs).expect("plan");
-    plan.target_slot = BootSlot::A;
-    rejection(plan.validate(), "target slot A");
+fn an_install_plan_for_target_slot_a_switches_the_boot_lun_and_validates() {
+    let fixture = InstallFixture::target_slot_a();
+    let plan = InstallPlan::build(&fixture.inputs).expect("kk plan");
+    plan.validate().expect("the kk plan validates");
+    assert_eq!(plan.stock_slot, BootSlot::B);
+    assert_eq!(plan.target_slot, BootSlot::A);
+    assert_eq!(plan.original_boot_lun, 2);
+    assert_eq!(plan.new_boot_lun, 1);
+    let labels: Vec<String> = plan.steps.iter().map(InstallStep::label).collect();
+    assert!(labels.contains(&"write:boot_a".to_string()));
+    assert!(labels.contains(&"write:vbmeta_a".to_string()));
+    assert!(labels.contains(&"set_boot_lun:1".to_string()));
+    assert!(labels.iter().any(|label| label.starts_with("write:gpt_")));
+    assert_eq!(labels.last().map(String::as_str), Some("restart"));
 }
 
 #[test]
-fn an_install_plan_file_for_target_slot_a_is_rejected_at_load() {
-    let fixture = InstallFixture::standard();
-    let _ = fixture.stored_plan();
+fn an_install_plan_file_for_target_slot_a_round_trips_through_a_save_and_load() {
+    let fixture = InstallFixture::target_slot_a();
+    let stored = fixture.stored_plan();
+    assert_eq!(stored.plan().stock_slot, BootSlot::B);
+    assert_eq!(stored.plan().target_slot, BootSlot::A);
+
     let directory = fixture.plan_directory();
     let path = directory.join(PLAN_FILE);
-    let mut value: Value =
+    let value: Value =
         serde_json::from_slice(&fs::read(&path).expect("read the plan file")).expect("parse");
-    value
-        .as_object_mut()
-        .expect("a JSON object")
-        .insert("target_slot".to_string(), Value::from("a"));
-    fs::write(
-        &path,
-        serde_json::to_vec(&value).expect("serialize the plan"),
-    )
-    .expect("write");
-    rejection(InstallPlan::load(&directory), "target slot A");
+    assert_eq!(value["stock_slot"], Value::from("b"));
+    assert_eq!(value["target_slot"], Value::from("a"));
+
+    let reloaded = InstallPlan::load(&directory).expect("the kk plan file loads");
+    assert_eq!(reloaded.plan().stock_slot, BootSlot::B);
+    assert_eq!(reloaded.plan().target_slot, BootSlot::A);
 }
 
 #[test]

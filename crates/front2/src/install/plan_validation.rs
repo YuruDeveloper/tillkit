@@ -15,7 +15,6 @@ use crate::install::step_source::StepSource;
 use crate::install::write_step::WriteStep;
 
 pub fn validate(plan: &InstallPlan) -> Result<()> {
-    require_supported_target(plan)?;
     require_fixed_facts(plan)?;
     require_gpt_copies(plan)?;
     require_step_order(plan)?;
@@ -26,15 +25,6 @@ pub fn validate(plan: &InstallPlan) -> Result<()> {
     require_gpt_steps(plan)?;
     require_restore_set(plan)?;
     require_data_restore(plan)
-}
-
-fn require_supported_target(plan: &InstallPlan) -> Result<()> {
-    if plan.target_slot == BootSlot::A {
-        return Err(Front2Error::Unsupported(
-            "the install target slot A is not supported until the boot switch and the super rebuild are complete".into(),
-        ));
-    }
-    Ok(())
 }
 
 fn require_fixed_facts(plan: &InstallPlan) -> Result<()> {
