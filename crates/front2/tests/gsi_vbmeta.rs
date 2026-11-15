@@ -721,6 +721,7 @@ fn a_candidate_from_an_untested_build_needs_the_acceptance_of_its_fingerprint() 
             rollback_evidence: &[],
             accepted_untested_build: accepted,
             stock_slot: BootSlot::A,
+            target_slot: BootSlot::B,
         })
         .expect_err("the backup has no super dump")
         .to_string()
@@ -756,6 +757,7 @@ fn a_candidate_from_the_tested_build_needs_no_acceptance() {
         rollback_evidence: &[],
         accepted_untested_build: None,
         stock_slot: BootSlot::A,
+        target_slot: BootSlot::B,
     })
     .expect_err("the backup has no super dump")
     .to_string();

@@ -44,6 +44,7 @@ fn request<'a>(backup: &'a Path, gsi: &'a Path, output: &'a Path) -> GsiCandidat
         rollback_evidence: &[],
         accepted_untested_build: None,
         stock_slot: BootSlot::A,
+        target_slot: BootSlot::B,
     }
 }
 

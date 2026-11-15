@@ -192,6 +192,7 @@ fn build_candidate(
         rollback_evidence: &[],
         accepted_untested_build: accepted_build,
         stock_slot,
+        target_slot: BootSlot::B,
     };
     let candidate = GsiCandidate::build(&request)?;
     let review = reviewed_candidate(directory.clone(), &candidate);

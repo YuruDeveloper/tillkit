@@ -37,6 +37,8 @@ pub struct GsiCandidate {
     pub schema: u32,
     #[serde(default, skip_serializing_if = "is_slot_a")]
     pub stock_slot: BootSlot,
+    #[serde(default = "default_target_slot", skip_serializing_if = "is_slot_b")]
+    pub target_slot: BootSlot,
     pub gsi_bytes: u64,
     pub gsi_sha256: String,
     pub original_super: BackupPartition,
@@ -81,7 +83,7 @@ impl GsiCandidate {
     }
 
     pub fn images(&self) -> Vec<CandidateImage> {
-        let slot_b = |base: &str| profile::slot_label(base, toss_front2::SUPPORTED_SLOT_SUFFIX);
+        let target = |base: &str| profile::slot_label(base, self.target_slot.suffix());
         let mut images: Vec<CandidateImage> = self
             .physical_images
             .iter()
@@ -91,12 +93,12 @@ impl GsiCandidate {
             })
             .collect();
         images.push(CandidateImage {
-            partition: slot_b(toss_front2::CHAINED_VBMETA_BASE),
+            partition: target(toss_front2::CHAINED_VBMETA_BASE),
             image: in_view(&self.chained_vbmeta.image),
             backup_source: None,
         });
         images.push(CandidateImage {
-            partition: slot_b(profile::VBMETA_BASE),
+            partition: target(profile::VBMETA_BASE),
             image: in_view(&self.top_vbmeta.image),
             backup_source: None,
         });
@@ -131,6 +133,14 @@ fn is_slot_a(slot: &BootSlot) -> bool {
     matches!(slot, BootSlot::A)
 }
 
+fn is_slot_b(slot: &BootSlot) -> bool {
+    matches!(slot, BootSlot::B)
+}
+
+fn default_target_slot() -> BootSlot {
+    BootSlot::B
+}
+
 fn in_view(image: &ImageRecord) -> ImageRecord {
     ImageRecord {
         file: format!("{VIEW_DIRECTORY}/{}", image.file),
@@ -140,7 +150,7 @@ fn in_view(image: &ImageRecord) -> ImageRecord {
 
 fn assemble(request: &GsiCandidateRequest<'_>, manifest: &BackupManifest) -> Result<GsiCandidate> {
     let stock_name = |base: &str| profile::slot_label(base, request.stock_slot.suffix());
-    let target_name = |base: &str| profile::slot_label(base, toss_front2::SUPPORTED_SLOT_SUFFIX);
+    let target_name = |base: &str| profile::slot_label(base, request.target_slot.suffix());
     let stock_top = manifest.verified_partition(&stock_name(profile::VBMETA_BASE))?;
     let original_top = manifest.verified_partition(&target_name(profile::VBMETA_BASE))?;
     let stock_chained =
@@ -206,6 +216,7 @@ fn assemble(request: &GsiCandidateRequest<'_>, manifest: &BackupManifest) -> Res
     Ok(GsiCandidate {
         schema: CANDIDATE_SCHEMA,
         stock_slot: request.stock_slot,
+        target_slot: request.target_slot,
         gsi_bytes,
         gsi_sha256,
         original_super,
@@ -235,4 +246,111 @@ fn require_view_matches(view: &[ImageRecord], verification: &SuperVerification) 
         ));
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn image_record() -> ImageRecord {
+        ImageRecord {
+            file: "image.img".to_string(),
+            bytes: 1,
+            sha256: "00".to_string(),
+        }
+    }
+
+    fn signed_vbmeta() -> SignedVbmeta {
+        SignedVbmeta {
+            image: image_record(),
+            algorithm: "SHA256_RSA4096".to_string(),
+            key_spec: "testkey_rsa4096".to_string(),
+            rollback_index: 0,
+            rollback_index_location: 0,
+            flags: 0,
+            required_libavb_version_minor: 0,
+            descriptors: 0,
+        }
+    }
+
+    fn backup_partition() -> BackupPartition {
+        BackupPartition {
+            name: SUPER_PARTITION.to_string(),
+            lun: 0,
+            path: std::path::PathBuf::new(),
+            bytes: 1,
+            sha256: "00".to_string(),
+        }
+    }
+
+    fn super_verification() -> SuperVerification {
+        SuperVerification {
+            metadata_sha256: "00".to_string(),
+            logical_partitions: Vec::new(),
+            allowed_super_ranges: Vec::new(),
+            outside_ranges_equal_bytes: 0,
+            candidate_bytes: 1,
+            candidate_sha256: "00".to_string(),
+        }
+    }
+
+    fn sample(target_slot: BootSlot) -> GsiCandidate {
+        GsiCandidate {
+            schema: CANDIDATE_SCHEMA,
+            stock_slot: BootSlot::A,
+            target_slot,
+            gsi_bytes: 1,
+            gsi_sha256: "00".to_string(),
+            original_super: backup_partition(),
+            super_image: image_record(),
+            super_verification: super_verification(),
+            logical_view: Vec::new(),
+            physical_images: Vec::new(),
+            chained_vbmeta: signed_vbmeta(),
+            top_vbmeta: signed_vbmeta(),
+            avb_verification: Vec::new(),
+            first_conversion_only: true,
+            fec_recomputed: false,
+            device_boot_verified: false,
+            stored_rollback_verified: false,
+        }
+    }
+
+    #[test]
+    fn the_target_slot_is_omitted_for_slot_b_and_reads_back_as_slot_b_when_absent() {
+        let value = serde_json::to_value(sample(BootSlot::B)).expect("slot B value");
+        assert_eq!(value.get("target_slot"), None);
+        let loaded: GsiCandidate =
+            serde_json::from_value(value).expect("read the slot B candidate");
+        assert_eq!(loaded.target_slot, BootSlot::B);
+    }
+
+    #[test]
+    fn the_target_slot_is_recorded_for_slot_a() {
+        let value = serde_json::to_value(sample(BootSlot::A)).expect("slot A value");
+        assert_eq!(value["target_slot"], serde_json::Value::from("a"));
+    }
+
+    #[test]
+    fn the_images_take_the_vbmeta_names_from_the_target_slot() {
+        let names = |slot| {
+            sample(slot)
+                .images()
+                .into_iter()
+                .map(|image| image.partition)
+                .collect::<Vec<String>>()
+        };
+        let slot_a = names(BootSlot::A);
+        assert!(slot_a.contains(&"vbmeta_a".to_string()), "{slot_a:?}");
+        assert!(
+            slot_a.contains(&"vbmeta_system_a".to_string()),
+            "{slot_a:?}"
+        );
+        let slot_b = names(BootSlot::B);
+        assert!(slot_b.contains(&"vbmeta_b".to_string()), "{slot_b:?}");
+        assert!(
+            slot_b.contains(&"vbmeta_system_b".to_string()),
+            "{slot_b:?}"
+        );
+    }
 }
