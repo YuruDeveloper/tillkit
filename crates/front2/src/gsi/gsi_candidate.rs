@@ -288,7 +288,7 @@ fn assemble(request: &GsiCandidateRequest<'_>, manifest: &BackupManifest) -> Res
 
     let view = directory.join(VIEW_DIRECTORY);
     fs::create_dir(&view)?;
-    let logical_view = extract_logical_view(&super_path, &view)?;
+    let logical_view = extract_logical_view(&super_path, &view, &super_slot)?;
     require_view_matches(&logical_view, &super_verification)?;
     let mut physical_images = Vec::new();
     for base in toss_front2::PHYSICAL_BOOT_PARTITIONS {

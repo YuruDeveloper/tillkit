@@ -3,21 +3,24 @@ use crate::error::{Front2Error, Result};
 use crate::gsi::view_verification::view_file;
 use crate::image_record::ImageRecord;
 use crate::partition_target::is_safe_label;
-use crate::profiles::toss_front2;
 use crate::super_image::file_ranges::copy_exact;
-use crate::super_image::{ByteRange, LpGeometry, LpMetadata, LpPartition, TARGET_SLOT};
+use crate::super_image::{ByteRange, LpGeometry, LpMetadata, LpPartition, SuperSlot};
 use sha2::{Digest, Sha256};
 use std::fs::{File, OpenOptions};
 use std::io::{Seek, SeekFrom};
 use std::path::Path;
 
-pub fn extract_logical_view(super_image: &Path, directory: &Path) -> Result<Vec<ImageRecord>> {
+pub fn extract_logical_view(
+    super_image: &Path,
+    directory: &Path,
+    slot: &SuperSlot,
+) -> Result<Vec<ImageRecord>> {
     let mut source = File::open(super_image)?;
     let geometry = LpGeometry::read(&mut source)?;
-    let metadata = LpMetadata::read_slot(&mut source, &geometry, TARGET_SLOT)?;
+    let metadata = LpMetadata::read_slot(&mut source, &geometry, slot.target_index())?;
     let mut records = Vec::new();
     for partition in &metadata.partitions {
-        records.push(extract(&mut source, &metadata, partition, directory)?);
+        records.push(extract(&mut source, &metadata, partition, directory, slot)?);
     }
     Ok(records)
 }
@@ -27,14 +30,15 @@ fn extract(
     metadata: &LpMetadata,
     partition: &LpPartition,
     directory: &Path,
+    slot: &SuperSlot,
 ) -> Result<ImageRecord> {
     let name = partition.name.as_str();
     let base = name
-        .strip_suffix(toss_front2::SUPPORTED_SLOT_SUFFIX)
+        .strip_suffix(slot.suffix())
         .filter(|base| is_safe_label(base))
         .ok_or_else(|| {
             Front2Error::Image(format!(
-                "super metadata: partition {name:?} is not a plain slot B name"
+                "super metadata: partition {name:?} is not a plain target slot name"
             ))
         })?;
     let file = view_file(base);
