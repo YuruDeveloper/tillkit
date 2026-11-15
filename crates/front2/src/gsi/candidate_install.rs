@@ -83,7 +83,7 @@ pub fn require_slot_a_active(backup_directory: &Path) -> Result<()> {
     for lun in ACTIVATION_LUNS {
         let (_, main) = gpt_backup(&manifest, lun, GptCopyKind::Main)?;
         let (_, backup) = gpt_backup(&manifest, lun, GptCopyKind::Backup)?;
-        SlotActivation::prepare(lun, &main, &backup)?;
+        SlotActivation::prepare(lun, BootSlot::B, &main, &backup)?;
     }
     Ok(())
 }
@@ -168,7 +168,12 @@ fn prepare_activation(
     backup_copies: &[Vec<u8>],
 ) -> Result<SlotActivation> {
     let position = usize::from(lun);
-    SlotActivation::prepare(lun, &main_copies[position], &backup_copies[position])
+    SlotActivation::prepare(
+        lun,
+        BootSlot::B,
+        &main_copies[position],
+        &backup_copies[position],
+    )
 }
 
 fn require_tidy_stock_b(main_copies: &[Vec<u8>], backup_copies: &[Vec<u8>]) -> Result<()> {

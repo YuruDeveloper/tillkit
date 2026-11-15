@@ -315,7 +315,7 @@ fn slot_activation(
         return None;
     }
     let (main, backup) = &copies[usize::from(lun)];
-    Some(SlotActivation::prepare(lun, main, backup).expect("slot activation"))
+    Some(SlotActivation::prepare(lun, BootSlot::B, main, backup).expect("slot activation"))
 }
 
 fn install_image(
