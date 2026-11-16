@@ -129,7 +129,9 @@ When you select a system image on the `WRITE` screen, these steps open in sequen
    - Boot slot A, target slot A: The tool installs on slot A and keeps the boot slot.
    - Boot slot B, target slot A: The tool installs on slot A and changes the boot slot to A.
 
-   The tool always reads the images from the boot slot. An installation that changes the boot slot writes the boot images of the boot slot (`boot`, `dtbo`, `init_boot`, `recovery`, `vendor_boot`) to the target slot. It signs the top `vbmeta` of the target slot with the descriptors and the rollback value from the `vbmeta` of the boot slot.
+   For a new plan, the tool always reads the boot images and the source `vbmeta` images from the boot slot. The partitions that stay in `super` are those of the target slot. An installation that changes the boot slot writes the boot images of the boot slot (`boot`, `dtbo`, `init_boot`, `recovery`, `vendor_boot`) to the target slot. It signs the top `vbmeta` of the target slot with the descriptors and the rollback value from the `vbmeta` of the boot slot.
+
+   A plan from a previous version of TillKit can have a different source slot. The tool does not change that plan. It shows the stock build from the `vbmeta` of that source slot.
 
    For an installation that changes the boot slot, the boot slot must be a stock slot. The `super` partitions of the target slot must also agree with the `vbmeta` of the boot slot. A device on which the two slots use the same areas of `super` is in that condition. The top `vbmeta` of the target slot can have a higher rollback value than the `vbmeta` of the boot slot. The tool then makes no plan.
 
