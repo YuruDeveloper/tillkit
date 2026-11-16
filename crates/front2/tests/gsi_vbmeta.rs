@@ -465,6 +465,14 @@ fn system_refuses_rollback_values_that_differ_between_the_slots() {
         message.contains("no tested rule selects between them"),
         "{message}"
     );
+    let source = format!("is {SYSTEM_ROLLBACK} at location");
+    let target = format!("and {} at location", SYSTEM_ROLLBACK - 1);
+    assert!(message.contains(&source), "{message}");
+    assert!(message.contains(&target), "{message}");
+    assert!(message.contains("on the source slot and"), "{message}");
+    assert!(message.contains("on the target slot;"), "{message}");
+    assert!(!message.contains("slot A"), "{message}");
+    assert!(!message.contains("slot B"), "{message}");
 }
 
 #[test]
