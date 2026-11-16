@@ -1,6 +1,5 @@
 use crate::device_profile::DeviceProfile;
 use crate::error::{Front2Error, Result};
-use crate::gpt::slot_activation::SLOT_A_SUFFIX;
 use crate::gpt::{
     ACTIVE_FLAG, BootSlot, GptCopy, GptCopyKind, PartitionMap, SECTOR_BYTES, SlotActivation,
     misc_wipe_sector,
@@ -10,7 +9,9 @@ use crate::gsi::backup_partition::BackupPartition;
 use crate::gsi::candidate_image::CandidateImage;
 use crate::gsi::gsi_candidate::{GsiCandidate, SUPER_PARTITION};
 use crate::gsi::install_source::install_source_slot;
-use crate::install::layout::{ACTIVATION_LUNS, GPT_LUN_COUNT, NEW_BOOT_LUN, ORIGINAL_BOOT_LUN};
+use crate::install::layout::{
+    ACTIVATION_LUNS, GPT_LUN_COUNT, NEW_BOOT_LUN, ORIGINAL_BOOT_LUN, boot_lun_pair,
+};
 use crate::install::{GptBackup, InstallImage, InstallInputs};
 use std::fs;
 use std::io::Read;
@@ -172,13 +173,10 @@ fn slot_activations(
                 )?),
             ))
         }
-        (BootSlot::B, BootSlot::B) => {
-            require_tidy_stock_b(main_copies, backup_copies)?;
+        (BootSlot::A, BootSlot::A) | (BootSlot::B, BootSlot::B) => {
+            require_tidy_in_place(target_slot, main_copies, backup_copies)?;
             Ok((None, None))
         }
-        (BootSlot::A, BootSlot::A) => Err(Front2Error::Unsupported(
-            "the install from the stock slot A to the target slot A is not supported".into(),
-        )),
     }
 }
 
@@ -197,22 +195,34 @@ fn prepare_activation(
     )
 }
 
-fn require_tidy_stock_b(main_copies: &[Vec<u8>], backup_copies: &[Vec<u8>]) -> Result<()> {
+fn require_tidy_in_place(
+    slot: BootSlot,
+    main_copies: &[Vec<u8>],
+    backup_copies: &[Vec<u8>],
+) -> Result<()> {
     for lun in ACTIVATION_LUNS {
         let position = usize::from(lun);
         let main = GptCopy::parse(GptCopyKind::Main, &main_copies[position])?;
         let backup = GptCopy::parse(GptCopyKind::Backup, &backup_copies[position])?;
         main.require_pair_with(&backup, &format!("LUN {lun}"))?;
-        require_no_active_slot_a(lun, &main)?;
+        require_no_active_other_slot(lun, slot, &main)?;
     }
-    require_stock_b_boot_lun(main_copies)
+    require_boot_lun_of(slot, main_copies)
 }
 
-fn require_no_active_slot_a(lun: u8, main: &GptCopy) -> Result<()> {
+fn other_slot(slot: BootSlot) -> BootSlot {
+    match slot {
+        BootSlot::A => BootSlot::B,
+        BootSlot::B => BootSlot::A,
+    }
+}
+
+fn require_no_active_other_slot(lun: u8, slot: BootSlot, main: &GptCopy) -> Result<()> {
+    let other = other_slot(slot);
     for entry in main.entries() {
-        if entry.name.ends_with(SLOT_A_SUFFIX) && entry.flags & ACTIVE_FLAG != 0 {
+        if entry.name.ends_with(other.suffix()) && entry.flags & ACTIVE_FLAG != 0 {
             return Err(Front2Error::Unsupported(format!(
-                "LUN {lun}: {} has the active flag, a tidy stock slot B backup has no active slot A partition",
+                "LUN {lun}: {} has the active flag, a tidy slot {slot:?} backup has no active slot {other:?} partition",
                 entry.name
             )));
         }
@@ -220,11 +230,12 @@ fn require_no_active_slot_a(lun: u8, main: &GptCopy) -> Result<()> {
     Ok(())
 }
 
-fn require_stock_b_boot_lun(main_copies: &[Vec<u8>]) -> Result<()> {
+fn require_boot_lun_of(slot: BootSlot, main_copies: &[Vec<u8>]) -> Result<()> {
+    let (_, expected) = boot_lun_pair(slot);
     let boot_lun = xbl_boot_lun(main_copies)?;
-    if boot_lun != NEW_BOOT_LUN {
+    if boot_lun != expected {
         return Err(Front2Error::Unsupported(format!(
-            "the backup shows boot LUN {boot_lun}, a stock slot B backup boots LUN {NEW_BOOT_LUN}"
+            "the backup shows boot LUN {boot_lun}, a tidy slot {slot:?} backup boots LUN {expected}"
         )));
     }
     Ok(())

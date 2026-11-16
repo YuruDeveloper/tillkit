@@ -242,9 +242,9 @@ fn tables(
     let (boot_a_flags, boot_b_flags) = pair(0x0077 << 48, 0x00c3 << 48);
     let (vbmeta_a_flags, vbmeta_b_flags) = pair(ACTIVE_SLOT_FLAGS, INACTIVE_SLOT_FLAGS);
     let (system_a_flags, system_b_flags) = pair(ACTIVE_SLOT_FLAGS, INACTIVE_SLOT_FLAGS);
-    let xbl_b_flags = match stock_slot {
-        BootSlot::A => 0,
-        BootSlot::B => ACTIVE_SLOT_FLAGS,
+    let (xbl_a_flags, xbl_b_flags) = match stock_slot {
+        BootSlot::A => (ACTIVE_SLOT_FLAGS, 0),
+        BootSlot::B => (0, ACTIVE_SLOT_FLAGS),
     };
     let boot_lun_table = |name: &str, flags: u64| {
         let named = SyntheticGpt::empty().with_entry(name, flags);
@@ -262,7 +262,7 @@ fn tables(
             .with_entry("misc", 0)
             .with_entry("userdata", 0)
             .with_entry("super", 0),
-        boot_lun_table("xbl_a", 0),
+        boot_lun_table("xbl_a", xbl_a_flags),
         boot_lun_table("xbl_b", xbl_b_flags),
         SyntheticGpt::empty().with_entry("cdt", 0),
         physical_table(
