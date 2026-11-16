@@ -294,6 +294,7 @@ pub mod tests {
             sha256: stored.plan_sha256().to_string(),
             directory: fixture.plan_directory(),
             build: crate::plan_build::PlanBuild::Tested,
+            replaced_system: None,
         };
         let flow = InstallFlow {
             connected: true,

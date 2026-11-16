@@ -314,6 +314,68 @@ fn a_stock_slot_b_backup_that_does_not_boot_lun_2_is_rejected() {
     assert!(error.to_string().contains("boot LUN"), "{error}");
 }
 
+fn prepared_in_place_a_fixture() -> InstallFixture {
+    let fixture = InstallFixture::new(BootSlot::A, BootSlot::A);
+    let backup = &fixture.inputs.backup_directory;
+    write_manifest(backup, &manifest_entries(backup));
+    fixture
+}
+
+#[test]
+fn a_tidy_slot_a_backup_gives_the_in_place_inputs_with_no_slot_activation() {
+    let fixture = prepared_in_place_a_fixture();
+    assert_eq!(
+        backup_boot_slot(&fixture.inputs.backup_directory).expect("boot slot"),
+        BootSlot::A
+    );
+    let inputs = inputs_of(&fixture).expect("the tidy slot A backup gives the inputs");
+    assert_eq!(inputs.stock_slot, BootSlot::A);
+    assert_eq!(inputs.target_slot, BootSlot::A);
+    assert!(inputs.activation_lun0.is_none());
+    assert!(inputs.activation_lun4.is_none());
+
+    let plan = InstallPlan::build(&inputs).expect("plan");
+    assert!(
+        plan.steps
+            .iter()
+            .any(|step| matches!(step, InstallStep::KeepBootLun { lun: 1 }))
+    );
+    assert!(
+        !plan
+            .steps
+            .iter()
+            .any(|step| matches!(step, InstallStep::SetBootLun { .. }))
+    );
+}
+
+#[test]
+fn a_slot_a_in_place_backup_with_an_active_slot_b_partition_is_rejected() {
+    let fixture = prepared_in_place_a_fixture();
+    let backup = &fixture.inputs.backup_directory;
+    let mixed = SyntheticGpt::standard().with_flags("vbmeta_b", 0x0077 << 48);
+    write_lun_tables(backup, 4, &mixed);
+    assert_eq!(backup_boot_slot(backup).expect("boot slot"), BootSlot::A);
+    let error = inputs_of(&fixture).expect_err("a slot B partition is active");
+    assert!(matches!(error, Front2Error::Unsupported(_)), "{error}");
+    assert!(
+        error.to_string().contains("vbmeta_b has the active flag"),
+        "{error}"
+    );
+}
+
+#[test]
+fn a_slot_a_in_place_backup_that_does_not_boot_lun_1_is_rejected() {
+    let fixture = prepared_in_place_a_fixture();
+    let backup = &fixture.inputs.backup_directory;
+    let xbl_a_inactive = SyntheticGpt::empty().with_entry("xbl_a", 0);
+    let xbl_b_active = SyntheticGpt::empty().with_entry("xbl_b", 0x0077 << 48);
+    write_lun_tables(backup, 1, &xbl_a_inactive);
+    write_lun_tables(backup, 2, &xbl_b_active);
+    let error = inputs_of(&fixture).expect_err("the backup does not boot LUN 1");
+    assert!(matches!(error, Front2Error::Unsupported(_)), "{error}");
+    assert!(error.to_string().contains("shows boot LUN 2"), "{error}");
+}
+
 fn write_lun_tables(backup: &Path, lun: u8, gpt: &SyntheticGpt) {
     let main = backup.join(format!("gpt/gpt_main{lun}.bin"));
     let secondary = backup.join(format!("gpt/gpt_backup{lun}.bin"));

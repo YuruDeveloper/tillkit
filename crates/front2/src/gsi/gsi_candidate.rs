@@ -253,7 +253,9 @@ fn assemble(request: &GsiCandidateRequest<'_>, manifest: &BackupManifest) -> Res
     let stock_top_vbmeta = VbmetaSource::read(&stock_top.path)?;
     require_stock_front2_top(&stock_top_vbmeta)?
         .require_accepted(request.accepted_untested_build)?;
-    require_stock_front2_system(&VbmetaSource::read(&stock_chained.path)?)?;
+    if source_slot != request.target_slot {
+        require_stock_front2_system(&VbmetaSource::read(&stock_chained.path)?)?;
+    }
 
     let original_super = manifest.partition(SUPER_PARTITION)?;
     let (gsi_bytes, gsi_sha256) = sha256_file(request.gsi_image)?;
