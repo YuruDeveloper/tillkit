@@ -8,4 +8,5 @@ pub struct InstallReview {
     pub sha256: String,
     pub directory: PathBuf,
     pub build: PlanBuild,
+    pub replaced_system: Option<String>,
 }

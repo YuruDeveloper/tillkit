@@ -30,6 +30,8 @@ const UNFINISHED: &str = "이 기기는 기록이 끝나지 않은 상태입니�
 const UNFINISHED_OPEN: &str = "이 기기는 기록이 끝나지 않은 상태입니다. 기기를 다시 시작하거나 끄지 말고, EDL 모드로 연결한 채로 아래의 WRITE를 눌러서 남은 단계를 기록해 주세요.";
 const OTHER_BUILD: &str = "OTHER STOCK BUILD";
 const OTHER_BUILD_NOT_ACCEPTED: &str = "이 전체 백업의 순정 빌드는 TillKit이 GSI 설치 절차의 기준으로 삼은 빌드와 빌드 번호가 다릅니다. 설치 계획은 아직 만들지 않았습니다. MAKE PLAN을 다시 누르면 이 빌드로 진행할지 다시 묻습니다.";
+const REPLACED_SYSTEM: &str = "NOT A STOCK SYSTEM";
+const REPLACED_SYSTEM_PLAN: &str = "이 전체 백업의 설치 슬롯에는 순정이 아닌 system이 이미 들어 있습니다. 이 계획은 그 위에 GSI를 다시 설치합니다. 이 전체 백업을 복원하면 기기는 순정 상태가 아니라 백업을 만든 때의 상태로 돌아갑니다.";
 const METER_PARTS: u16 = 1000;
 const METER_LEAST: u16 = 4;
 const GIBIBYTE: f64 = 1_073_741_824.0;
@@ -216,6 +218,14 @@ fn plan_details(app: &App) -> Vec<Element<'_, Message>> {
         parts::label(review.directory.display().to_string(), palette),
     ];
     details.extend(build_details(&review.build, palette));
+    if let Some(fingerprint) = &review.replaced_system {
+        details.push(parts::caution(
+            REPLACED_SYSTEM,
+            REPLACED_SYSTEM_PLAN,
+            palette,
+        ));
+        details.push(parts::value(fingerprint.clone(), palette));
+    }
     details
 }
 
