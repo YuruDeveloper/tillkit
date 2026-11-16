@@ -4,9 +4,9 @@ use avbtool_rs::info::DescriptorInfo;
 use front2::digest::sha256_file;
 use front2::gpt::BootSlot;
 use front2::gsi::{
-    GsiCandidate, GsiCandidateRequest, RawDescriptor, RollbackEvidence, StockBuild, VbmetaSource,
-    VbmetaTemplate, backup_stock_build, build_system_vbmeta, build_top_vbmeta,
-    require_stock_front2_system, require_stock_front2_top,
+    GsiCandidate, GsiCandidateRequest, RawDescriptor, RollbackEvidence, StockBuild, SystemOrigin,
+    VbmetaSource, VbmetaTemplate, backup_stock_build, backup_system_origin, build_system_vbmeta,
+    build_top_vbmeta, require_stock_front2_system, require_stock_front2_top,
 };
 use front2::profiles::toss_front2::PROFILE;
 use front2::top_signature::verify_top_signature;
@@ -1156,4 +1156,126 @@ fn an_install_to_the_test_key_slot_a_builds_a_candidate_in_place() {
     loaded
         .verify_files(&output)
         .expect("the files match their records");
+}
+
+fn write_installed_slot_a_backup(backup: &Path, installed: &Path, candidate: &GsiCandidate) {
+    let lun0 = backup.join("partitions").join("lun0");
+    let lun4 = backup.join("partitions").join("lun4");
+    std::fs::create_dir_all(&lun0).expect("create lun0");
+    std::fs::create_dir_all(&lun4).expect("create lun4");
+    let view = installed.join("view");
+    let mut entries = Vec::new();
+    let mut copy = |source: PathBuf, folder: &Path, relative: String| {
+        let name = relative.rsplit('\\').next().expect("file name").to_string();
+        let path = folder.join(name);
+        std::fs::copy(&source, &path).expect("copy the installed image");
+        record_entry(&mut entries, &relative, &path);
+    };
+
+    copy(
+        installed.join("super.img"),
+        &lun0,
+        "partitions\\lun0\\super.bin".to_string(),
+    );
+    for image in &candidate.physical_images {
+        copy(
+            view.join(&image.image.file),
+            &lun4,
+            format!("partitions\\lun4\\{}.bin", image.partition),
+        );
+    }
+    copy(
+        view.join(&candidate.top_vbmeta.image.file),
+        &lun4,
+        "partitions\\lun4\\vbmeta_a.bin".to_string(),
+    );
+    copy(
+        view.join(&candidate.chained_vbmeta.image.file),
+        &lun4,
+        "partitions\\lun4\\vbmeta_system_a.bin".to_string(),
+    );
+    for (name, source) in [
+        ("vbmeta_b", stock_slot_b_top_vbmeta()),
+        ("vbmeta_system_b", testkey_slot_a_system_vbmeta()),
+    ] {
+        let path = lun4.join(format!("{name}.bin"));
+        source.write(&path);
+        record_entry(
+            &mut entries,
+            &format!("partitions\\lun4\\{name}.bin"),
+            &path,
+        );
+    }
+
+    let text = serde_json::to_string_pretty(&entries).expect("manifest text");
+    std::fs::write(backup.join("sha256-manifest.json"), text).expect("write the manifest");
+}
+
+#[test]
+fn an_in_place_install_builds_a_candidate_on_a_slot_that_holds_a_gsi() {
+    let bench = Bench::new();
+    let stock_backup = bench.path("stock-backup");
+    write_testkey_slot_a_backup(&stock_backup);
+    let gsi = bench.path("gsi.img");
+    write_gsi_image(&gsi);
+    let first_output = bench.path("first-candidate");
+    let request =
+        |backup_directory, output_directory, stock_slot, target_slot| GsiCandidateRequest {
+            profile: &PROFILE,
+            backup_directory,
+            gsi_image: &gsi,
+            output_directory,
+            rollback_evidence: &[],
+            accepted_untested_build: None,
+            stock_slot,
+            target_slot,
+        };
+    let first = GsiCandidate::build(&request(
+        &stock_backup,
+        &first_output,
+        BootSlot::B,
+        BootSlot::A,
+    ))
+    .expect("the first candidate builds");
+    assert_eq!(
+        backup_system_origin(&stock_backup, BootSlot::A).expect("the stock system"),
+        SystemOrigin::Stock
+    );
+
+    let installed_backup = bench.path("installed-backup");
+    write_installed_slot_a_backup(&installed_backup, &first_output, &first);
+    assert_eq!(
+        backup_system_origin(&installed_backup, BootSlot::A).expect("the installed system"),
+        SystemOrigin::Other("gsi/1".to_string())
+    );
+
+    let second_output = bench.path("second-candidate");
+    let second = GsiCandidate::build(&request(
+        &installed_backup,
+        &second_output,
+        BootSlot::A,
+        BootSlot::A,
+    ))
+    .expect("the in-place candidate builds on the slot that holds a GSI");
+    assert_eq!(second.stock_slot, BootSlot::A);
+    assert_eq!(second.source_slot, BootSlot::A);
+    assert_eq!(second.target_slot, BootSlot::A);
+    assert_eq!(second.top_vbmeta.rollback_index, BOOT_SLOT_FLOOR);
+    assert_eq!(second.logical_view, first.logical_view);
+    assert!(!second.avb_verification.is_empty());
+
+    let switch_output = bench.path("switch-candidate");
+    let refused = GsiCandidate::build(&request(
+        &installed_backup,
+        &switch_output,
+        BootSlot::A,
+        BootSlot::B,
+    ))
+    .expect_err("a switch install does not read a slot that holds a GSI");
+    assert!(
+        matches!(refused, front2::Front2Error::Unsupported(_)),
+        "{refused}"
+    );
+    assert!(refused.to_string().contains("not the form"), "{refused}");
+    assert!(!switch_output.exists());
 }
