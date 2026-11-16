@@ -933,6 +933,8 @@ fn real_images_give_the_bytes_that_started_the_device_when_available() {
 }
 
 const GSI_BYTES: u64 = 4608 * 512;
+const SLOT_A_FILL: u8 = 0x5A;
+const SLOT_B_FILL: u8 = 0xB5;
 
 // The descriptors below carry empty digests. libavb treats an empty digest as a
 // persistent digest and does not compare it against the image, so verify_view
@@ -991,9 +993,22 @@ fn testkey_slot_a_top_vbmeta(fingerprints: &[&'static str]) -> Source<'static> {
 }
 
 fn stock_slot_b_top_vbmeta() -> Source<'static> {
-    let mut source = stock_top();
-    source.rollback_index = BOOT_SLOT_FLOOR;
-    source
+    Source {
+        rollback_index: BOOT_SLOT_FLOOR,
+        ..testkey_slot_a_top_vbmeta(&[TESTED_BUILD])
+    }
+}
+
+fn stock_slot_b_system_vbmeta(fingerprint: &'static str) -> Source<'static> {
+    Source {
+        key_spec: OTHER_KEY,
+        algorithm: OTHER_ALGORITHM,
+        properties: vec![
+            ("com.android.build.system.fingerprint", fingerprint),
+            ("com.android.build.product.fingerprint", "stock/475"),
+        ],
+        ..testkey_slot_a_system_vbmeta()
+    }
 }
 
 fn testkey_slot_a_system_vbmeta() -> Source<'static> {
@@ -1033,6 +1048,10 @@ fn record_entry(entries: &mut Vec<serde_json::Value>, relative: &str, path: &Pat
 }
 
 fn write_testkey_slot_a_backup(backup: &Path) {
+    write_testkey_slot_a_backup_with(backup, stock_slot_b_system_vbmeta(STOCK_SYSTEM));
+}
+
+fn write_testkey_slot_a_backup_with(backup: &Path, slot_b_system: Source<'_>) {
     let lun0 = backup.join("partitions").join("lun0");
     let lun4 = backup.join("partitions").join("lun4");
     std::fs::create_dir_all(&lun0).expect("create lun0");
@@ -1043,26 +1062,24 @@ fn write_testkey_slot_a_backup(backup: &Path) {
     std::fs::write(&super_path, SyntheticSuper::standard().image()).expect("write the super");
     record_entry(&mut entries, "partitions\\lun0\\super.bin", &super_path);
 
-    for name in [
-        "boot_a",
-        "dtbo_a",
-        "init_boot_a",
-        "recovery_a",
-        "vendor_boot_a",
-    ] {
-        let path = lun4.join(format!("{name}.bin"));
-        std::fs::write(&path, vec![0x5A; 4096]).expect("write the physical image");
-        record_entry(
-            &mut entries,
-            &format!("partitions\\lun4\\{name}.bin"),
-            &path,
-        );
+    for (suffix, fill) in [("_a", SLOT_A_FILL), ("_b", SLOT_B_FILL)] {
+        for base in ["boot", "dtbo", "init_boot", "recovery", "vendor_boot"] {
+            let name = format!("{base}{suffix}");
+            let path = lun4.join(format!("{name}.bin"));
+            std::fs::write(&path, vec![fill; 4096]).expect("write the physical image");
+            record_entry(
+                &mut entries,
+                &format!("partitions\\lun4\\{name}.bin"),
+                &path,
+            );
+        }
     }
 
     for (name, source) in [
         ("vbmeta_a", testkey_slot_a_top_vbmeta(&[TESTED_BUILD])),
         ("vbmeta_b", stock_slot_b_top_vbmeta()),
         ("vbmeta_system_a", testkey_slot_a_system_vbmeta()),
+        ("vbmeta_system_b", slot_b_system),
     ] {
         let path = lun4.join(format!("{name}.bin"));
         source.write(&path);
@@ -1088,7 +1105,7 @@ fn write_gsi_image(path: &Path) {
 }
 
 #[test]
-fn an_install_to_the_test_key_slot_a_builds_a_candidate_in_place() {
+fn an_install_to_the_test_key_slot_a_builds_a_candidate_from_the_boot_slot_b() {
     let bench = Bench::new();
     let backup = bench.path("backup");
     write_testkey_slot_a_backup(&backup);
@@ -1110,7 +1127,7 @@ fn an_install_to_the_test_key_slot_a_builds_a_candidate_in_place() {
 
     assert_eq!(candidate.stock_slot, BootSlot::B);
     assert_eq!(candidate.target_slot, BootSlot::A);
-    assert_eq!(candidate.source_slot, BootSlot::A);
+    assert_eq!(candidate.source_slot, BootSlot::B);
     assert_eq!(candidate.top_vbmeta.rollback_index, BOOT_SLOT_FLOOR);
 
     let view: Vec<&str> = candidate
@@ -1138,24 +1155,58 @@ fn an_install_to_the_test_key_slot_a_builds_a_candidate_in_place() {
     assert_eq!(
         physical,
         [
-            ("boot_a", Some("boot_a")),
-            ("dtbo_a", Some("dtbo_a")),
-            ("init_boot_a", Some("init_boot_a")),
-            ("recovery_a", Some("recovery_a")),
-            ("vendor_boot_a", Some("vendor_boot_a")),
+            ("boot_a", Some("boot_b")),
+            ("dtbo_a", Some("dtbo_b")),
+            ("init_boot_a", Some("init_boot_b")),
+            ("recovery_a", Some("recovery_b")),
+            ("vendor_boot_a", Some("vendor_boot_b")),
         ]
     );
+    for image in &candidate.physical_images {
+        let bytes = std::fs::read(output.join("view").join(&image.image.file))
+            .expect("read the physical image of the candidate");
+        assert_eq!(bytes, vec![SLOT_B_FILL; 4096], "{}", image.partition);
+    }
 
     assert_eq!(candidate.images().len(), 8);
     assert!(!candidate.avb_verification.is_empty());
 
     let (loaded, _) = GsiCandidate::load(&output).expect("load the saved candidate");
-    assert_eq!(loaded.source_slot, BootSlot::A);
+    assert_eq!(loaded.source_slot, BootSlot::B);
     assert_eq!(loaded.target_slot, BootSlot::A);
     assert_eq!(loaded.images(), candidate.images());
     loaded
         .verify_files(&output)
         .expect("the files match their records");
+}
+
+#[test]
+fn an_install_to_the_test_key_slot_a_refuses_a_boot_slot_b_that_holds_a_gsi() {
+    let bench = Bench::new();
+    let backup = bench.path("backup");
+    write_testkey_slot_a_backup_with(&backup, stock_slot_b_system_vbmeta(GSI_SYSTEM));
+    let gsi = bench.path("gsi.img");
+    write_gsi_image(&gsi);
+    let output = bench.path("candidate");
+
+    let refused = GsiCandidate::build(&GsiCandidateRequest {
+        profile: &PROFILE,
+        backup_directory: &backup,
+        gsi_image: &gsi,
+        output_directory: &output,
+        rollback_evidence: &[],
+        accepted_untested_build: None,
+        stock_slot: BootSlot::B,
+        target_slot: BootSlot::A,
+    })
+    .expect_err("the install does not read a boot slot that holds a GSI");
+
+    assert!(
+        matches!(refused, front2::Front2Error::Unsupported(_)),
+        "{refused}"
+    );
+    assert!(refused.to_string().contains("not the form"), "{refused}");
+    assert!(!output.exists());
 }
 
 fn write_installed_slot_a_backup(backup: &Path, installed: &Path, candidate: &GsiCandidate) {
