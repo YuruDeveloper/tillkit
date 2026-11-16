@@ -127,13 +127,17 @@ When you select a system image on the `WRITE` screen, these steps open in sequen
    - Boot slot A, target slot B: The tool installs on slot B and changes the boot slot to B. In each other partition pair, the partition of slot B must not have the active flag. A pair with no active flag on A and no active flag on B does not stop the plan. A full backup of the 1.609.5 stock firmware is in that condition.
    - Boot slot B, target slot B: The tool installs on slot B and keeps the boot slot.
    - Boot slot A, target slot A: The tool installs on slot A and keeps the boot slot.
-   - Boot slot B, target slot A: The tool installs on slot A and changes the boot slot to A. The top `vbmeta` of each slot has a rollback value. If the value of slot A is lower than the value of slot B, the tool signs slot A with the value of slot B.
+   - Boot slot B, target slot A: The tool installs on slot A and changes the boot slot to A.
 
-   For boot slot A and target slot B, the tool reads the images from slot A, and slot A must be a stock slot. For the other three types, the tool reads the images from the target slot. Those three types can also use a full backup with a GSI on the target slot. The plan step then tells you and shows the system fingerprint from the `vbmeta_system` of that slot. A restore of that full backup does not give the stock firmware. It gives the condition of the device at the time of the backup.
+   The tool always reads the images from the boot slot. An installation that changes the boot slot writes the boot images of the boot slot (`boot`, `dtbo`, `init_boot`, `recovery`, `vendor_boot`) to the target slot. It signs the top `vbmeta` of the target slot with the descriptors and the rollback value from the `vbmeta` of the boot slot.
+
+   For an installation that changes the boot slot, the boot slot must be a stock slot. The `super` partitions of the target slot must also agree with the `vbmeta` of the boot slot. A device on which the two slots use the same areas of `super` is in that condition. The top `vbmeta` of the target slot can have a higher rollback value than the `vbmeta` of the boot slot. The tool then makes no plan.
+
+   An installation that keeps the boot slot can also use a full backup with a GSI on the target slot. The plan step then tells you and shows the system fingerprint from the `vbmeta_system` of that slot. A restore of that full backup does not give the stock firmware. It gives the condition of the device at the time of the backup.
 
    For an installation that keeps the boot slot, the full backup must agree with two conditions. First, no partition of the other slot has the active flag on LUN 0 and LUN 4. Second, the active flags of `xbl_a` and `xbl_b` show the boot LUN of the target slot (LUN 1 for slot A, LUN 2 for slot B). An installation that changes the boot slot does not change the flags of `xbl_a` and `xbl_b`. Thus a full backup of a device after such an installation does not agree with the second condition.
 
-   If a full backup is not in a correct condition, the step stops before it makes files and tells you. The tool reads the stock build of the full backup from the property `com.android.build.boot.fingerprint` in the `vbmeta` of the source slot. For boot slot B and target slot B, the tool reads `vbmeta_b`. For the other three types, the tool reads `vbmeta_a`. The reference build is `TOSSPLACE/toss_front2/toss_front2:13/TKQ1.230110.001/475:user/dev-keys`. If only the build number (`475`) is different, the tool shows the two builds and gets your approval. The tool makes the plan only after you select CONTINUE ANYWAY. If a different part of the value is different, the tool makes no plan and shows the value from the full backup. The tool does the same if the full backup has no value or more than one value of the property.
+   If a full backup is not in a correct condition, the step stops before it makes files and tells you. The tool reads the stock build of the full backup from the property `com.android.build.boot.fingerprint` in the `vbmeta` of the boot slot (`vbmeta_a` for boot slot A, `vbmeta_b` for boot slot B). The reference build is `TOSSPLACE/toss_front2/toss_front2:13/TKQ1.230110.001/475:user/dev-keys`. If only the build number (`475`) is different, the tool shows the two builds and gets your approval. The tool makes the plan only after you select CONTINUE ANYWAY. If a different part of the value is different, the tool makes no plan and shows the value from the full backup. The tool does the same if the full backup has no value or more than one value of the property.
 4. Check: The tool reads the device and compares it with the plan. The check finds a first installation or an installation that stopped. The tool does not write to the device before step 5.
 5. Write: After your approval, the tool writes the images and the partition tables, and it changes the boot LUN. Then it reads all that it wrote and compares the hashes.
 6. User data: The tool erases the user data immediately after the write. The approval of step 5 is also the approval for this step.
@@ -143,7 +147,7 @@ When you select a system image on the `WRITE` screen, these steps open in sequen
 
 - If the write does not complete, the device can become unbootable. Keep the device in EDL mode and do the check again. If the check finds the step that stopped, the tool continues from that step. To write the full backup to the device again, use the full restore.
 - If the check finds a partition table that the plan does not write and that is different from the full backup, the check stops. The tool tells you to write the full backup to the device first.
-- TillKit cannot compare the rollback values that the device keeps with the values of the images. For an installation from boot slot B on slot A, we do not know if the device accepts the increased rollback value.
+- TillKit cannot compare the rollback values that the device keeps with the values of the images.
 - TillKit cannot tell if the device started from the GSI after the restart.
 
 ### Full restore
@@ -202,9 +206,10 @@ The checks for these items used a simulated device and a local shell only.
 
 Write functions:
 
-- A GSI installation on slot A of a device with boot slot B and the test key on slot A. This installation also changes the boot slot to A. Only the tests with a simulated device and a code review examined this path. The `vbmeta` in those tests has no hash values. Thus no test compared the `vbmeta` with the `super` data of a device.
+- A GSI installation on slot A of a device with boot slot B and the test key on slot A. This installation also changes the boot slot to A. A full backup of one such device gave a candidate and a plan, and its `vbmeta` agreed with its `super` data. Only the tests with a simulated device examined the write of the plan. No test showed that a device starts after this installation.
 - A GSI installation on slot A that keeps boot slot A.
 - A GSI installation on a slot that has a GSI. Only a test with simulated `super` and `vbmeta` data made a candidate for this path. That test used boot slot A and target slot A.
+- A GSI installation on a device with `super` metadata that does not have the `default` group first. Only a test with simulated `super` data made a candidate for this path.
 - The restart step of the GSI installation. The first user device started from the GSI. We do not know if the restart used this step.
 - A full backup of a device with stock firmware, and a GSI installation that uses that full backup.
 - A GSI installation on a device with firmware that is not 1.609.5. After you select CONTINUE ANYWAY, the tool makes a plan for a stock build with a different build number. No installation used a plan of that type.
