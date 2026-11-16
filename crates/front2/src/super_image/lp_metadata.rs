@@ -1,3 +1,4 @@
+use super::DEFAULT_GROUP;
 use super::file_ranges::read_at;
 use super::lp_block_device::LpBlockDevice;
 use super::lp_extent::LpExtent;
@@ -109,6 +110,17 @@ impl LpMetadata {
             .ok_or_else(|| {
                 Front2Error::Image(format!("super metadata: there is no group named {name}"))
             })
+    }
+
+    pub fn default_group(&self) -> Result<LpGroup> {
+        let found = self
+            .groups
+            .iter()
+            .find(|group| group.name.as_str() == DEFAULT_GROUP);
+        match found {
+            Some(group) => Ok(group.clone()),
+            None => LpGroup::standard_default(),
+        }
     }
 
     pub fn single_block_device(&self) -> Result<&LpBlockDevice> {

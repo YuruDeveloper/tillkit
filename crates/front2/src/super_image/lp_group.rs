@@ -1,3 +1,4 @@
+use super::DEFAULT_GROUP;
 use super::lp_format::{GROUP_ENTRY_BYTES, NAME_BYTES, u32_at, u64_at};
 use super::lp_name::LpName;
 use crate::error::{Front2Error, Result};
@@ -10,6 +11,12 @@ pub struct LpGroup {
 }
 
 impl LpGroup {
+    pub fn standard_default() -> Result<Self> {
+        let mut record = [0u8; GROUP_ENTRY_BYTES];
+        record[..DEFAULT_GROUP.len()].copy_from_slice(DEFAULT_GROUP.as_bytes());
+        Self::decode(&record)
+    }
+
     pub fn decode(record: &[u8]) -> Result<Self> {
         if record.len() != GROUP_ENTRY_BYTES {
             return Err(Front2Error::Image(format!(

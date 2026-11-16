@@ -627,6 +627,87 @@ fn a_slot_a_candidate_passes_the_slot_a_verification() {
     assert!(!system.original_preserved);
 }
 
+fn regrouped_slot_a(groups: &[&str]) -> SyntheticSuper {
+    let mut synthetic = SyntheticSuper::standard();
+    let slot = &mut synthetic.slots[0];
+    let original = slot.groups.clone();
+    slot.groups = groups
+        .iter()
+        .map(|name| {
+            original
+                .iter()
+                .find(|(group, _)| group == name)
+                .expect("the group of the standard slot")
+                .clone()
+        })
+        .collect();
+    let moved = |index: u32| {
+        let (group, _) = &original[index as usize];
+        groups.iter().position(|name| name == group)
+    };
+    slot.partitions
+        .retain(|partition| moved(partition.group_index).is_some());
+    for partition in &mut slot.partitions {
+        partition.group_index = moved(partition.group_index).expect("a kept group") as u32;
+    }
+    synthetic
+}
+
+#[test]
+fn a_slot_without_the_default_group_first_gets_a_candidate_with_the_default_group_first() {
+    let dynamic = "qti_dynamic_partitions_a";
+    let cases: [&[&str]; 3] = [&[dynamic, "cow"], &[dynamic, "default", "cow"], &[dynamic]];
+    for groups in cases {
+        let (directory, original) = written(&regrouped_slot_a(groups));
+        let slot_a = SuperSlot::new(BootSlot::A);
+        let gsi = directory.path().join("gsi.img");
+        std::fs::write(&gsi, gsi_image(GSI_BYTES)).expect("write the GSI");
+        let (_, gsi_sha256) = sha256_file(&gsi).expect("GSI digest");
+        let (_, original_sha256) = sha256_file(&original).expect("original digest");
+        let candidate = directory.path().join("candidate.img");
+        let plan = SuperLayoutPlan::from_super_file(&original, GSI_BYTES, &slot_a).expect("plan");
+        let request = SuperCandidateRequest {
+            original_super: &original,
+            original_super_sha256: &original_sha256,
+            gsi_image: &gsi,
+            gsi_sha256: &gsi_sha256,
+            output: &candidate,
+        };
+        build_super_candidate(&request, &plan, &slot_a).expect("candidate");
+        verify_super_candidate(
+            &SuperVerificationRequest {
+                candidate: &candidate,
+                original_super: &original,
+                gsi_bytes: GSI_BYTES,
+                gsi_sha256: &gsi_sha256,
+            },
+            &slot_a,
+        )
+        .expect("verification");
+
+        let mut file = std::fs::File::open(&candidate).expect("open the candidate");
+        let geometry = LpGeometry::read(&mut file).expect("geometry");
+        let metadata = LpMetadata::read_slot(&mut file, &geometry, 0).expect("metadata");
+        let rebuilt: Vec<(&str, u32, u64)> = metadata
+            .groups
+            .iter()
+            .map(|group| (group.name.as_str(), group.flags, group.maximum_size))
+            .collect();
+        assert_eq!(
+            rebuilt,
+            [("default", 0, 0), (dynamic, 0, GROUP_MAXIMUM_BYTES)],
+            "{groups:?}"
+        );
+        assert!(
+            metadata
+                .partitions
+                .iter()
+                .all(|partition| partition.group_index == 1),
+            "{groups:?}"
+        );
+    }
+}
+
 #[test]
 fn candidate_refuses_an_existing_output_and_wrong_digests() {
     let (directory, original) = written(&SyntheticSuper::standard());
