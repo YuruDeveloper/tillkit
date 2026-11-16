@@ -35,7 +35,7 @@ pub fn prepare(
 ) -> Result<PreparedInstall> {
     if let Some(stored) = stored(paths, backup, backup_is_found, gsi_image)? {
         let target_slot = stored.plan.target_slot;
-        let source_slot = install_source_slot(stored.plan.stock_slot, target_slot)?;
+        let source_slot = stored_source_slot(&stored.plan)?;
         let build = backup_stock_build(&stored.plan.backup_directory, source_slot);
         let replaced = replaced_system(&stored.plan.backup_directory, source_slot, target_slot);
         return Ok(planned(stored, build, replaced));
@@ -61,6 +61,11 @@ pub fn prepare(
     let install = told_if_in_place(stock_slot, target_slot, install)?;
     let replaced = replaced_system(backup, source_slot, target_slot);
     Ok(planned(install, Ok(build), replaced))
+}
+
+fn stored_source_slot(plan: &InstallPlan) -> Result<BootSlot> {
+    let (candidate, _) = GsiCandidate::load(&plan.candidate_directory)?;
+    Ok(candidate.source_slot)
 }
 
 fn planned(
@@ -514,5 +519,87 @@ mod tests {
         assert!(stopped.to_string().contains("no manifest"));
         let none = stored_for_image(&paths, |_| false, unreadable);
         assert!(none.expect("no plan of the image").is_none());
+    }
+
+    fn stored_candidate(source_slot: BootSlot) -> GsiCandidate {
+        use front2::ImageRecord;
+        use front2::gsi::{BackupPartition, SignedVbmeta};
+        use front2::super_image::SuperVerification;
+
+        let image = ImageRecord {
+            file: "image.img".to_string(),
+            bytes: 1,
+            sha256: "00".to_string(),
+        };
+        let vbmeta = SignedVbmeta {
+            image: image.clone(),
+            algorithm: "SHA256_RSA4096".to_string(),
+            key_spec: "testkey_rsa4096".to_string(),
+            rollback_index: 0,
+            rollback_index_location: 0,
+            flags: 0,
+            required_libavb_version_minor: 0,
+            descriptors: 0,
+        };
+        let original_super = BackupPartition {
+            name: "super".to_string(),
+            lun: 0,
+            path: PathBuf::new(),
+            bytes: 1,
+            sha256: "00".to_string(),
+        };
+        let super_verification = SuperVerification {
+            metadata_sha256: "00".to_string(),
+            logical_partitions: Vec::new(),
+            allowed_super_ranges: Vec::new(),
+            outside_ranges_equal_bytes: 0,
+            candidate_bytes: 1,
+            candidate_sha256: "00".to_string(),
+        };
+        GsiCandidate {
+            schema: front2::gsi::gsi_candidate::CANDIDATE_SCHEMA,
+            stock_slot: BootSlot::B,
+            target_slot: BootSlot::A,
+            source_slot,
+            gsi_bytes: 1,
+            gsi_sha256: "00".to_string(),
+            original_super,
+            super_image: image,
+            super_verification,
+            logical_view: Vec::new(),
+            physical_images: Vec::new(),
+            chained_vbmeta: vbmeta.clone(),
+            top_vbmeta: vbmeta,
+            avb_verification: Vec::new(),
+            first_conversion_only: true,
+            fec_recomputed: false,
+            device_boot_verified: false,
+            stored_rollback_verified: false,
+        }
+    }
+
+    #[test]
+    fn letter_1674_a_stored_plan_shows_the_source_slot_of_its_candidate() {
+        use crate::install_support::InstallFixture;
+        use front2::gsi::gsi_candidate::CANDIDATE_FILE;
+
+        let fixture = InstallFixture::new(BootSlot::B, BootSlot::A);
+        let mut plan = InstallPlan::build(&fixture.inputs).expect("plan");
+        for source_slot in [BootSlot::A, BootSlot::B] {
+            let directory = fixture
+                .directory
+                .path()
+                .join(format!("candidate-{}", source_slot.suffix()));
+            std::fs::create_dir(&directory).expect("candidate folder");
+            let record = serde_json::to_vec(&stored_candidate(source_slot)).expect("record");
+            std::fs::write(directory.join(CANDIDATE_FILE), record).expect("store the record");
+            plan.candidate_directory = directory;
+
+            let shown = stored_source_slot(&plan).expect("the source slot of the candidate");
+            assert_eq!(shown, source_slot);
+        }
+
+        plan.candidate_directory = fixture.directory.path().join("no-candidate");
+        assert!(stored_source_slot(&plan).is_err());
     }
 }

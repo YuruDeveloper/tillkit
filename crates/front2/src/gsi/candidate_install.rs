@@ -322,14 +322,14 @@ mod tests {
             .expect("a slot A source for a slot A boot to the target slot B");
         require_expected_source(BootSlot::B, BootSlot::B, BootSlot::B)
             .expect("a slot B source for a slot B boot to the target slot B");
-        require_expected_source(BootSlot::A, BootSlot::B, BootSlot::A)
-            .expect("a slot A source for a slot B boot to the target slot A");
+        require_expected_source(BootSlot::B, BootSlot::B, BootSlot::A)
+            .expect("a slot B source for a slot B boot to the target slot A");
     }
 
     #[test]
     fn a_candidate_source_that_does_not_fit_the_boot_and_target_is_rejected() {
-        let error = require_expected_source(BootSlot::B, BootSlot::B, BootSlot::A)
-            .expect_err("a slot B source for a slot B boot to the target slot A");
+        let error = require_expected_source(BootSlot::A, BootSlot::B, BootSlot::A)
+            .expect_err("a slot A source for a slot B boot to the target slot A");
         assert!(matches!(error, Front2Error::Plan(_)), "{error}");
         assert!(error.to_string().contains("source slot"), "{error}");
     }

@@ -12,7 +12,7 @@ use super::lp_partition::LpPartition;
 use super::lp_table::LpTable;
 use super::partition_summary::PartitionSummary;
 use super::super_layout_plan::SuperLayoutPlan;
-use super::{DEFAULT_GROUP, REBUILT_GROUP_INDEX, SYSTEM_ATTRIBUTES, SuperSlot};
+use super::{REBUILT_GROUP_INDEX, SYSTEM_ATTRIBUTES, SuperSlot};
 use crate::digest::sha256_bytes;
 use crate::error::{Front2Error, Result};
 use serde::Serialize;
@@ -58,7 +58,7 @@ impl RebuiltMetadata {
         require_plan_matches_device(original, plan)?;
         let selected = selected_names(plan, slot)?;
         let (group_index, dynamic_group) = original.group(slot.dynamic_group())?;
-        let groups = vec![default_group(original)?.clone(), dynamic_group.clone()];
+        let groups = vec![original.default_group()?, dynamic_group.clone()];
         let (partitions, extents) =
             select_partitions(original, plan, &selected, group_index, slot)?;
         let tables = encode_tables(original, &partitions, &extents, &groups);
@@ -112,18 +112,6 @@ fn selected_names(plan: &SuperLayoutPlan, slot: &SuperSlot) -> Result<BTreeSet<S
         )));
     }
     Ok(selected)
-}
-
-fn default_group(original: &LpMetadata) -> Result<&LpGroup> {
-    original
-        .groups
-        .first()
-        .filter(|group| group.name.as_str() == DEFAULT_GROUP)
-        .ok_or_else(|| {
-            Front2Error::Image(format!(
-                "super metadata: the first group is not named {DEFAULT_GROUP}"
-            ))
-        })
 }
 
 fn select_partitions(

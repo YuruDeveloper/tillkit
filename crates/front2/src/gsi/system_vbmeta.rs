@@ -78,7 +78,7 @@ fn require_same_rollback(stock: &VbmetaSource, original: &VbmetaSource) -> Resul
         || stock_header.rollback_index_location != original_header.rollback_index_location
     {
         return Err(Front2Error::Unsupported(format!(
-            "vbmeta_system rollback index is {} at location {} on slot A and {} at location {} on slot B; no tested rule selects between them",
+            "vbmeta_system rollback index is {} at location {} on the source slot and {} at location {} on the target slot; no tested rule selects between them",
             stock_header.rollback_index,
             stock_header.rollback_index_location,
             original_header.rollback_index,
@@ -87,7 +87,7 @@ fn require_same_rollback(stock: &VbmetaSource, original: &VbmetaSource) -> Resul
     }
     if stock_header.flags != 0 || original_header.flags != 0 {
         return Err(Front2Error::Unsupported(format!(
-            "vbmeta_system flags are {} on slot A and {} on slot B, only 0 is supported",
+            "vbmeta_system flags are {} on the source slot and {} on the target slot, only 0 is supported",
             stock_header.flags, original_header.flags
         )));
     }

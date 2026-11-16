@@ -95,13 +95,13 @@ fn require_supported_headers(stock: &VbmetaSource, original: &VbmetaSource) -> R
     let original_header = &original.info.header;
     if stock_header.rollback_index_location != original_header.rollback_index_location {
         return Err(Front2Error::Unsupported(format!(
-            "top vbmeta rollback index location is {} on slot A and {} on slot B",
+            "top vbmeta rollback index location is {} on the source slot and {} on the target slot",
             stock_header.rollback_index_location, original_header.rollback_index_location
         )));
     }
     if stock_header.flags != 0 || original_header.flags != 0 {
         return Err(Front2Error::Unsupported(format!(
-            "top vbmeta flags are {} on slot A and {} on slot B, only 0 is supported",
+            "top vbmeta flags are {} on the source slot and {} on the target slot, only 0 is supported",
             stock_header.flags, original_header.flags
         )));
     }

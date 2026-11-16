@@ -7,7 +7,7 @@ use super::lp_metadata::{LpMetadata, checked_sum};
 use super::lp_partition::LpPartition;
 use super::super_verification::SuperVerification;
 use super::super_verification_request::SuperVerificationRequest;
-use super::{DEFAULT_GROUP, REBUILT_GROUP_INDEX, SYSTEM_ATTRIBUTES, SuperSlot};
+use super::{REBUILT_GROUP_INDEX, SYSTEM_ATTRIBUTES, SuperSlot};
 use crate::digest::{hex, sha256_file};
 use crate::error::{Front2Error, Result};
 use sha2::{Digest, Sha256};
@@ -107,12 +107,9 @@ fn require_expected_tables(
     }
     source.single_block_device()?;
     let (_, dynamic_group) = source.group(slot.dynamic_group())?;
+    let default_group = source.default_group()?;
     let groups_match = match metadata.groups.as_slice() {
-        [default_group, group] => {
-            default_group.name.as_str() == DEFAULT_GROUP
-                && Some(default_group) == source.groups.first()
-                && group == dynamic_group
-        }
+        [first, group] => *first == default_group && group == dynamic_group,
         _ => false,
     };
     if !groups_match || metadata.block_devices != source.block_devices {
